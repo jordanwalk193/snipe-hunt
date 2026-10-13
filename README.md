@@ -101,7 +101,7 @@ docker compose exec snipe-hunt python -m snipehunt.jobs hourly --dry-run
 
 ## Home Assistant dashboard
 
-Install the [Walker Scout integration](https://github.com/jordanwalk193/ha-walker-scout) through HACS (it is named after the first player this was built for, and works with any Snipe Hunt bot). Give it the bot's address, `http://<bot machine>:8766`, and your `API_TOKEN`.
+Install the [Snipe Hunt integration](https://github.com/jordanwalk193/ha-snipe-hunt) through HACS: add that address as a custom repository of type Integration, download it, restart Home Assistant, then add the **Snipe Hunt** integration. Give it the bot's address, `http://<bot machine>:8766`, and your `API_TOKEN`.
 
 You get a five-tab dashboard, about fifty entities, an auctions calendar, and every setting below as a switch or number: which tiers alert, quiet hours, the cheap-card limit, a monthly budget, watched sellers and extra searches.
 
@@ -127,6 +127,10 @@ eBay disables a Production keyset until your app answers its Marketplace Account
 - The API needs a bearer token on every request and can only do seven things: hide a pick, restore hidden picks, mark cards filed, refresh, start a search, re-read Gixen, send a test alert.
 - Claude reads listing titles and emails written by strangers, so it runs with web search and web fetch only: no shell, no file access.
 - Gmail and Gixen are read-only. Gixen allows one login at a time, so the bot and your browser sign each other out; after losing its session the bot waits two hours before signing back in.
+
+## License
+
+MIT. See `LICENSE`.
 
 ## Development
 
