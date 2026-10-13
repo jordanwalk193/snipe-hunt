@@ -255,18 +255,33 @@ def card_key(title: str) -> frozenset[str]:
     return words(re.sub(r"\b\d{1,3}\s?/\s?(\d{1,3})\b", r" \1 ", title))
 
 
-def _same(a: frozenset[str], b: frozenset[str]) -> bool:
-    return bool(a and b) and len(a & b) / len(a | b) >= SAME_CARD
+GRADE = re.compile(r"\b(psa|bgs|sgc|cgc|beckett)\s*(\d{1,2}(?:\.5)?)?", re.I)
+AUTO = re.compile(r"\b(auto|autos|autograph|autographed|signed|rpa)\b", re.I)
+RUN = re.compile(r"/\s?(\d{1,4})\b")
+
+
+def traits(title: str) -> tuple:
+    """What changes a card's price without changing many words: grade, autograph, print run."""
+    grade = GRADE.search(title)
+    run = RUN.search(title)
+    return (grade.group(1).lower().replace("beckett", "bgs") + (grade.group(2) or "")
+            if grade else None, bool(AUTO.search(title)), run.group(1) if run else None)
+
+
+def _same(a: str, b: str) -> bool:
+    """Two titles for the same card: like words, and the same grade, autograph and print run."""
+    one, two = card_key(a), card_key(b)
+    return (bool(one and two) and len(one & two) / len(one | two) >= SAME_CARD
+            and traits(a) == traits(b))
 
 
 def history(con, limit: int = 12) -> list[dict]:
     """Cards that have sold more than once, with every price: the start of a price trend."""
     groups: list[dict] = []
     for row in with_calls(con):   # newest first
-        key = card_key(row["title"])
-        group = next((g for g in groups if _same(key, g["key"])), None)
+        group = next((g for g in groups if _same(row["title"], g["title"])), None)
         if group is None:
-            group = {"key": key, "title": row["title"], "image": row["image"],
+            group = {"title": row["title"], "image": row["image"],
                      "item_id": row["item_id"], "sales": []}
             groups.append(group)
         group["sales"].append(row)
@@ -289,8 +304,7 @@ def history(con, limit: int = 12) -> list[dict]:
 
 def last_sold(rows: list[dict], title: str, item_id: str = "") -> dict | None:
     """The latest recorded sale of the same card as this title, and how many there are."""
-    key = card_key(title)
-    same = [r for r in rows if r["item_id"] != item_id and _same(key, card_key(r["title"]))]
+    same = [r for r in rows if r["item_id"] != item_id and _same(title, r["title"])]
     if not same:
         return None
     return {"total": same[0]["total"], "price": same[0]["price"], "n": len(same),

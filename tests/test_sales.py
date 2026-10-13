@@ -193,7 +193,8 @@ def test_cards_that_sold_more_than_once_get_a_price_history():
     sale(con, "2", "2023 Topps Chrome Sam Example Gold Refractor /50 #45", 46.0, ago=86400)
     sale(con, "3", "2023 Topps Chrome Sam Example Gold Refractor 31/50 #45", 52.0, ago=60)
     sale(con, "4", "2021 Bowman Draft Sam Example 1st Auto PSA 10", 150.0)
-    (card,) = sales.history(con)
+    sale(con, "5", "2023 Topps Chrome Sam Example Gold Refractor /50 #45 PSA 10", 140.0)
+    (card,) = sales.history(con)        # the graded copy is a different card
     assert (card["n"], card["prices"], card["low"], card["high"], card["last"]) == (
         3, [40.0, 46.0, 52.0], 40.0, 52.0, 52.0)
     last = sales.last_sold(sales.with_calls(con), "Sam Example 2023 Topps Chrome Gold Refractor /50 #45")

@@ -32,6 +32,7 @@ def card_numbers(con, now: float | None = None) -> list[tuple[str, str]]:
     """(year, card number) pairs seen often on the player's listings, most common first."""
     now = now or time.time()
     who = profile.get()
+    initials = "".join(word[0] for word in who.player.split()).upper()
     counts: Counter = Counter()
     for row in con.execute("SELECT title FROM seen WHERE last_seen>?",
                            (now - LOOK_BACK_DAYS * 86400,)):
@@ -42,7 +43,8 @@ def card_numbers(con, now: float | None = None) -> list[tuple[str, str]]:
         if not year:
             continue
         for code in set(CODE.findall(title.upper())):
-            if any(ch.isdigit() for ch in code) or len(code) >= 5:
+            # a real card number has a digit, or ends in the player's initials (CDA-JW)
+            if any(ch.isdigit() for ch in code) or code.split("-")[1].startswith(initials):
                 counts[(year.group(1), code)] += 1
     return [pair for pair, n in counts.most_common(MAX_CODES) if n >= MIN_SEEN]
 
