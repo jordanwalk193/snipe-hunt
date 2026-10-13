@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements.txt pytest
+      - run: pytest -q
+        env:
+          SNIPEHUNT_HOME: /tmp/snipe-hunt-ci
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t snipe-hunt .
+      - name: Start it in demo mode
+        run: |
+          docker run -d --name snipe-hunt -e SNIPEHUNT_DEMO=1 -e API_TOKEN=ci-token \
+            -p 8766:8766 snipe-hunt
+          for i in $(seq 1 30); do
+            curl -fs -H "Authorization: Bearer ci-token" http://127.0.0.1:8766/api/snapshot \
+              -o snapshot.json && break
+            sleep 2
+          done
+          docker logs snipe-hunt
+      - name: The API answers with the demo snapshot and refuses a bad token
+        run: |
+          python3 -c "import json; d = json.load(open('snapshot.json')); assert d['api'] == 1 and d['demo'] is True and len(d['picks']) == 9, d.keys(); print('snapshot ok:', len(d['picks']), 'picks')"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8766/api/snapshot)" = 401
+      - name: The pieces the real bot needs are inside the image
+        run: |
+          docker exec snipe-hunt python -m snipehunt check
+          docker exec snipe-hunt claude --version
+          docker exec snipe-hunt git --version
