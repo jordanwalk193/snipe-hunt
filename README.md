@@ -163,7 +163,7 @@ eBay disables a Production keyset until your app answers its Marketplace Account
 
 **Is this allowed by eBay?** It uses eBay's official Browse API with your own developer keys and only searches. Sixteen or so searches an hour is far inside the default daily limit.
 
-**What does it cost to run?** eBay's API is free. Claude is the cost, and it depends on how many new listings your player gets each hour. The dashboard tracks the real figure.
+**What does it cost to run?** eBay's API is free. Claude is the cost, and it is not trivial: in the one setup this has run on, a single hourly run that scored 48 new listings (with the whole inventory in the prompt and a few sold-price lookups) came to about $0.50 at API prices on the CLI's default model. A quiet player costs far less; a busy one at that rate would be several dollars a day. Set `CLAUDE_MODEL` to a smaller model to cut it, and watch the dashboard's cost sensors for the first day before leaving it running.
 
 **Does it work for football, basketball, hockey, Pokémon?** The searching and filtering work for any name. Set `EBAY_CATEGORY` if your cards aren't in Sports Trading Card Singles, and fill in `sport` and the word lists in your profile. It has only been run for real on one baseball player so far.
 

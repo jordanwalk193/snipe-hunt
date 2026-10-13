@@ -126,6 +126,8 @@ def ask_claude(prompt: str, tools: str = "WebFetch,WebSearch",
            "--tools", tools, "--strict-mcp-config"]
     if tools:
         cmd += ["--allowedTools", tools]
+    if config.get("CLAUDE_MODEL"):   # a smaller model costs less; see the README
+        cmd += ["--model", config.get("CLAUDE_MODEL")]
     env = dict(os.environ)
     if config.get("ANTHROPIC_API_KEY"):   # may come from the env file, not the environment
         env["ANTHROPIC_API_KEY"] = config.get("ANTHROPIC_API_KEY")
