@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -r requirements.txt pytest
-      - run: pytest -q
+      - run: python -m pytest -q
         env:
           SNIPEHUNT_HOME: /tmp/snipe-hunt-ci
 
