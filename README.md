@@ -32,6 +32,7 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Gives two bids for every auction**: the cheapskate max, and a "to win" bid at about the going rate, for the card you would rather own than steal. The scorecard shows how each would have done.
 - **Has a fast lane for price mistakes** (off until you turn it on): every few minutes it checks brand-new Buy It Now listings and scores only the ones worth a look.
 - **Keeps a price history per card**: every card it has seen sell more than once, with the trend, and "same card last sold for" on each pick.
+- **Checks your Gixen amounts**: reads the snipes you set (never changes them) and says how each amount sits against the card's going rate: over it, a fair bid that should win, a real discount, or a long shot. A card it has no price for gets one Claude appraisal, kept so it is paid for once.
 - **Ranks the rarest cards for sale**: the ten lowest print runs on eBay right now (1/1s, then /5, /10 and so on), read from the listing titles on every search at no Claude cost.
 - **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes, and what the week's auctions sold for.
 - **Shows what it costs.** Every Claude call's cost is added up per day and month and shown on the dashboard.

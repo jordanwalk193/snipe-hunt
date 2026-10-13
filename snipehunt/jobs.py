@@ -12,8 +12,9 @@ import sys
 import time
 from datetime import datetime
 
-from . import (config, db, ebay_search, gitsync, hidden, inventory, inventory_sync,
-               limited_drops, notify, ops, profile, rarity, report, sales, score, watch)
+from . import (config, db, ebay_search, gitsync, gixen, hidden, inventory, inventory_sync,
+               limited_drops, notify, ops, profile, rarity, report, sales, score, settings,
+               snipecheck, watch)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -47,6 +48,11 @@ def hourly(dry_run: bool = False) -> str:
         except Exception as exc:   # bookkeeping must not stop the hunt
             con.rollback()
             print(f"sales: {exc}", file=sys.stderr)
+        try:   # a going rate for any Gixen snipe nothing on record can price
+            _appraise_snipes(con)
+        except Exception as exc:
+            con.rollback()
+            print(f"snipecheck: {exc}", file=sys.stderr)
     fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
 
     def save(batch, batch_picks) -> None:
@@ -67,6 +73,18 @@ def hourly(dry_run: bool = False) -> str:
     sent = notify.deliver(con, picks, dry_run=dry_run)
     return (f"{len(listings)} listings, {len(fresh)} new, {len(scored)} scored, "
             f"{len(picks)} picks, {sent} alerted")
+
+
+def _appraise_snipes(con) -> None:
+    """Price the scheduled Gixen snipes the bot has no pick or sale for (cached reads only)."""
+    if not (settings.load(con)["gixen_enabled"] and config.get("GIXEN_USER")):
+        return
+    sniped, _, _ = gixen.snipes(con)
+    now = datetime.now(config.TZ).isoformat(timespec="minutes")
+    live = [s for s in sniped if s["status"] == "SCHEDULED" and s["end_time"]
+            and s["end_time"] > now]
+    if snipecheck.appraise(con, live):
+        con.commit()
 
 
 def _remember(con, listings: list) -> list[dict]:

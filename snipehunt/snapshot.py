@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import (config, db, gixen, inventory, profile, rarity, report, sales, scheduler,
-               settings, watch)
+               settings, snipecheck, watch)
 from . import usage
 from .notify import TIER_ORDER
 
@@ -284,6 +284,10 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
             p["snipe"] = by_item.get(p["item_id"], {}).get("max_bid")
             p["bid_now"] = by_item.get(p["item_id"], {}).get("current_bid")
         gix = gixen_view(sniped, problem, read_at, picks, now)
+        # how each of your amounts sits against what the card goes for
+        checks, gix["analysis"] = snipecheck.check(con, gix["snipes"])
+        for row, verdict in zip(gix["snipes"], checks):
+            row["check"] = verdict
     picks = ranked(picks)
     state = status(con, picks, now)
     state.update(usage.summary(con, now))

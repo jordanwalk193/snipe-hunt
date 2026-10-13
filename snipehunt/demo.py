@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from . import config, profile, sales, settings, snapshot
+from . import config, profile, sales, settings, snapshot, snipecheck
 
 # (tier, card, price, shipping, max, value, hours until it ends or None for Buy It Now,
 #  basis, snipe, why, colour)
@@ -163,6 +163,26 @@ def _market(now: datetime) -> dict:
             "sold": sold, "history": _history(now)}
 
 
+def _checked(gixen: dict, picks: list[dict]) -> dict:
+    """The demo snipes with the same verdicts the real bot gives."""
+    values = {p["item_id"]: p for p in picks}
+    checks = []
+    for n, snipe in enumerate(gixen["snipes"]):
+        pick = values.get(snipe["item_id"])
+        rate = ({"value": pick["value"], "basis": pick["max_basis"], "note": pick["why"]}
+                if pick else {"value": round((snipe["max_bid"] or 10) * (0.8 + 0.5 * n), 2),
+                              "basis": "estimate", "note": "No recent sale found; priced "
+                              "from similar cards."})
+        checks.append(snipecheck.judge(snipe, rate, 4.99))
+        snipe["check"] = checks[-1]
+    live = [(s, c) for s, c in zip(gixen["snipes"], checks) if c["verdict"] != "outbid"]
+    gixen["analysis"] = {
+        **{name: sum(c["verdict"] == name for c in checks) for name in snipecheck.VERDICTS},
+        "snipes": len(checks), "committed": round(sum(s["max_bid"] for s, _ in live), 2),
+        "worth": round(sum(c["value"] for _, c in live), 2)}
+    return gixen
+
+
 def build(now: datetime | None = None) -> dict:
     now = now or datetime.now(config.TZ)
     who = profile.get()
@@ -228,10 +248,11 @@ def build(now: datetime | None = None) -> dict:
                            and p["end_time"] <= (now + timedelta(hours=24)).isoformat()],
         },
         "picks": picks,
-        "gixen": {"available": True, "problem": None,
+        "gixen": _checked({"available": True, "problem": None,
                   "read_at": (now - timedelta(minutes=6)).isoformat(timespec="seconds"),
                   "snipes": sorted(snipes, key=lambda s: s["end_time"]), "outbid_count": 1,
                   "committed": round(sum(s["max_bid"] for s in snipes if not s["outbid"]), 2)},
+                         picks),
         "cards": cards,
         "collection": {
             "cards": len(cards), "spent": spent, "avg_paid": round(spent / len(cards), 2),
