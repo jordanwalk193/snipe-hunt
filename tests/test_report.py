@@ -146,6 +146,8 @@ def test_first_run_sends_one_welcome_instead_of_a_flood(con, monkeypatch):
     sent = []
     monkeypatch.setattr(notify, "send", lambda title, msg, *a, **kw: sent.append(title))
     assert jobs.hourly().startswith("first run: 3 listings, 3 picks")
+    from snipehunt import settings
+    settings.update(con, {"quiet_hours": False})    # so this passes at night too
     assert sent == ["Snipe Hunt is up and running"]
     items.append(Listing("100000000009", "2023 Topps Jordan Walker RC", 1.0, "USD", 1.0,
                          ["AUCTION"], 0, "2026-10-13T21:00-04:00", "s", "u", None))

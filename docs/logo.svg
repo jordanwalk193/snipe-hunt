@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Snipe Hunt">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c2531"/><stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4f1e8"/><stop offset="1" stop-color="#d9d2bf"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g transform="rotate(-10 256 256)">
+    <rect x="150" y="96" width="212" height="300" rx="18" fill="url(#card)"/>
+    <rect x="168" y="114" width="176" height="196" rx="8" fill="#c41e3a"/>
+    <circle cx="256" cy="186" r="34" fill="#f4f1e8" opacity=".92"/>
+    <path d="M196 310c0-40 27-66 60-66s60 26 60 66z" fill="#f4f1e8" opacity=".92"/>
+    <rect x="168" y="328" width="118" height="14" rx="7" fill="#1c2531" opacity=".75"/>
+    <rect x="168" y="352" width="76" height="12" rx="6" fill="#1c2531" opacity=".45"/>
+  </g>
+  <g fill="none" stroke="#ffd54a" stroke-width="20" stroke-linecap="round">
+    <circle cx="330" cy="330" r="92"/>
+    <path d="M330 206v52M330 402v52M206 330h52M402 330h52"/>
+  </g>
+  <circle cx="330" cy="330" r="16" fill="#ffd54a"/>
+</svg>
