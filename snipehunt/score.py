@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 
@@ -111,7 +112,10 @@ def ask_claude(prompt: str, tools: str = "WebFetch,WebSearch",
            "--tools", tools, "--strict-mcp-config"]
     if tools:
         cmd += ["--allowedTools", tools]
-    proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+    env = dict(os.environ)
+    if config.get("ANTHROPIC_API_KEY"):   # may come from the env file, not the environment
+        env["ANTHROPIC_API_KEY"] = config.get("ANTHROPIC_API_KEY")
+    proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, env=env,
                           timeout=timeout, cwd=str(config.ensure_state_dir()))
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p exit {proc.returncode}: "

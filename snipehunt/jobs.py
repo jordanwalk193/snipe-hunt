@@ -56,14 +56,17 @@ def daily(dry_run: bool = False) -> str:
         parts.append(f"{len(drops)} new drops, {sent} alerted")
     except Exception as exc:
         errors.append(f"drops: {exc}")
-    try:
-        result = inventory_sync.run(dry_run=dry_run)
-        for line in result["changes"]:
-            print("  " + line, file=sys.stderr)
-        parts.append(f"{result['emails']} emails, {len(result['changes'])} "
-                     f"inventory changes{' (dry run)' if dry_run else ''}")
-    except Exception as exc:
-        errors.append(f"inventory sync: {exc}")
+    if not inventory_sync.configured():
+        parts.append("email sync is off (no Gmail login set)")
+    else:
+        try:
+            result = inventory_sync.run(dry_run=dry_run)
+            for line in result["changes"]:
+                print("  " + line, file=sys.stderr)
+            parts.append(f"{result['emails']} emails, {len(result['changes'])} "
+                         f"inventory changes{' (dry run)' if dry_run else ''}")
+        except Exception as exc:
+            errors.append(f"inventory sync: {exc}")
     if errors:
         raise RuntimeError("; ".join(errors + parts))
     return "; ".join(parts)
@@ -76,10 +79,11 @@ def weekly(dry_run: bool = False, now: datetime | None = None) -> str:
     notes: list[str] = []
     if not dry_run:
         gitsync.pull()
-        try:   # pick up this afternoon's emails so the report is current
-            inventory_sync.run(verbose=False)
-        except Exception as exc:
-            notes.append(f"Inventory sync failed before this report: {exc}")
+        if inventory_sync.configured():
+            try:   # pick up this afternoon's emails so the report is current
+                inventory_sync.run(verbose=False)
+            except Exception as exc:
+                notes.append(f"Inventory sync failed before this report: {exc}")
     releases = monthly = None
     try:
         releases = limited_drops.check_new_releases(verbose=True)
@@ -100,8 +104,9 @@ def weekly(dry_run: bool = False, now: datetime | None = None) -> str:
     gitsync.commit_and_push([str(path.relative_to(config.DATA_DIR))],
                             f"report: {now.strftime('%Y-%m-%d')}")
     base = config.get("REPORTS_URL")   # where the reports can be read on the web, if anywhere
-    notify.send(f"{profile.get().app_name}: weekly report", summary,
-                url=base.rstrip("/") + "/" + path.name if base else None)
+    if notify.configured():
+        notify.send(f"{profile.get().app_name}: weekly report", summary,
+                    url=base.rstrip("/") + "/" + path.name if base else None)
     if notes:
         raise RuntimeError("report written, with problems: " + "; ".join(notes))
     return summary.replace("\n", " · ")

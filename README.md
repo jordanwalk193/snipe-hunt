@@ -11,7 +11,7 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Finds steals.** Auctions ending soon, new Buy It Now and Best Offer listings, autos, patches, numbered cards, and typo listings other buyers miss.
 - **Knows what you own.** It skips cards already in `inventory.csv` unless a copy is clearly better.
 - **Sets a max.** Each pick comes with a snipe price where winning still beats recent sales, shipping counted, and says whether that came from real sales or an estimate.
-- **Alerts your phone** through Home Assistant or [ntfy](https://ntfy.sh), with quiet hours that urgent auctions can break through.
+- **Alerts your phone** through Home Assistant or [ntfy](https://ntfy.sh), with quiet hours that urgent auctions can break through. Alerts are optional: without them, picks still reach the dashboard.
 - **Watches limited drops.** A daily check for Topps Now and other print-to-order cards of your player, and a weekly check of new product checklists.
 - **Keeps the inventory current** from your eBay and Gixen emails (optional, read-only).
 - **Shows your Gixen snipes** next to its own picks, so you can see which good auctions have no snipe yet (optional, read-only).

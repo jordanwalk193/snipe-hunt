@@ -18,6 +18,12 @@ MAX_MESSAGES = 3                 # per run; the rest go out on the next run
 PENDING_KEY = "pending_picks"
 
 
+def configured() -> bool:
+    """Is there anywhere to send an alert?"""
+    ha = all(config.get(k) for k in ("HA_URL", "HA_TOKEN", "HA_NOTIFY_SERVICE"))
+    return ha or bool(config.get("NTFY_URL"))
+
+
 def send(title: str, message: str, url: str | None = None,
          image: str | None = None) -> None:
     """Send to Home Assistant if it is set up, and to ntfy if `NTFY_URL` is set."""
@@ -154,8 +160,8 @@ def plan_messages(picks: list[dict], now: datetime | None = None
 def deliver(con, new_picks: list[dict], dry_run: bool = False,
             now: datetime | None = None) -> int:
     """Bundle new picks plus anything held overnight into one notification."""
-    if not settings.load(con)["alerts_enabled"]:
-        return 0   # paused in Home Assistant; the picks still reach the dashboard
+    if not settings.load(con)["alerts_enabled"] or not (configured() or dry_run):
+        return 0   # paused, or no phone set up; the picks still reach the dashboard
     held = json.loads(db.kv_get(con, PENDING_KEY, "[]"))
     known = {p["item_id"] for p in new_picks}
     candidates = [p for p in new_picks if worth_alerting(p)]

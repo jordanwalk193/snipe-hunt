@@ -80,6 +80,7 @@ def test_build_report(con):
 def test_failed_run_alerts_once(con, monkeypatch):
     sent = []
     monkeypatch.setattr(notify, "send", lambda title, msg, **kw: sent.append(title))
+    monkeypatch.setitem(config.load(), "NTFY_URL", "https://ntfy.example/topic")
 
     def boom():
         raise RuntimeError("eBay 500")
@@ -97,3 +98,15 @@ def test_hourly_needs_ebay_keys(con, monkeypatch):
     monkeypatch.setitem(config.load(), "EBAY_CLIENT_ID", "")
     with pytest.raises(config.ConfigError):
         jobs.hourly(dry_run=True)
+
+
+def test_optional_pieces_can_be_left_out(con, monkeypatch):
+    """No phone and no Gmail: jobs still succeed and nothing tries to send."""
+    monkeypatch.setattr(notify, "send", lambda *a, **k: pytest.fail("nothing to send to"))
+    assert not notify.configured()
+    assert notify.deliver(con, [pick()]) == 0
+    assert ops.guarded("hourly", lambda: 1 / 0) == 1      # fails quietly, no alert attempt
+    monkeypatch.setattr(jobs.limited_drops, "check_drops", lambda verbose=False: [])
+    assert "email sync is off" in jobs.daily()
+    monkeypatch.setitem(config.load(), "NTFY_URL", "https://ntfy.example/topic")
+    assert notify.configured()

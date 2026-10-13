@@ -37,7 +37,7 @@ def guarded(job: str, fn: Callable[[], str | None], dry_run: bool = False) -> in
         reason = f"{type(exc).__name__}: {exc}"[:300]
         if dry_run:
             return 1
-        if db.kv_get(con, key) != "1":
+        if db.kv_get(con, key) != "1" and notify.configured():
             try:
                 notify.send(f"{profile.get().app_name}: {job} run failed", reason)
             except Exception as nexc:  # the phone alert is best effort

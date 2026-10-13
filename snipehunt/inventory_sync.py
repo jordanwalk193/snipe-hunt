@@ -78,6 +78,11 @@ Reply with ONLY one JSON object, no prose:
 """
 
 
+def configured() -> bool:
+    """The email sync is optional: it runs only when a Gmail login is set."""
+    return bool(config.get("GMAIL_USER") and config.get("GMAIL_APP_PASSWORD"))
+
+
 def _text(msg: email.message.Message) -> str:
     plain, rich = "", ""
     for part in msg.walk():
