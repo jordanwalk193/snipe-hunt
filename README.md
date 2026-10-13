@@ -2,6 +2,7 @@
 
 # Snipe Hunt
 
+[![CI](https://github.com/jordanwalk193/snipe-hunt/actions/workflows/ci.yml/badge.svg)](https://github.com/jordanwalk193/snipe-hunt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A self-hosted bot that hunts eBay for underpriced cards of **one player you collect**, and tells you what to snipe and for how much.
