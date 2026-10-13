@@ -92,6 +92,7 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
         if kind == "running":   # now that the end is known it is asked again after it
             con.execute("UPDATE seen SET is_auction=1, end_ts=? WHERE item_id=?",
                         (info["end_ts"], row["item_id"]))
+            con.commit()
             continue
         if kind == "sold":
             shipping = info["shipping"] if info["shipping"] is not None else row["shipping"]
@@ -102,6 +103,7 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
                  shipping, info["bids"], int(info["end_ts"])))
             added += 1
         con.execute("UPDATE seen SET closed_at=? WHERE item_id=?", (int(now), row["item_id"]))
+        con.commit()   # one at a time, so a dashboard button never waits on this loop
     con.execute("DELETE FROM sales WHERE sold_at<?", (now - KEEP_DAYS * 86400,))
     con.commit()
     return added
