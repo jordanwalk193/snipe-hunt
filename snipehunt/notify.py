@@ -108,6 +108,16 @@ def split_for_quiet_hours(picks: list[dict], now: datetime | None = None
             [p for p in live if not is_urgent(p, now)])
 
 
+def deal_line(pick: dict) -> str:
+    """★★★★☆ 42% under $25 value. For an auction that is at the max, not today's bid."""
+    stars = "★" * pick["deal"] + "☆" * (5 - pick["deal"])
+    worth = f"${pick['value']:.0f}" if pick["value"] >= 10 else f"${pick['value']:.2f}"
+    if not pick.get("deal_pct"):
+        return f"Deal: {stars} about its {worth} value"
+    return (f"Deal: {stars} {pick['deal_pct']}% under {worth} value"
+            + (" at max" if pick.get("is_auction") else ""))
+
+
 def format_pick(pick: dict) -> str:
     """Four short lines, with the item number alone on the last one for copying."""
     icon = TIER_ICON.get(pick.get("tier"), "•")
@@ -122,6 +132,8 @@ def format_pick(pick: dict) -> str:
     lines = [f"{icon} {pick['card']}", line2]
     if pick.get("max") is not None:
         lines.append(f"Max: {pick['max']:.2f} ({pick.get('max_basis', 'estimate')})")
+    if pick.get("deal"):
+        lines.append(deal_line(pick))
     if pick.get("why"):
         lines.append(pick["why"])
     lines.append(str(pick["item_id"]))

@@ -18,6 +18,17 @@ BATCH = 80
 MAX_BATCHES = 6          # anything beyond this waits for the next hourly run
 TIMEOUT = 1200
 TIERS = {"fire", "green", "yellow"}
+UNKNOWN_SHIPPING = 5.00   # what the prompt tells Claude to assume for "ship ?"
+# A deal's stars: how far under its going rate you would pay, shipping included.
+STARS = ((50, 5), (35, 4), (20, 3), (10, 2))
+
+
+def rate(pay: float, value: float | None) -> tuple[int | None, int | None]:
+    """Return (stars 1-5, percent under value) for paying `pay` on a card worth `value`."""
+    if not value or value <= 0:
+        return None, None
+    pct = round(100 * (1 - pay / value))
+    return next((stars for floor, stars in STARS if pct >= floor), 1), max(pct, 0)
 
 PROMPT = """You are {app}, a card-collecting assistant. {collector} collects \
 {player}. Review the eBay listings below and pick out the steals.
@@ -43,6 +54,9 @@ beats recent sales.
 fetch/search (130point.com, eBay sold listings) and set max_basis to "sales". \
 Otherwise use "estimate". Do at most {lookups} lookups; if one fails, use \
 "estimate" and say so in comps.
+- Set "value" to what this exact card (same parallel, serial and grade) has \
+recently sold for, shipping included: the going rate, not your max. Use the \
+sold prices you looked up; when you have none, give your honest best estimate.
 - Auctions whose current price already exceeds your max are not steals; leave \
 them out. Buy It Now only counts when the price is at or under \
 your max.
@@ -55,7 +69,7 @@ Reply with ONLY one JSON object, no prose, no code fence:
 {{"picks": [{{"item_id": "…", "card": "short card name, e.g. 2023 Bowman's \
 Best Refractor PSA 10", "tier": "fire|green|yellow", "max": 12.12, "max_basis": \
 "sales|estimate", "comps": "what recent sales show, or why it is an estimate", \
-"why": "one short phone-friendly line"}}], "not_player": ["item_id", …]}}
+"value": 25.00, "why": "one short phone-friendly line"}}], "not_player": ["item_id", …]}}
 
 === preferences.md ===
 {preferences}
@@ -142,9 +156,16 @@ def _pick_dict(item: Listing, raw: dict) -> dict | None:
     # Belt and braces: never surface something already priced past the max.
     if item.price > max_bid:
         return None
+    try:
+        value = round(float(raw["value"]), 2)
+    except (KeyError, TypeError, ValueError):
+        value = None
+    # What you would really pay: the asking price, or the snipe if it wins at its max.
+    ship = item.shipping if item.shipping is not None else UNKNOWN_SHIPPING
+    deal, deal_pct = rate((max_bid if item.is_auction else item.price) + ship, value)
     return {
         "item_id": item.item_id, "card": str(raw.get("card") or item.title)[:90],
-        "tier": tier, "max": max_bid,
+        "tier": tier, "max": max_bid, "value": value, "deal": deal, "deal_pct": deal_pct,
         "max_basis": "sales" if raw.get("max_basis") == "sales" else "estimate",
         "comps": str(raw.get("comps", ""))[:300], "why": str(raw.get("why", ""))[:140],
         "title": item.title, "price": item.price, "shipping": item.shipping,

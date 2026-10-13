@@ -58,3 +58,24 @@ def test_messages_are_phone_sized_and_urgent_goes_first():
     assert [len(m) for m in messages] == [notify.PER_MESSAGE] * notify.MAX_MESSAGES
     assert messages[0][0]["item_id"] == "soon"
     assert len(overflow) == 21 - notify.PER_MESSAGE * notify.MAX_MESSAGES
+
+
+def test_deal_rating_counts_shipping_and_uses_the_max_for_auctions():
+    from snipehunt import score
+    from snipehunt.ebay_search import Listing
+    assert score.rate(5, 10) == (5, 50) and score.rate(8.5, 10) == (2, 15)
+    assert score.rate(12, 10) == (1, 0) and score.rate(5, None) == (None, None)
+    auction = Listing("1", "t", 0.99, "USD", 1.0, ["AUCTION"], 0, None, "s", "u", None)
+    p = score._pick_dict(auction, {"tier": "green", "max": 12.12, "value": 25})
+    assert (p["deal"], p["deal_pct"], p["value"]) == (4, 48, 25.0)   # 13.12 against 25
+    buy_now = Listing("2", "t", 8.0, "USD", None, ["FIXED_PRICE"], None, None, "s", "u", None)
+    p = score._pick_dict(buy_now, {"tier": "yellow", "max": 9.09, "value": "20"})
+    assert (p["deal"], p["deal_pct"]) == (4, 35)                     # 8 + assumed 5 shipping
+    assert score._pick_dict(buy_now, {"tier": "yellow", "max": 9.09})["deal"] is None
+
+
+def test_alert_shows_the_deal_rating():
+    lines = notify.format_pick(pick(value=45.0, deal=4, deal_pct=42)).split("\n")
+    assert "Deal: ★★★★☆ 42% under $45 value at max" in lines
+    assert lines[-1] == "123456789012"
+    assert not any(l.startswith("Deal") for l in notify.format_pick(pick()).split("\n"))
