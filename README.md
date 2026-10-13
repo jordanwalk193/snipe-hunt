@@ -9,7 +9,7 @@ A self-hosted bot that hunts eBay for underpriced cards of **one player you coll
 
 Every hour it searches eBay (including misspelled listings), throws out everything that isn't your player, and has Claude compare what's left with your inventory, your want list and recent sold prices. The steals come to your phone with a suggested max bid, and to a Home Assistant dashboard.
 
-![The Today tab: what needs a snipe, the top pick, your snipes ending today and what to pay](docs/today.png)
+![A tour of the dashboard: Today, Picks, Sold prices and Collection, shown with demo data](docs/tour.gif)
 
 <sub>Screenshots show the built-in demo data. Every card, price and seller in them is made up.</sub>
 
