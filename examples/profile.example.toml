@@ -1,0 +1,59 @@
+# Who you collect. Only [player] name is required; delete anything you don't need.
+# This example is the setup Snipe Hunt was first built for.
+
+collector = "Alex"            # your first name, used in reports and prompts
+app_name = "Snipe Hunt"       # shown in alerts and report titles
+
+[player]
+name = "Jordan Walker"
+about = "the St. Louis Cardinals outfielder"   # one phrase that says which one
+sport = "baseball"
+
+# Words that confirm a listing is this player (team, city, minor-league clubs).
+team_words = ["cardinals", "cardinal", "st louis", "stl", "redbirds", "memphis", "springfield"]
+
+# Product and hobby words that only fit this sport. A title with the player's
+# name and one of these (or a team word) is a sure match; without one it is
+# handed to Claude to judge.
+card_words = ["mlb", "topps", "bowman", "bowmans", "perfect game", "heritage", "stadium club",
+              "allen", "ginter", "gypsy queen", "finest", "1st bowman", "prospect",
+              "prospects", "outfield"]
+
+# Words that mean it is someone or something else: other sports, schools, teams.
+wrong_words = ["basketball", "nba", "wnba", "mavericks", "mavs", "blazers", "uab",
+               "tulane", "seton hall", "bowman u", "bowman university", "football",
+               "nfl", "hockey", "nhl", "soccer", "ufc", "wrestling", "wwe", "pokemon",
+               "hoops", "g league", "g-league"]
+
+# Other people with the same last name (first names only).
+other_first_names = ["larry", "taijuan", "christian", "todd", "harry", "neil", "kemba",
+                     "kenneth", "herschel", "tyler", "ryan", "kyle"]
+
+# Spellings to accept in a title. Leave these out and Snipe Hunt works out
+# common typos from the name (one letter dropped, two letters swapped).
+first_names = ["jordan", "jordon", "jorden", "jordn", "jodan", "j"]
+last_names = ["walker", "wlaker", "walkr"]
+
+[search]
+# Each search is one eBay API call an hour. The player's name is always
+# searched twice (auctions ending soonest, newest listings).
+keywords = ["auto", "patch", "relic", "/"]     # "<name> auto", "<name> patch", ...
+typos = ["jordon walker", "jorden walker", "jordn walker", "jodan walker",
+         "jordan wlaker", "jordan walkr"]      # leave out to have six picked for you
+extra = ["j walker cardinals", "walker cardinals rookie lot", "jordan walker topps now"]
+# Products to check for new releases each week.
+products = "Topps Update, Topps Chrome Update, Bowman Draft, Holiday, Heritage High Number, Finest, Cosmic Chrome, Pristine, Stadium Club, Bowman's Best, Allen & Ginter, Gypsy Queen, Archives, Panini products"
+
+[binder]
+# Which binder page a card goes on, by the year on the card. Optional.
+spare = "p20 spare"
+[binder.pages]
+2019 = "p1"
+2020 = "pp2–3"
+2021 = "pp4–5"
+2022 = "pp6–7"
+2023 = "pp8–11"
+2024 = "pp12–13"
+2025 = "pp14–15"
+2026 = "pp16–17"
+2027 = "pp18–19"

@@ -1,0 +1,16 @@
+# For running without Docker. Assumes the repo is at /opt/snipe-hunt with a
+# virtualenv in /opt/snipe-hunt/.venv, and secrets in /var/lib/snipe-hunt/env.
+[Unit]
+Description=Snipe Hunt: card steal-finder (API and scheduler)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/snipe-hunt
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/snipe-hunt/.venv/bin/python -m snipehunt serve
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+services:
+  snipe-hunt:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8766:8766"
+    volumes:
+      - ./home:/var/lib/snipe-hunt
