@@ -115,8 +115,13 @@ def ask_claude(prompt: str, tools: str = "WebFetch,WebSearch",
     env = dict(os.environ)
     if config.get("ANTHROPIC_API_KEY"):   # may come from the env file, not the environment
         env["ANTHROPIC_API_KEY"] = config.get("ANTHROPIC_API_KEY")
-    proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, env=env,
-                          timeout=timeout, cwd=str(config.ensure_state_dir()))
+    try:
+        proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, env=env,
+                              timeout=timeout, cwd=str(config.ensure_state_dir()))
+    except FileNotFoundError:
+        raise RuntimeError(
+            f"The Claude CLI ({cmd[0]!r}) wasn't found. Install it with `npm install -g "
+            "@anthropic-ai/claude-code`, or set CLAUDE_BIN to its full path") from None
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p exit {proc.returncode}: "
                            f"{(proc.stderr or proc.stdout)[:300]}")

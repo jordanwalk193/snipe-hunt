@@ -35,6 +35,10 @@ def guarded(job: str, fn: Callable[[], str | None], dry_run: bool = False) -> in
     except Exception as exc:
         traceback.print_exc()
         reason = f"{type(exc).__name__}: {exc}"[:300]
+        # The failed job's own database connection lives on inside the
+        # traceback; let go of it so its unfinished write can't block this one.
+        exc.__traceback__ = None
+        traceback.clear_frames(sys.exc_info()[2])
         if dry_run:
             return 1
         if db.kv_get(con, key) != "1" and notify.configured():

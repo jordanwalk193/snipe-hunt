@@ -110,3 +110,20 @@ def test_optional_pieces_can_be_left_out(con, monkeypatch):
     assert "email sync is off" in jobs.daily()
     monkeypatch.setitem(config.load(), "NTFY_URL", "https://ntfy.example/topic")
     assert notify.configured()
+
+
+def test_a_run_that_fails_while_scoring_is_still_recorded(con, monkeypatch):
+    """The job's own unfinished database write must not block the failure note."""
+    from snipehunt.ebay_search import Listing
+    item = Listing("123456789012", "2023 Topps Jordan Walker RC", 1.0, "USD", 1.0,
+                   ["AUCTION"], 0, "2026-10-13T21:00-04:00", "s", "u", None)
+    monkeypatch.setitem(config.load(), "EBAY_CLIENT_ID", "x")
+    monkeypatch.setitem(config.load(), "EBAY_CLIENT_SECRET", "y")
+    monkeypatch.setattr(jobs.ebay_search, "search_all", lambda verbose=False: [item])
+
+    def no_claude(*args, **kwargs):
+        raise RuntimeError("Claude is down")
+    monkeypatch.setattr(jobs.score, "score", no_claude)
+    assert ops.guarded("hourly", jobs.hourly) == 1
+    assert db.kv_get(con, "failing:hourly") == "1"
+    assert con.execute("SELECT count(*) FROM seen").fetchone()[0] == 1   # still tracked

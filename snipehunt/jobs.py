@@ -25,6 +25,9 @@ def hourly(dry_run: bool = False) -> str:
     listings = ebay_search.search_all(verbose=True)
     for item in listings:
         db.touch(con, item.item_id, item.title)
+    # Save now: if scoring fails, an open write here would block the failure
+    # from being recorded, and these listings are still on eBay either way.
+    con.commit()
     fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
 
     def save(batch, batch_picks) -> None:

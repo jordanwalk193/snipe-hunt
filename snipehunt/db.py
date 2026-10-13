@@ -42,7 +42,8 @@ PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
 
 def connect() -> sqlite3.Connection:
     config.ensure_state_dir()
-    con = sqlite3.connect(config.SEEN_DB)
+    # The API reads while a job writes; wait for the other side instead of failing.
+    con = sqlite3.connect(config.SEEN_DB, timeout=30)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
     return con
