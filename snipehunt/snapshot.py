@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import (config, db, gixen, inventory, profile, rarity, report, sales, scheduler,
-               settings)
+               settings, watch)
 from . import usage
 from .notify import TIER_ORDER
 
@@ -34,6 +34,7 @@ def _short(text: str | None, limit: int) -> str:
 def _slim(pick: dict) -> dict:
     return {
         "item_id": pick["item_id"], "card": _short(pick.get("card"), 90),
+        "title": pick.get("title"),
         "tier": pick.get("tier"), "price": pick.get("price"),
         "shipping": pick.get("shipping"), "total": pick.get("total"),
         "max": pick.get("max"), "max_basis": pick.get("max_basis"),
@@ -44,8 +45,21 @@ def _slim(pick: dict) -> dict:
         "image": pick.get("image"), "snipe": pick.get("snipe"),
         "bid_now": pick.get("bid_now"), "value": pick.get("value"),
         "deal": pick.get("deal"), "deal_pct": pick.get("deal_pct"),
-        "edge": pick.get("edge"),
+        "edge": pick.get("edge"), "fast": bool(pick.get("fast")),
+        # older picks were saved before the win bid existed; work it out for them too
+        "win": sales.win_bid(pick.get("value"), pick.get("shipping"), pick.get("max"))
+        if pick.get("is_auction") else None,
     }
+
+
+def _with_last_sold(con, picks: list[dict]) -> list[dict]:
+    """Each pick with the latest recorded sale of the same card, when there is one."""
+    rows = sales.with_calls(con)
+    for pick in picks:
+        pick["last_sold"] = sales.last_sold(rows, pick.get("title") or pick["card"],
+                                            pick["item_id"]) if rows else None
+        pick.pop("title", None)
+    return picks
 
 
 def skipped_ids(con) -> list[str]:
@@ -278,7 +292,7 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "profile": profile.get().public(),
         "generated": now.isoformat(timespec="seconds"),
         "status": state,
-        "picks": [_slim(p) for p in picks[:MAX_PICKS]],
+        "picks": _with_last_sold(con, [_slim(p) for p in picks[:MAX_PICKS]]),
         "gixen": gix,
         "cards": cards(rows),
         "collection": collection(rows, now),
@@ -286,6 +300,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "record": record(con, now),
         "market": sales.market(con, now),
         "rarest": rarity.load(con, now.isoformat(timespec="minutes")),
+        "rarest_census": rarity.census(con),
+        "moves": watch.load(con, now.isoformat(timespec="minutes")),
         "wantlist": wantlist(),
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),

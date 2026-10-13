@@ -1,0 +1,11 @@
+# See the dashboard with made-up data: no eBay keys, no Claude, no alerts.
+#   docker compose -f docker-compose.demo.yml up
+# Then add the Home Assistant integration with http://<this machine>:8766 and the token "demo".
+services:
+  snipe-hunt-demo:
+    build: .
+    environment:
+      SNIPEHUNT_DEMO: "1"
+      API_TOKEN: demo
+    ports:
+      - "8766:8766"

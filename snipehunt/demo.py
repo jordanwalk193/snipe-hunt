@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from . import config, profile, settings, snapshot
+from . import config, profile, sales, settings, snapshot
 
 # (tier, card, price, shipping, max, value, hours until it ends or None for Buy It Now,
 #  basis, snipe, why, colour)
@@ -100,8 +100,51 @@ def _rarest(now: datetime) -> list[dict]:
             "end_time": (now + timedelta(hours=hours)).isoformat(timespec="minutes")
             if hours else None,
             "seller": SELLERS[n % len(SELLERS)], "url": f"https://www.ebay.com/itm/{item_id}",
-            "image": _art(colour, "1/1" if run == 1 else f"/{run}")})
+            "image": _art(colour, "1/1" if run == 1 else f"/{run}"),
+            "first_seen": int((now - timedelta(hours=2 if n in (1, 6) else 90)).timestamp()),
+            "owned": n == 5})
     return out
+
+
+# (card, old price, new price, shipping, relist?, hours ago, colour)
+MOVES = [
+    ("2023 Chrome Update Rookie Auto Blue Refractor /150", 89.99, 59.99, 4.99, False, 1, "#1e63c9"),
+    ("2022 Sterling Prospect Auto Speckle /99 PSA 10", 75.00, 54.00, 0.0, True, 3, "#8e24aa"),
+    ("2023 Finest Rookie Design Variation Auto /25", 140.00, 110.00, 5.25, False, 7, "#2e9d57"),
+    ("2021 Draft Chrome Sapphire Green /50", 48.00, 39.99, 4.99, False, 20, "#00897b"),
+    ("2024 Heritage Real One Auto Red Ink /75", 60.00, 60.00, 4.99, True, 26, "#d2452f"),
+]
+# (card, prices oldest first, colour)
+HISTORY = [
+    ("2023 Chrome Rookie Refractor #45 PSA 10", [31.0, 29.5, 27.0, 28.5, 24.99, 23.5], "#1e63c9"),
+    ("2022 Draft Chrome 1st Auto Blue /150 PSA 10", [162.0, 149.0, 140.99], "#8e24aa"),
+    ("2023 Cosmic Chrome Nucleus Refractor /199", [13.5, 15.0, 16.75, 18.0], "#d2452f"),
+    ("2023 Heritage High Number RC variation", [5.5, 6.25, 5.75], "#b0872c"),
+    ("2021 Bowman's Best Refractor /250", [12.0, 14.5], "#00897b"),
+]
+
+
+def _moves(now: datetime) -> list[dict]:
+    out = []
+    for n, (card, old, new, ship, relist, hours, colour) in enumerate(MOVES):
+        item_id = str(410000400009 + n * 4273)
+        out.append({
+            "kind": "relist" if relist else "drop", "item_id": item_id, "title": card,
+            "old": old, "price": new, "cut_pct": round(100 * (1 - new / old)), "shipping": ship,
+            "is_auction": False, "best_offer": n % 2 == 0, "end_time": None,
+            "seller": SELLERS[n % len(SELLERS)], "url": f"https://www.ebay.com/itm/{item_id}",
+            "image": _art(colour, "CUT" if not relist else "BACK"),
+            "at": int((now - timedelta(hours=hours)).timestamp())})
+    return out
+
+
+def _history(now: datetime) -> list[dict]:
+    return [{"title": card, "image": _art(colour, "SOLD"), "n": len(prices), "prices": prices,
+             "last": prices[-1], "low": min(prices), "high": max(prices),
+             "typical": round(sorted(prices)[len(prices) // 2], 2),
+             "last_at": (now - timedelta(days=1 + n)).isoformat(timespec="minutes"),
+             "url": f"https://www.ebay.com/itm/{410000500001 + n * 3301}"}
+            for n, (card, prices, colour) in enumerate(HISTORY)]
 
 
 def _market(now: datetime) -> dict:
@@ -116,7 +159,8 @@ def _market(now: datetime) -> dict:
             "call": call and {"tier": call[0], "max": call[1], "value": float(call[2]),
                               "under_max": price <= call[1]}})
     return {"count": 212, "count_7d": 41, "calls": 31, "under_max": 22, "over_max": 9,
-            "value_gap_pct": 14, "value_bias_pct": 6, "valued": 28, "sold": sold}
+            "under_win": 28, "value_gap_pct": 14, "value_bias_pct": 6, "valued": 28,
+            "sold": sold, "history": _history(now)}
 
 
 def build(now: datetime | None = None) -> dict:
@@ -137,7 +181,11 @@ def build(now: datetime | None = None) -> dict:
             "seller": SELLERS[n % len(SELLERS)], "why": why,
             "url": f"https://www.ebay.com/itm/{item_id}", "image": _art(colour, "/" + label if "/" in card else label),
             "snipe": snipe, "bid_now": price if snipe else None, "value": float(value),
-            "deal": stars, "deal_pct": max(pct, 0), "edge": EDGES.get(n)})
+            "deal": stars, "deal_pct": max(pct, 0), "edge": EDGES.get(n), "fast": n == 4,
+            "win": sales.win_bid(float(value), ship, max_bid) if hours else None,
+            "last_sold": {"total": round(value * 0.96, 2), "price": round(value * 0.96 - ship, 2),
+                          "n": 2 + n % 3, "at": (now - timedelta(days=3 + n)).date().isoformat()}
+            if basis == "sales" else None})
         if snipe:
             snipes.append({"item_id": item_id, "end_time": end, "max_bid": snipe,
                            "current_bid": price, "outbid": False, "title": card,
@@ -213,6 +261,8 @@ def build(now: datetime | None = None) -> dict:
                                       "seller": SELLERS[1]}]},
         "market": _market(now),
         "rarest": _rarest(now),
+        "rarest_census": {"one_of_one": 4, "to_10": 11, "to_50": 37},
+        "moves": _moves(now),
         "wantlist": snapshot.wantlist(),
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": None,

@@ -7,11 +7,13 @@ Everything here only reads eBay and recommends; nothing bids or buys.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import time
 from datetime import datetime
 
-from . import (config, db, ebay_search, gitsync, inventory_sync, limited_drops,
-               notify, ops, profile, rarity, report, sales, score)
+from . import (config, db, ebay_search, gitsync, hidden, inventory, inventory_sync,
+               limited_drops, notify, ops, profile, rarity, report, sales, score, watch)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -24,12 +26,16 @@ def hourly(dry_run: bool = False) -> str:
             print(f"hourly: {exc}; using the local copy", file=sys.stderr)
     first_run = con.execute("SELECT count(*) FROM seen").fetchone()[0] == 0
     listings = ebay_search.search_all(verbose=True)
-    for item in listings:
-        db.touch(con, item.item_id, item.title, item.is_auction,
-                 datetime.fromisoformat(item.end_time).timestamp() if item.end_time else None,
-                 item.shipping)
+    try:   # the same cards listed without the player's name
+        listings += hidden.search(con, {i.item_id for i in listings}, verbose=True)
+    except Exception as exc:
+        print(f"hidden: {exc}", file=sys.stderr)
+    moves = _remember(con, listings)
+    if not dry_run and not first_run:
+        watch.save(con, moves)
     if not dry_run:
-        rarity.save(con, listings)   # the lowest print runs for sale, for the dashboard
+        # the lowest print runs for sale, for the dashboard
+        rarity.save(con, listings, inventory.read()[1])
     # Save now: if scoring fails, an open write here would block the failure
     # from being recorded, and these listings are still on eBay either way.
     con.commit()
@@ -61,6 +67,92 @@ def hourly(dry_run: bool = False) -> str:
     sent = notify.deliver(con, picks, dry_run=dry_run)
     return (f"{len(listings)} listings, {len(fresh)} new, {len(scored)} scored, "
             f"{len(picks)} picks, {sent} alerted")
+
+
+def _remember(con, listings: list) -> list[dict]:
+    """Note every listing as seen; returns the price drops and relists among them."""
+    moves = []
+    for item in listings:
+        move = watch.spot(con, item)
+        if move:
+            moves.append(move)
+        db.touch(con, item.item_id, item.title, item.is_auction,
+                 datetime.fromisoformat(item.end_time).timestamp() if item.end_time else None,
+                 item.shipping, item.price, item.seller)
+    return moves
+
+
+def fast(dry_run: bool = False) -> str:
+    """The fast lane: brand-new Buy It Now listings, checked between hourly runs.
+
+    A mispriced Buy It Now can be gone in minutes. This is one eBay search for
+    the newest fixed-price listings; only the ones never seen before, and
+    worth a look, go to Claude, so most runs cost nothing.
+    """
+    config.require("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET")
+    con = db.connect()
+    if con.execute("SELECT count(*) FROM seen").fetchone()[0] == 0:
+        return "waiting for the first hourly run"
+    client = ebay_search.EbayClient()
+    found = []
+    for raw in client.search(profile.get().search_name, "buyingOptions:{FIXED_PRICE|BEST_OFFER}",
+                             "newlyListed", limit=50):
+        item = ebay_search.parse_item(raw)
+        if item is None or item.currency != "USD":
+            continue
+        item.match = ebay_search.classify(item.title)
+        if item.match != "no" and not item.is_auction:
+            found.append(item)
+    new = [i for i in found if con.execute(
+        "SELECT 1 FROM seen WHERE item_id=?", (i.item_id,)).fetchone() is None]
+    worth = [i for i in new if fast_worth(con, i)][:FAST_MAX]
+    if dry_run:
+        for item in worth:
+            print(f"  would score: ${item.price:.2f} {item.title}", file=sys.stderr)
+        return f"{len(found)} newest, {len(new)} new, {len(worth)} worth scoring (dry run)"
+    watch.save(con, _remember(con, new))
+    con.commit()   # seen but not scored: whatever Claude doesn't get now, the hourly run will
+    used = _fast_calls_today(con)
+    if not worth or used >= FAST_CALLS_PER_DAY:
+        return (f"{len(found)} newest, {len(new)} new, {len(worth)} worth scoring"
+                + (", daily limit reached" if worth else ""))
+    db.kv_set(con, FAST_KEY, json.dumps([time.strftime("%Y-%m-%d"), used + 1]))
+    con.commit()
+    picks, scored = score.score(worth, verbose=True, con=con)
+    tiers = {p["item_id"]: p["tier"] for p in picks}
+    for item in scored:
+        db.mark_scored(con, item.item_id, item.total, tiers.get(item.item_id))
+    for p in picks:
+        p["fast"] = True
+        db.save_pick(con, p)
+    con.commit()
+    sent = notify.deliver(con, picks)
+    return (f"{len(found)} newest, {len(new)} new, {len(scored)} scored, "
+            f"{len(picks)} picks, {sent} alerted")
+
+
+FAST_MAX = 12              # listings in one fast-lane scoring call
+FAST_CALLS_PER_DAY = 30    # Claude calls the fast lane may make in a day
+FAST_KEY = "fast_calls"
+FAST_MIN_PRICE = 15.0      # under this, a plain card waits for the hourly run
+
+
+def fast_worth(con, item) -> bool:
+    """Is a new Buy It Now worth a Claude call right now, or can it wait for the hour?"""
+    if rarity.print_run(item.title) is not None and rarity.print_run(item.title) <= 99:
+        return True
+    if rarity.AUTO.search(item.title) or rarity.GRADED.search(item.title):
+        return True
+    if item.match == "unclear":      # a misspelled or thin title: where mistakes hide
+        return True
+    # the same card has sold for clearly more than this one is asking
+    return any(s["price"] + (s["shipping"] or 0) > item.total * 1.3
+               for s in sales.relevant(con, [item])) or item.price >= FAST_MIN_PRICE
+
+
+def _fast_calls_today(con) -> int:
+    day, used = json.loads(db.kv_get(con, FAST_KEY, '["", 0]'))
+    return used if day == time.strftime("%Y-%m-%d") else 0
 
 
 def _welcome(con, listings: list, picks: list[dict]) -> str:
@@ -144,7 +236,7 @@ def weekly(dry_run: bool = False, now: datetime | None = None) -> str:
     return summary.replace("\n", " · ")
 
 
-JOBS = {"hourly": hourly, "daily": daily, "weekly": weekly}
+JOBS = {"hourly": hourly, "daily": daily, "weekly": weekly, "fast": fast}
 
 
 def main() -> None:

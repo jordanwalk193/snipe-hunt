@@ -27,7 +27,7 @@ TIERS = {"fire", "green", "yellow"}
 # buyers won't find, or an auction nobody is watching.
 EDGES = {"mispriced", "hidden", "sleeper"}
 EDGE_MIN_PCT = 25         # an edge has to be this far under the going rate
-UNKNOWN_SHIPPING = 5.00   # what the prompt tells Claude to assume for "ship ?"
+UNKNOWN_SHIPPING = sales.UNKNOWN_SHIPPING   # what the prompt tells Claude to assume for "ship ?"
 # The inventory columns that say which card a row is. Scoring only needs these
 # to tell what is already owned; order dates, sellers and notes are left out
 # because every extra word is paid for on every run.
@@ -85,6 +85,10 @@ card buried in a lot; "sleeper" = an auction ending within about a day with \
 few or no bids and still far under its going rate. Use "" for a card that is \
 only a fair price. Claim an edge only when you are fairly sure of the going \
 rate and paying your max plus shipping would still be at least 25% under it.
+- A listing marked "found": "by card number…" came from a search for one of \
+{name}'s card numbers and does not name the player. If the year, set and card \
+number make it {name}'s card, it is "hidden" by definition and worth a close \
+look; if that number belongs to another player in that set, put it in "not_player".
 - Tiers: "fire" = brag-worthy (autos, patch autos, /50 or lower, case hits, \
 SSPs, want-list hits); "green" = numbered or clear value; "yellow" = cheap \
 card not yet in the collection.
@@ -129,6 +133,8 @@ def _compact(item: Listing) -> str:
             "best_offer" if "BEST_OFFER" in item.buying_options else "buy_it_now"),
         "bids": item.bid_count, "ends": item.end_time, "seller": item.seller,
         "match": item.match,
+        **({"found": "by card number; the title leaves the player's name out"}
+           if any(q.startswith("no-name") for q in item.queries) else {}),
     }, ensure_ascii=False)
 
 
@@ -244,6 +250,7 @@ def _pick_dict(item: Listing, raw: dict) -> dict | None:
         "item_id": item.item_id, "card": str(raw.get("card") or item.title)[:90],
         "tier": tier, "max": max_bid, "value": value, "deal": deal, "deal_pct": deal_pct,
         "edge": edge,
+        "win": sales.win_bid(value, item.shipping, max_bid) if item.is_auction else None,
         "max_basis": "sales" if raw.get("max_basis") == "sales" else "estimate",
         "comps": str(raw.get("comps", ""))[:300], "why": str(raw.get("why", ""))[:140],
         "title": item.title, "price": item.price, "shipping": item.shipping,

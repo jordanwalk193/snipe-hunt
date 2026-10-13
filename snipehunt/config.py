@@ -35,6 +35,7 @@ DEFAULTS = {
     "API_PORT": "8766",
     "API_BIND": "0.0.0.0",
     "SNIPEHUNT_TZ": "America/New_York",
+    "FAST_LANE_MINUTES": "0",    # check brand-new Buy It Nows this often; 0 = off
 }
 SECRETS = ("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET", "GMAIL_USER", "GMAIL_APP_PASSWORD",
            "HA_URL", "HA_TOKEN", "HA_NOTIFY_SERVICE", "NTFY_URL", "GIXEN_USER",

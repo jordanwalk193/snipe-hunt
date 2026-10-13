@@ -1,0 +1,17 @@
+# The shortest profile that works: a different player, a different sport.
+# Everything Snipe Hunt needs beyond this it works out for itself: common
+# misspellings of the name, the searches to run, and the card numbers to look
+# for in listings that leave the name out.
+
+collector = "Sam"
+
+[player]
+name = "Caleb Williams"
+about = "the Chicago Bears quarterback"
+sport = "football"
+team_words = ["bears", "chicago", "usc", "trojans"]
+card_words = ["nfl", "panini", "prizm", "donruss", "optic", "select", "mosaic", "topps"]
+wrong_words = ["baseball", "mlb", "basketball", "nba", "hockey", "nhl", "soccer", "pokemon"]
+
+[search]
+keywords = ["auto", "patch", "/"]

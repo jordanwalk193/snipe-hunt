@@ -61,9 +61,36 @@ def rarest(listings: list[Listing], limit: int = 10) -> list[dict]:
     } for run, no_auto, _, item in found[:limit]]
 
 
-def save(con, listings: list[Listing]) -> int:
+def owned(row: dict, inventory: list[dict]) -> bool:
+    """Is this rare card already in the collection? Same year, same print run, like words."""
+    from . import sales   # sales imports nothing from here; kept local to stay that way
+    year = re.search(r"\b(19|20)\d\d\b", row["title"])
+    mine = sales.words(row["title"])
+    for card in inventory:
+        serial = re.search(r"/\s?(\d+)", card.get("serial") or "")
+        run = 1 if "1/1" in (card.get("serial") or "") else (int(serial.group(1)) if serial else None)
+        if run != row["run"] or not year or card.get("year") != year.group(0):
+            continue
+        theirs = sales.words(" ".join(str(card.get(k) or "") for k in
+                                      ("year", "set", "card", "parallel", "card_no")))
+        if theirs and len(mine & theirs) / len(theirs) >= 0.6:
+            return True
+    return False
+
+
+def save(con, listings: list[Listing], inventory: list[dict] | None = None) -> int:
     """Keep the current top of the list for the dashboard. Returns how many made it."""
     top = rarest(listings, limit=25)
+    for row in top:
+        first = con.execute("SELECT first_seen FROM seen WHERE item_id=?",
+                            (row["item_id"],)).fetchone()
+        row["first_seen"] = first["first_seen"] if first else None
+        row["owned"] = owned(row, inventory or [])
+    # how many of each print run are for sale at all, for the panel's summary line
+    runs = [print_run(i.title) for i in listings if i.match == "yes"]
+    census = {"one_of_one": sum(r == 1 for r in runs), "to_10": sum(r is not None and 1 < r <= 10 for r in runs),
+              "to_50": sum(r is not None and 10 < r <= 50 for r in runs)}
+    db.kv_set(con, KEY + ":census", json.dumps(census))
     db.kv_set(con, KEY, json.dumps(top, ensure_ascii=False))
     return len(top)
 
@@ -73,3 +100,8 @@ def load(con, now_iso: str, limit: int = 10) -> list[dict]:
     rows = json.loads(db.kv_get(con, KEY, "[]"))
     live = [r for r in rows if not (r["is_auction"] and r["end_time"] and r["end_time"] <= now_iso)]
     return live[:limit]
+
+
+def census(con) -> dict:
+    """How many 1/1s, /10-or-fewer and /50-or-fewer cards were for sale at the last search."""
+    return json.loads(db.kv_get(con, KEY + ":census", "{}"))

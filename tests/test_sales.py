@@ -138,7 +138,9 @@ def test_the_dashboard_gets_recent_sales_and_how_the_picks_turned_out():
     assert view["value_gap_pct"] == 20      # $12 and $32 delivered against $15 and $40
     assert [s["item_id"] for s in view["sold"]] == ["1", "2", "3"]
     assert view["sold"][0]["call"] == {"tier": "fire", "max": 12.12, "value": 15.0,
-                                       "under_max": True}
+                                       "under_max": True, "win": None, "under_win": True}
+    # the second went past the max of 20.20 but a bid at the going rate would have held
+    assert view["sold"][1]["call"]["win"] == 38.07 and view["under_win"] == 2
     assert view["sold"][0]["total"] == 12.0 and view["sold"][2]["call"] is None
 
 
@@ -176,3 +178,24 @@ def test_price_check_finds_sales_by_the_words_in_the_title():
     assert "2 sales · $40.00 to $90.00 with shipping · typical $65.00" in text
     assert "No sold prices on record for 'superfractor'. 3 sales" in sales.price_check(
         con, "superfractor")
+
+
+def test_the_win_bid_is_the_going_rate_less_shipping_and_only_when_above_the_max():
+    assert sales.win_bid(40.0, 2.0, 20.2) == 38.07
+    assert sales.win_bid(40.0, None, 20.2) == 35.07          # unknown shipping: assume $5
+    assert sales.win_bid(15.0, 2.0, 12.12) is None           # no real gap over the max
+    assert sales.win_bid(None, 2.0, 12.12) is None
+
+
+def test_cards_that_sold_more_than_once_get_a_price_history():
+    con = db.connect()
+    sale(con, "1", "2023 Topps Chrome Sam Example Gold Refractor 07/50 #45", 40.0, ago=3 * 86400)
+    sale(con, "2", "2023 Topps Chrome Sam Example Gold Refractor /50 #45", 46.0, ago=86400)
+    sale(con, "3", "2023 Topps Chrome Sam Example Gold Refractor 31/50 #45", 52.0, ago=60)
+    sale(con, "4", "2021 Bowman Draft Sam Example 1st Auto PSA 10", 150.0)
+    (card,) = sales.history(con)
+    assert (card["n"], card["prices"], card["low"], card["high"], card["last"]) == (
+        3, [40.0, 46.0, 52.0], 40.0, 52.0, 52.0)
+    last = sales.last_sold(sales.with_calls(con), "Sam Example 2023 Topps Chrome Gold Refractor /50 #45")
+    assert (last["total"], last["n"]) == (52.0, 3)
+    assert sales.last_sold(sales.with_calls(con), "2024 Panini Prizm Silver #12") is None

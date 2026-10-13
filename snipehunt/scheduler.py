@@ -42,8 +42,19 @@ def trigger(job: str) -> bool:
     return True
 
 
+def fast_minutes() -> int:
+    """How often the fast lane runs; 0 when it is off (see jobs.fast)."""
+    try:
+        return max(0, min(59, int(config.get("FAST_LANE_MINUTES") or 0)))
+    except ValueError:
+        return 0
+
+
 def last_due(job: str, now: datetime) -> datetime:
     """The most recent moment this job was scheduled to start."""
+    if job == "fast":
+        every = fast_minutes() or 60
+        return now.replace(minute=now.minute - now.minute % every, second=0, microsecond=0)
     if job == "hourly":
         due = now.replace(minute=HOURLY_MINUTE, second=0, microsecond=0)
         return due if due <= now else due - timedelta(hours=1)
@@ -59,10 +70,13 @@ def last_due(job: str, now: datetime) -> datetime:
 def due_jobs(con, now: datetime) -> list[str]:
     """Jobs whose scheduled time has passed since they last started."""
     out = []
-    for job in ("hourly", "daily", "weekly"):
+    for job in ("hourly", "daily", "weekly") + (("fast",) if fast_minutes() else ()):
         due = last_due(job, now)
         started = float(db.kv_get(con, f"started:{job}", "0") or 0)
-        if started < due.timestamp() and (now - due).total_seconds() <= LATE[job]:
+        late = LATE.get(job, fast_minutes() * 60)
+        if job == "fast" and due.minute == HOURLY_MINUTE:
+            continue   # the hourly run is searching anyway
+        if started < due.timestamp() and (now - due).total_seconds() <= late:
             out.append(job)
     return out
 

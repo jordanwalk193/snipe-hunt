@@ -27,6 +27,7 @@ KEEP_DAYS = 180
 PER_LISTING = 3         # sold prices offered to Claude for one listing
 MAX_LINES = 60          # and for one scoring call, because every line is paid for
 MIN_OVERLAP = 0.5
+UNKNOWN_SHIPPING = 5.00
 TRACK_CALLS = 30        # the latest calls the scoring prompt's track record looks at
 TRACK_MIN = 8           # fewer than this says nothing yet
 TRACK_OFF = 10          # percent the going rate has to be off before it is mentioned
@@ -157,6 +158,21 @@ def lines(sales: list[dict]) -> str:
     return "\n".join(out)
 
 
+def win_bid(value: float | None, shipping: float | None, max_bid: float | None
+            ) -> float | None:
+    """A bid that should usually win: the going rate less shipping, on odd cents.
+
+    The max is a cheapskate's price and most good cards sell above it. This is
+    the other number: what the card goes for, so a snipe here is a fair buy
+    rather than a steal. None when it would be no higher than the max.
+    """
+    if not value or max_bid is None:
+        return None
+    bid = value - (UNKNOWN_SHIPPING if shipping is None else shipping)
+    bid = int(bid) + 0.07 if bid >= 1 else 0
+    return round(bid, 2) if bid > max_bid * 1.1 else None
+
+
 def with_calls(con, since: float = 0) -> list[dict]:
     """Sales with the pick the bot made on the same auction, if any. Newest first."""
     out = []
@@ -170,8 +186,11 @@ def with_calls(con, since: float = 0) -> list[dict]:
         row["call"] = None
         if pick and pick.get("max") is not None:
             value = pick.get("value")
+            win = win_bid(value, row["shipping"], pick["max"])
             row["call"] = {"tier": pick.get("tier"), "max": pick["max"], "value": value,
-                           "under_max": row["price"] <= pick["max"]}
+                           "under_max": row["price"] <= pick["max"], "win": win,
+                           # a snipe at the win bid would have been in the running
+                           "under_win": row["price"] <= (win or pick["max"])}
             # how far the real delivered price was from the going rate; + means it sold higher
             row["off"] = (row["total"] - value) / value if value else None
         out.append(row)
@@ -190,6 +209,7 @@ def scorecard(rows: list[dict]) -> dict:
     off = [r["off"] for r in made if r["off"] is not None]
     return {
         "calls": len(made), "under_max": under, "over_max": len(made) - under,
+        "under_win": sum(r["call"]["under_win"] for r in made),
         # how far the going-rate guess was from the real final price, typically
         "value_gap_pct": round(100 * statistics.median(abs(o) for o in off)) if off else None,
         # and which way: above zero means cards sold for more than the guess
@@ -224,7 +244,57 @@ def market(con, now: datetime, limit: int = 40) -> dict:
         "image": r["image"], "url": f"https://www.ebay.com/itm/{r['item_id']}",
         "call": r["call"]} for r in rows[:limit]]
     return {"count": len(rows), "count_7d": sum(r["sold_at"] >= week for r in rows),
-            **scorecard(rows), "sold": sold}
+            **scorecard(rows), "sold": sold, "history": history(con)}
+
+
+SAME_CARD = 0.75        # title overlap that makes two listings the same card
+
+
+def card_key(title: str) -> frozenset[str]:
+    """The identifying words, with "07/50" read as "/50": which copy doesn't matter."""
+    return words(re.sub(r"\b\d{1,3}\s?/\s?(\d{1,3})\b", r" \1 ", title))
+
+
+def _same(a: frozenset[str], b: frozenset[str]) -> bool:
+    return bool(a and b) and len(a & b) / len(a | b) >= SAME_CARD
+
+
+def history(con, limit: int = 12) -> list[dict]:
+    """Cards that have sold more than once, with every price: the start of a price trend."""
+    groups: list[dict] = []
+    for row in with_calls(con):   # newest first
+        key = card_key(row["title"])
+        group = next((g for g in groups if _same(key, g["key"])), None)
+        if group is None:
+            group = {"key": key, "title": row["title"], "image": row["image"],
+                     "item_id": row["item_id"], "sales": []}
+            groups.append(group)
+        group["sales"].append(row)
+    out = []
+    for g in groups:
+        if len(g["sales"]) < 2:
+            continue
+        totals = [s["total"] for s in reversed(g["sales"])]   # oldest first
+        out.append({
+            "title": g["title"], "image": g["image"], "n": len(totals), "prices": totals[-12:],
+            "last": totals[-1], "low": min(totals), "high": max(totals),
+            "typical": round(statistics.median(totals), 2),
+            "last_at": datetime.fromtimestamp(g["sales"][0]["sold_at"], config.TZ).isoformat(
+                timespec="minutes"),
+            "url": f"https://www.ebay.com/itm/{g['item_id']}"})
+    out.sort(key=lambda g: g["last_at"], reverse=True)
+    out.sort(key=lambda g: -g["n"])
+    return out[:limit]
+
+
+def last_sold(rows: list[dict], title: str, item_id: str = "") -> dict | None:
+    """The latest recorded sale of the same card as this title, and how many there are."""
+    key = card_key(title)
+    same = [r for r in rows if r["item_id"] != item_id and _same(key, card_key(r["title"]))]
+    if not same:
+        return None
+    return {"total": same[0]["total"], "price": same[0]["price"], "n": len(same),
+            "at": datetime.fromtimestamp(same[0]["sold_at"], config.TZ).date().isoformat()}
 
 
 def search(con, query: str, limit: int = 25) -> list[dict]:

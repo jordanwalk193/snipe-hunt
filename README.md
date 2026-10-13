@@ -27,6 +27,11 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Keeps the inventory current** from your eBay and Gixen emails (optional, read-only).
 - **Shows your Gixen snipes** next to its own picks, so you can see which good auctions have no snipe yet (optional, read-only).
 - **Hunts for what slipped through the cracks**: price mistakes on Buy It Now listings, cards hidden by a misspelled or thin title, and auctions about to end with nobody watching. Each one is labelled on the dashboard and leads the phone alert.
+- **Finds cards listed without the player's name**: it learns your player's card numbers from the listings it has seen ("2020 Bowman Draft BD-57"), searches for those, and keeps the ones that leave the name out. Nobody searching for the player sees them.
+- **Watches for sellers who blink**: a Buy It Now cut by 15% or more, or a card that ended unsold and came back. No Claude cost.
+- **Gives two bids for every auction**: the cheapskate max, and a "to win" bid at about the going rate, for the card you would rather own than steal. The scorecard shows how each would have done.
+- **Has a fast lane for price mistakes** (off until you turn it on): every few minutes it checks brand-new Buy It Now listings and scores only the ones worth a look.
+- **Keeps a price history per card**: every card it has seen sell more than once, with the trend, and "same card last sold for" on each pick.
 - **Ranks the rarest cards for sale**: the ten lowest print runs on eBay right now (1/1s, then /5, /10 and so on), read from the listing titles on every search at no Claude cost.
 - **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes, and what the week's auctions sold for.
 - **Shows what it costs.** Every Claude call's cost is added up per day and month and shown on the dashboard.
@@ -38,6 +43,8 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 ![Sold prices the bot recorded itself, and how its picks turned out against them](docs/sold.png)
 
 ![The rarest cards for sale right now, next to the Top 10 deals and the top pick (demo data)](docs/rarest.png)
+
+![Price drops and relists, price history, the "to win" bid and the fast-lane tag (demo data)](docs/moves.png)
 </p>
 
 ## Try it in two minutes
@@ -46,8 +53,7 @@ Demo mode serves made-up data, so you can see the dashboard before you have any 
 
 ```
 git clone https://github.com/jordanwalk193/snipe-hunt && cd snipe-hunt
-docker build -t snipe-hunt .
-docker run -d -p 8766:8766 -e SNIPEHUNT_DEMO=1 -e API_TOKEN=demo snipe-hunt
+docker compose -f docker-compose.demo.yml up -d
 ```
 
 Then add the [Home Assistant integration](#home-assistant-dashboard) with the address `http://<this machine>:8766` and the token `demo`.
@@ -181,7 +187,11 @@ Watch the dashboard's cost sensors for the first day before leaving it running.
 
 **Does it work for football, basketball, hockey, Pokémon?** The searching and filtering work for any name. Set `EBAY_CATEGORY` if your cards aren't in Sports Trading Card Singles, and fill in `sport` and the word lists in your profile. It has only been run for real on one baseball player so far.
 
+**What is the fast lane and what does it cost?** A badly mispriced Buy It Now can be gone in minutes, long before the hourly search. Set `FAST_LANE_MINUTES=10` in `.env` and the bot makes one extra eBay search that often for the newest fixed-price listings. A listing it has never seen goes to Claude only when it is worth a look: numbered to 99 or fewer, an autograph, graded, an unclear title, asking $15 or more, or priced under a recorded sale of the same card. At most 12 listings a call and 30 calls a day, so the ceiling is a few dollars a day and most runs cost nothing. Everything else waits for the hourly run.
+
 **Do I need Home Assistant?** For the dashboard, yes. Alerts alone work through ntfy without it.
+
+**How little do I have to set up for another player?** A name, a sport and a few team words: see [`examples/profile.minimal.toml`](examples/profile.minimal.toml), a football quarterback in fifteen lines. Misspellings, searches and card numbers are worked out from there.
 
 **Can it follow more than one player?** One player per bot. Run a second copy with its own home folder and port for another.
 

@@ -47,8 +47,9 @@ CREATE TABLE IF NOT EXISTS mail_events (
 
 PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
 # Added to `seen` after the first release, so sales.py can look up closed auctions.
+# `price` and `seller` came later still, for price drops and relists (watch.py).
 SEEN_ADDED = {"is_auction": "INTEGER", "end_ts": "INTEGER", "shipping": "REAL",
-              "closed_at": "INTEGER"}
+              "closed_at": "INTEGER", "price": "REAL", "seller": "TEXT"}
 
 
 def connect() -> sqlite3.Connection:
@@ -71,15 +72,17 @@ def _dropped(old: float | None, new: float) -> bool:
 
 
 def touch(con, item_id: str, title: str, is_auction: bool | None = None,
-          end_ts: float | None = None, shipping: float | None = None) -> None:
+          end_ts: float | None = None, shipping: float | None = None,
+          price: float | None = None, seller: str | None = None) -> None:
     now = int(time.time())
     con.execute(
-        "INSERT INTO seen (item_id, title, first_seen, last_seen, is_auction, end_ts, shipping)"
-        " VALUES (?,?,?,?,?,?,?) "
+        "INSERT INTO seen (item_id, title, first_seen, last_seen, is_auction, end_ts, shipping,"
+        " price, seller) VALUES (?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(item_id) DO UPDATE SET last_seen=excluded.last_seen, "
-        "is_auction=excluded.is_auction, end_ts=excluded.end_ts, shipping=excluded.shipping",
+        "is_auction=excluded.is_auction, end_ts=excluded.end_ts, shipping=excluded.shipping, "
+        "price=excluded.price, seller=excluded.seller",
         (item_id, title, now, now, None if is_auction is None else int(is_auction),
-         None if end_ts is None else int(end_ts), shipping),
+         None if end_ts is None else int(end_ts), shipping, price, seller),
     )
 
 
