@@ -26,7 +26,7 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Watches limited drops.** A daily check for Topps Now and other print-to-order cards of your player, and a weekly check of new product checklists.
 - **Keeps the inventory current** from your eBay and Gixen emails (optional, read-only).
 - **Shows your Gixen snipes** next to its own picks, so you can see which good auctions have no snipe yet (optional, read-only).
-- **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes.
+- **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes, and what the week's auctions sold for.
 - **Shows what it costs.** Every Claude call's cost is added up per day and month and shown on the dashboard.
 
 <p>
@@ -181,7 +181,17 @@ Watch the dashboard's cost sensors for the first day before leaving it running.
 
 **Can it follow more than one player?** One player per bot. Run a second copy with its own home folder and port for another.
 
-**How good are the prices?** They get better the longer it runs. eBay blocks its sold-listings pages, so at first most prices are Claude's estimate, with a web lookup for the dearer cards. But the bot also records the final bid of every auction for your player that it saw close (one free eBay API call each, kept for 180 days), and shows Claude the sales that look like the card being scored. Each pick says whether its max came from real sales or an estimate. Only auctions are recorded: a Buy It Now that sold may have gone for a lower accepted offer, so it isn't counted. Treat the prices as a well-informed second opinion, and check anything expensive yourself.
+**How good are the prices?** They get better the longer it runs. eBay blocks its sold-listings pages, so at first most prices are Claude's estimate, with a web lookup for the dearer cards. But the bot also records the final bid of every auction for your player that it saw close (one free eBay API call each, kept for 180 days), and shows Claude the sales that look like the card being scored. Each pick says whether its max came from real sales or an estimate. Only auctions are recorded: a Buy It Now that sold may have gone for a lower accepted offer, so it isn't counted. Treat the prices as a well-informed second opinion, and check anything expensive yourself. Once enough of its picks have sold, the bot also tells Claude how far off its going rates have been running, so the estimates correct themselves.
+
+**Can I look up a price myself?** Yes. `python -m snipehunt sold gold refractor /50` lists every recorded sale with those words in the title, with the range and the typical price. With no words it lists the latest sales.
+
+```
+$ docker compose exec snipe-hunt python -m snipehunt sold gold refractor
+2026-10-11 | $41.00 +4.99 ship, 14 bids | 2023 Topps Chrome Sam Example Gold Refractor /50 #45 RC
+2026-10-04 | $36.50 +1.25 ship, 9 bids | 2023 Topps Chrome Sam Example Gold Refractor /50 #45
+
+2 sales · $37.75 to $45.99 with shipping · typical $41.87
+```
 
 ## License
 

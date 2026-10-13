@@ -143,10 +143,10 @@ def inventory_for_scoring() -> str:
 
 
 def build_prompt(items: list[Listing], lookups: int = 8,
-                 sold: list[dict] | None = None) -> str:
+                 sold: list[dict] | None = None, track: str = "") -> str:
     who = profile.get()
     return PROMPT.format(
-        sold_rule=SOLD_RULE if sold else "",
+        sold_rule=(SOLD_RULE if sold else "") + track,
         sold=SOLD.format(lines=sales.lines(sold)) if sold else "",
         app=who.app_name, collector=who.collector, player=who.described,
         name=who.player,
@@ -241,7 +241,8 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
     `on_batch(batch, batch_picks)` runs after each batch so the caller can
     save progress. A batch that fails ends the run early; what was scored
     before it is kept and the rest waits for the next hourly run. With `con`,
-    each batch is shown what similar cards sold for (see sales.py).
+    each batch is shown what similar cards sold for, and how far off the going
+    rates have been running (see sales.py).
     """
     items = sorted(items, key=lambda i: (not i.is_auction, i.end_time or "9"))
     # Sold-price lookups are close to half of what a run costs; 0 turns them off.
@@ -253,8 +254,10 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
         by_id = {i.item_id: i for i in batch}
         try:
             sold = sales.relevant(con, batch) if con is not None else []
+            track = sales.track_record(con) if con is not None else ""
             reply = extract_json(ask_claude(
-                build_prompt(batch, lookups, sold), tools=WEB_TOOLS if lookups else ""))
+                build_prompt(batch, lookups, sold, track),
+                tools=WEB_TOOLS if lookups else ""))
         except Exception as exc:
             if not scored:
                 raise

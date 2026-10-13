@@ -98,7 +98,6 @@ def test_only_sales_of_similar_cards_are_offered_for_a_listing():
 
 
 def test_the_scoring_prompt_shows_sold_prices_only_when_there_are_some():
-    config.PREFERENCES.write_text("Cheap and odd-cent.\n")
     item = listing("9", "Sam Example 2023 Topps Chrome Refractor #45")
     assert "sold prices seen" not in score.build_prompt([item])
     prompt = score.build_prompt([item], sold=[{
@@ -141,3 +140,39 @@ def test_the_dashboard_gets_recent_sales_and_how_the_picks_turned_out():
     assert view["sold"][0]["call"] == {"tier": "fire", "max": 12.12, "value": 15.0,
                                        "under_max": True}
     assert view["sold"][0]["total"] == 12.0 and view["sold"][2]["call"] is None
+
+
+def sale(con, item_id, title, price, value=None, max_bid=None, ago=3600):
+    con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                "VALUES (?,?,?,?,?,?)", (item_id, title, price, 0.0, 3, NOW - ago))
+    if max_bid is not None:
+        db.save_pick(con, {"item_id": item_id, "tier": "green", "max": max_bid, "value": value})
+
+
+def test_scoring_is_told_when_its_going_rates_have_been_running_off():
+    con = db.connect()
+    for n in range(7):   # every one sold for half again what the bot thought
+        sale(con, str(n), f"card {n}", 15.0, value=10.0, max_bid=6.06, ago=n)
+    assert sales.track_record(con) == ""             # too few to say anything
+    sale(con, "7", "card 7", 15.0, value=10.0, max_bid=6.06)
+    sale(con, "8", "no pick on this one", 99.0)
+    line = sales.track_record(con)
+    assert "last 8 picks" in line and "50% more" in line
+    item = listing("9", "Sam Example 2023 Topps Chrome Refractor #45")
+    assert line in score.build_prompt([item], track=line)
+    con.execute("DELETE FROM sales")
+    for n in range(8):   # close enough: nothing worth a line in a paid prompt
+        sale(con, str(n), f"card {n}", 10.5, value=10.0, max_bid=6.06, ago=n)
+    assert sales.track_record(con) == ""
+
+
+def test_price_check_finds_sales_by_the_words_in_the_title():
+    con = db.connect()
+    sale(con, "1", "2023 Topps Chrome Sam Example Gold Refractor /50 #45", 40.0)
+    sale(con, "2", "2023 Topps Chrome Sam Example Gold Refractor /50 #45 PSA 10", 90.0, ago=60)
+    sale(con, "3", "2023 Topps Chrome Sam Example Refractor #45", 4.0)
+    assert [r["item_id"] for r in sales.search(con, "gold /50")] == ["2", "1"]
+    text = sales.price_check(con, "Gold Refractor")
+    assert "2 sales · $40.00 to $90.00 with shipping · typical $65.00" in text
+    assert "No sold prices on record for 'superfractor'. 3 sales" in sales.price_check(
+        con, "superfractor")

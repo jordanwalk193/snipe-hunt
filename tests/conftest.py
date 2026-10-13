@@ -18,5 +18,7 @@ def isolated_home(tmp_path, monkeypatch):
         monkeypatch.setattr(config, name, value)
     (data / "inventory.csv").write_text((config.EXAMPLES / "inventory.example.csv").read_text())
     (data / "wantlist.md").write_text((config.EXAMPLES / "wantlist.example.md").read_text())
+    (data / "preferences.md").write_text(
+        (config.EXAMPLES / "preferences.example.md").read_text())
     monkeypatch.setattr(config, "_cache", dict(config.DEFAULTS))
     monkeypatch.setattr(profile, "_cache", profile.parse(EXAMPLE.read_text()))

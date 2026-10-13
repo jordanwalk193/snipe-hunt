@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
-from . import config, db, inventory, profile, settings
+from . import config, db, inventory, profile, sales, settings
 from .notify import TIER_ICON, TIER_ORDER
 from .score import ask_claude
 
@@ -142,6 +142,32 @@ def _pick_line(p: dict) -> str:
             f"({p.get('max_basis', 'estimate')}) · item `{p['item_id']}`")
 
 
+def sold_section(con, since: datetime, top: int = 5) -> list[str]:
+    """What closed auctions went for this week, and how the bot's calls on them did."""
+    rows = sales.with_calls(con, since.timestamp())
+    md = ["", f"## What sold this week ({len(rows)} auctions)"]
+    if not rows:
+        return md + ["- No watched auction closed with bids this week."]
+    for r in sorted(rows, key=lambda r: -r["price"])[:top]:
+        call = r["call"]
+        note = "" if not call else (
+            f" · bot's max {call['max']:.2f}: "
+            + ("under it" if call["under_max"] else "went over"))
+        md.append(f"- [{r['title']}](https://www.ebay.com/itm/{r['item_id']}) · "
+                  f"**{_money(r['price'])}**"
+                  + (f" · {sales.bid_count(r['bids'])}" if r["bids"] else "") + note)
+    card = sales.scorecard(rows)
+    if card["calls"]:
+        line = (f"- The bot had picked {card['calls']} of these: {card['under_max']} closed "
+                f"at or under its max, {card['over_max']} went over.")
+        if card["value_bias_pct"] is not None and card["valued"] >= 3:
+            way = "above" if card["value_bias_pct"] > 0 else "below"
+            line += (f" Final prices ran {abs(card['value_bias_pct'])}% {way} "
+                     "its going rates.")
+        md.append(line)
+    return md
+
+
 def monthly_section() -> str:
     today = datetime.now(config.TZ).strftime("%Y-%m-%d")
     who = profile.get()
@@ -197,6 +223,7 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
 
     md += ["", "## Best upcoming snipes"]
     md += [_pick_line(p) for p in snipes] or ["- None on the board right now."]
+    md += sold_section(con, since)
 
     if releases is not None:
         md += ["", "## New releases to watch"]

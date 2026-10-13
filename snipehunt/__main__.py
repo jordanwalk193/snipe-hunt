@@ -3,6 +3,9 @@
   python -m snipehunt init     copy the example profile, inventory and lists into data/
   python -m snipehunt check    show what is configured (never prints secrets)
   python -m snipehunt serve    run the API and the scheduler (what the container runs)
+  python -m snipehunt sold gold refractor /50
+                               price check: what cards with those words in the
+                               title sold for, from the bot's own record
 
 Set SNIPEHUNT_DEMO=1 to serve made-up data instead: a way to see the dashboard
 before you have eBay or Claude keys.
@@ -15,7 +18,7 @@ import shutil
 import sys
 import threading
 
-from . import api, config, profile, scheduler
+from . import api, config, db, profile, sales, scheduler
 
 STARTERS = {"profile.example.toml": config.PROFILE, "inventory.example.csv": config.INVENTORY,
             "wantlist.example.md": config.WANTLIST, "preferences.example.md": config.PREFERENCES}
@@ -51,12 +54,23 @@ def serve() -> None:
     api.serve()
 
 
+def sold(words: list[str]) -> None:
+    con = db.connect()
+    if words:
+        print(sales.price_check(con, " ".join(words)))
+    else:
+        latest = sales.search(con, "", limit=20)
+        print(sales.lines(latest) if latest else "No sold prices on record yet. The bot "
+              "records one each time an auction it has seen closes with bids.")
+
+
 def main() -> None:
     commands = {"init": init, "check": check, "serve": serve}
-    if len(sys.argv) != 2 or sys.argv[1] not in commands:
+    name, rest = (sys.argv[1:2] or [""])[0], sys.argv[2:]
+    if name not in (*commands, "sold") or (rest and name != "sold"):
         sys.exit(__doc__)
     try:
-        commands[sys.argv[1]]()
+        sold(rest) if name == "sold" else commands[name]()
     except (config.ConfigError, profile.ProfileError) as exc:
         sys.exit(f"error: {exc}")
 

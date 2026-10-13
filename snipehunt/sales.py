@@ -27,6 +27,9 @@ KEEP_DAYS = 180
 PER_LISTING = 3         # sold prices offered to Claude for one listing
 MAX_LINES = 60          # and for one scoring call, because every line is paid for
 MIN_OVERLAP = 0.5
+TRACK_CALLS = 30        # the latest calls the scoring prompt's track record looks at
+TRACK_MIN = 8           # fewer than this says nothing yet
+TRACK_OFF = 10          # percent the going rate has to be off before it is mentioned
 # Words that say nothing about which card it is.
 FILLER = {"the", "and", "card", "cards", "baseball", "football", "basketball", "hockey",
           "mlb", "nfl", "nba", "nhl", "rookie", "rc", "sp", "free", "shipping", "ship",
@@ -139,55 +142,110 @@ def relevant(con, items: list[Listing]) -> list[dict]:
     return sorted(chosen.values(), key=lambda s: -s["sold_at"])[:MAX_LINES]
 
 
+def bid_count(bids: int) -> str:
+    return "1 bid" if bids == 1 else f"{bids} bids"
+
+
 def lines(sales: list[dict]) -> str:
     """The sales as the scoring prompt shows them, one per line."""
     out = []
     for s in sales:
         day = datetime.fromtimestamp(s["sold_at"], timezone.utc).astimezone(config.TZ)
         ship = "ship ?" if s["shipping"] is None else f"+{s['shipping']:.2f} ship"
-        bids = f", {s['bids']} bids" if s["bids"] else ""
+        bids = f", {bid_count(s['bids'])}" if s["bids"] else ""
         out.append(f"{day:%Y-%m-%d} | ${s['price']:.2f} {ship}{bids} | {s['title']}")
     return "\n".join(out)
 
 
-def market(con, now: datetime, limit: int = 40) -> dict:
-    """For the dashboard: the latest sold prices, and how the bot's own calls turned out.
+def with_calls(con, since: float = 0) -> list[dict]:
+    """Sales with the pick the bot made on the same auction, if any. Newest first."""
+    out = []
+    for row in con.execute(
+            "SELECT s.item_id, s.title, s.price, s.shipping, s.bids, s.sold_at, s.image, p.data "
+            "FROM sales s LEFT JOIN picks p USING (item_id) WHERE s.sold_at>=? "
+            "ORDER BY s.sold_at DESC", (since,)):
+        row = dict(row)
+        pick = json.loads(row.pop("data")) if row["data"] else None
+        row["total"] = round(row["price"] + (row["shipping"] or 0), 2)
+        row["call"] = None
+        if pick and pick.get("max") is not None:
+            value = pick.get("value")
+            row["call"] = {"tier": pick.get("tier"), "max": pick["max"], "value": value,
+                           "under_max": row["price"] <= pick["max"]}
+            # how far the real delivered price was from the going rate; + means it sold higher
+            row["off"] = (row["total"] - value) / value if value else None
+        out.append(row)
+    return out
+
+
+def scorecard(rows: list[dict]) -> dict:
+    """How the calls among these sales turned out.
 
     A call is a pick whose auction then sold. It is "under the max" when the
     final bid was at or below the max the bot gave, so a snipe at that max
     would have been in the running.
     """
-    rows = [dict(r) for r in con.execute(
-        "SELECT s.item_id, s.title, s.price, s.shipping, s.bids, s.sold_at, s.image, p.data "
-        "FROM sales s LEFT JOIN picks p USING (item_id) ORDER BY s.sold_at DESC")]
-    week = now.timestamp() - 7 * 86400
-    sold, under, over, gaps = [], 0, 0, []
-    for row in rows:
-        pick = json.loads(row.pop("data")) if row["data"] else None
-        total = round(row["price"] + (row["shipping"] or 0), 2)
-        call = None
-        if pick and pick.get("max") is not None:
-            won = row["price"] <= pick["max"]
-            under, over = under + won, over + (not won)
-            if pick.get("value"):
-                gaps.append(abs(total - pick["value"]) / pick["value"])
-            call = {"tier": pick.get("tier"), "max": pick["max"], "value": pick.get("value"),
-                    "under_max": won}
-        if len(sold) < limit:
-            sold.append({
-                "item_id": row["item_id"], "title": row["title"], "price": row["price"],
-                "shipping": row["shipping"], "total": total, "bids": row["bids"],
-                "sold_at": datetime.fromtimestamp(row["sold_at"], config.TZ).isoformat(
-                    timespec="minutes"),
-                "image": row["image"], "url": f"https://www.ebay.com/itm/{row['item_id']}",
-                "call": call})
+    made = [r for r in rows if r["call"]]
+    under = sum(r["call"]["under_max"] for r in made)
+    off = [r["off"] for r in made if r["off"] is not None]
     return {
-        "count": len(rows), "count_7d": sum(r["sold_at"] >= week for r in rows),
-        "calls": under + over, "under_max": under, "over_max": over,
+        "calls": len(made), "under_max": under, "over_max": len(made) - under,
         # how far the going-rate guess was from the real final price, typically
-        "value_gap_pct": round(100 * statistics.median(gaps)) if gaps else None,
-        "sold": sold,
+        "value_gap_pct": round(100 * statistics.median(abs(o) for o in off)) if off else None,
+        # and which way: above zero means cards sold for more than the guess
+        "value_bias_pct": round(100 * statistics.median(off)) if off else None,
+        "valued": len(off),
     }
+
+
+def track_record(con) -> str:
+    """One line for the scoring prompt when the going rates have been running off."""
+    recent = [r for r in with_calls(con) if r["call"] and r["off"] is not None][:TRACK_CALLS]
+    if len(recent) < TRACK_MIN:
+        return ""
+    bias = round(100 * statistics.median(r["off"] for r in recent))
+    if abs(bias) < TRACK_OFF:
+        return ""
+    way = "more" if bias > 0 else "less"
+    return (f"- Your track record: of your last {len(recent)} picks whose auctions then sold, "
+            f"the real final price with shipping was typically {abs(bias)}% {way} than the "
+            f"\"value\" you gave. Correct for that when you estimate a going rate.\n")
+
+
+def market(con, now: datetime, limit: int = 40) -> dict:
+    """For the dashboard: the latest sold prices, and how the bot's own calls turned out."""
+    rows = with_calls(con)
+    week = now.timestamp() - 7 * 86400
+    sold = [{
+        "item_id": r["item_id"], "title": r["title"], "price": r["price"],
+        "shipping": r["shipping"], "total": r["total"], "bids": r["bids"],
+        "sold_at": datetime.fromtimestamp(r["sold_at"], config.TZ).isoformat(
+            timespec="minutes"),
+        "image": r["image"], "url": f"https://www.ebay.com/itm/{r['item_id']}",
+        "call": r["call"]} for r in rows[:limit]]
+    return {"count": len(rows), "count_7d": sum(r["sold_at"] >= week for r in rows),
+            **scorecard(rows), "sold": sold}
+
+
+def search(con, query: str, limit: int = 25) -> list[dict]:
+    """Sales whose titles have every word of the query, newest first."""
+    wanted = re.findall(r"[a-z0-9/#-]+", query.lower())
+    rows = [r for r in with_calls(con)
+            if all(w in r["title"].lower() for w in wanted)]
+    return rows[:limit]
+
+
+def price_check(con, query: str) -> str:
+    """What the ledger says about a card, as text for the command line."""
+    found = search(con, query)
+    if not found:
+        return (f"No sold prices on record for {query!r}. "
+                f"{count(con)} sales are on record in all.")
+    prices = sorted(r["total"] for r in found)
+    out = [lines(found), "",
+           f"{len(found)} sales · ${prices[0]:.2f} to ${prices[-1]:.2f} with shipping · "
+           f"typical ${statistics.median(prices):.2f}"]
+    return "\n".join(out)
 
 
 def count(con, since: float = 0) -> int:

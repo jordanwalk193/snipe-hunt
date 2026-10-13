@@ -153,3 +153,17 @@ def test_first_run_sends_one_welcome_instead_of_a_flood(con, monkeypatch):
                          ["AUCTION"], 0, "2026-10-13T21:00-04:00", "s", "u", None))
     assert jobs.hourly().endswith("1 picks, 1 alerted")           # only the new one
     assert len(sent) == 2 and sent[1] == "Snipe Hunt: 1 steal"
+
+
+def test_the_report_says_what_sold_and_how_the_calls_did(con):
+    assert "No watched auction closed with bids this week." in report.build(con, NOW)[0]
+    for item_id, price, ago in (("1", 40.0, 1), ("2", 9.0, 2), ("3", 500.0, 30)):
+        con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                    "VALUES (?,?,?,?,?,?)", (item_id, "Gold Refractor " + item_id, price, 1.0,
+                                             6, NOW.timestamp() - ago * 86400))
+    db.save_pick(con, pick(item_id="1", max=25.25, value=30.0))
+    text, _ = report.build(con, NOW)
+    assert "## What sold this week (2 auctions)" in text       # last month's isn't this week's
+    assert ("- [Gold Refractor 1](https://www.ebay.com/itm/1) · **$40.00** · 6 bids · "
+            "bot's max 25.25: went over") in text
+    assert "The bot had picked 1 of these: 0 closed at or under its max, 1 went over." in text

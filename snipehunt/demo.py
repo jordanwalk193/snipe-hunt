@@ -84,7 +84,7 @@ def _market(now: datetime) -> dict:
             "call": call and {"tier": call[0], "max": call[1], "value": float(call[2]),
                               "under_max": price <= call[1]}})
     return {"count": 212, "count_7d": 41, "calls": 31, "under_max": 22, "over_max": 9,
-            "value_gap_pct": 14, "sold": sold}
+            "value_gap_pct": 14, "value_bias_pct": 6, "valued": 28, "sold": sold}
 
 
 def build(now: datetime | None = None) -> dict:
