@@ -61,6 +61,8 @@ def connect() -> sqlite3.Connection:
     for name, kind in SEEN_ADDED.items():
         if name not in have:
             con.execute(f"ALTER TABLE seen ADD COLUMN {name} {kind}")
+    if "image" not in {row["name"] for row in con.execute("PRAGMA table_info(sales)")}:
+        con.execute("ALTER TABLE sales ADD COLUMN image TEXT")
     return con
 
 

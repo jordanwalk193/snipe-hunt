@@ -20,7 +20,7 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Finds steals.** Auctions ending soon, new Buy It Now and Best Offer listings, autos, patches, numbered cards, and typo listings other buyers miss.
 - **Knows what you own.** It skips cards already in `inventory.csv` unless a copy is clearly better.
 - **Sets a max.** Each pick comes with a snipe price where winning still beats recent sales, shipping counted, and says whether that came from real sales or an estimate.
-- **Learns what cards sell for.** After every auction it has seen closes, it asks eBay what the final bid was and keeps it. The next time the same card comes up, the price comes from that sale and not from a guess.
+- **Learns what cards sell for.** After every auction it has seen closes, it asks eBay what the final bid was and keeps it. The next time the same card comes up, the price comes from that sale and not from a guess. The dashboard lists the sales and keeps score: how many of its picks closed under the max it gave, and how far its going rate was from the real price.
 - **Rates the deal.** One to five stars for how far under the going rate you would pay, shipping included: the asking price for Buy It Now, the max for an auction. Five stars is half price or better.
 - **Alerts your phone** through Home Assistant or [ntfy](https://ntfy.sh), with quiet hours that urgent auctions can break through. Alerts are optional: without them, picks still reach the dashboard.
 - **Watches limited drops.** A daily check for Topps Now and other print-to-order cards of your player, and a weekly check of new product checklists.
@@ -32,6 +32,8 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 <p>
 <img src="docs/picks.png" width="62%" alt="Every live pick with filters, deal ratings and the snipe record">
 <img src="docs/phone.png" width="24%" alt="The dashboard on a phone">
+
+![Sold prices the bot recorded itself, and how its picks turned out against them](docs/sold.png)
 </p>
 
 ## Try it in two minutes

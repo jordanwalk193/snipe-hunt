@@ -12,7 +12,7 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import config, db, gixen, inventory, profile, report, scheduler, settings
+from . import config, db, gixen, inventory, profile, report, sales, scheduler, settings
 from . import usage
 from .notify import TIER_ORDER
 
@@ -282,6 +282,7 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "collection": collection(rows, now),
         "pipeline": pipeline(rows, picks),
         "record": record(con, now),
+        "market": sales.market(con, now),
         "wantlist": wantlist(),
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),

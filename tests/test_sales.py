@@ -87,7 +87,8 @@ def test_only_sales_of_similar_cards_are_offered_for_a_listing():
             ("2023 Topps Chrome Sam Example Gold Refractor /50 #45 RC", 40.0),
             ("2021 Bowman Draft Sam Example 1st Bowman Auto PSA 10", 150.0),
             ("2023 Topps Chrome Sam Example Refractor #45", 4.0)]):
-        con.execute("INSERT INTO sales VALUES (?,?,?,?,?,?)",
+        con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                    "VALUES (?,?,?,?,?,?)",
                     (str(n), title, price, 1.0, 3, int(NOW) - n))
     found = sales.relevant(con, [listing("9", "Sam Example 2023 Topps Chrome Refractor #45 RC")])
     assert [s["price"] for s in found] == [40.0, 4.0]
@@ -120,3 +121,23 @@ def test_an_older_database_gains_the_new_columns(tmp_path):
     con = db.connect()
     db.touch(con, "1", "x", True, NOW, 2.0)
     assert con.execute("SELECT end_ts, shipping FROM seen").fetchone()[:] == (int(NOW), 2.0)
+
+
+def test_the_dashboard_gets_recent_sales_and_how_the_picks_turned_out():
+    from datetime import datetime
+    con = db.connect()
+    now = datetime.fromtimestamp(NOW, config.TZ)
+    for item_id, price, sold_at in (("1", 10.0, NOW - 3600), ("2", 30.0, NOW - 7200),
+                                    ("3", 5.0, NOW - 30 * 86400)):
+        con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                    "VALUES (?,?,?,?,?,?)", (item_id, "card " + item_id, price, 2.0, 3, sold_at))
+    db.save_pick(con, {"item_id": "1", "tier": "fire", "max": 12.12, "value": 15.0})
+    db.save_pick(con, {"item_id": "2", "tier": "green", "max": 20.2, "value": 40.0})
+    view = sales.market(con, now)
+    assert (view["count"], view["count_7d"]) == (3, 2)
+    assert (view["calls"], view["under_max"], view["over_max"]) == (2, 1, 1)
+    assert view["value_gap_pct"] == 20      # $12 and $32 delivered against $15 and $40
+    assert [s["item_id"] for s in view["sold"]] == ["1", "2", "3"]
+    assert view["sold"][0]["call"] == {"tier": "fire", "max": 12.12, "value": 15.0,
+                                       "under_max": True}
+    assert view["sold"][0]["total"] == 12.0 and view["sold"][2]["call"] is None

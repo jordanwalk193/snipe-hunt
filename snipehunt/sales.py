@@ -10,7 +10,9 @@ Read-only, like the rest of the eBay code: this only ever reads one listing.
 """
 from __future__ import annotations
 
+import json
 import re
+import statistics
 import sys
 import time
 from datetime import datetime, timezone
@@ -71,7 +73,8 @@ def _outcome(raw: dict, now: float) -> tuple[str, dict]:
         if shipping is not None:
             break
     return "sold", {"price": price, "shipping": shipping, "end_ts": end_ts,
-                    "bids": raw.get("bidCount")}
+                    "bids": raw.get("bidCount"),
+                    "image": (raw.get("image") or {}).get("imageUrl")}
 
 
 def collect(con, client: EbayClient | None = None, now: float | None = None) -> int:
@@ -97,10 +100,10 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
         if kind == "sold":
             shipping = info["shipping"] if info["shipping"] is not None else row["shipping"]
             con.execute(
-                "INSERT OR REPLACE INTO sales (item_id, title, price, shipping, bids, sold_at)"
-                " VALUES (?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO sales (item_id, title, price, shipping, bids, sold_at,"
+                " image) VALUES (?,?,?,?,?,?,?)",
                 (row["item_id"], raw.get("title") or row["title"], info["price"],
-                 shipping, info["bids"], int(info["end_ts"])))
+                 shipping, info["bids"], int(info["end_ts"]), info["image"]))
             added += 1
         con.execute("UPDATE seen SET closed_at=? WHERE item_id=?", (int(now), row["item_id"]))
         con.commit()   # one at a time, so a dashboard button never waits on this loop
@@ -145,6 +148,46 @@ def lines(sales: list[dict]) -> str:
         bids = f", {s['bids']} bids" if s["bids"] else ""
         out.append(f"{day:%Y-%m-%d} | ${s['price']:.2f} {ship}{bids} | {s['title']}")
     return "\n".join(out)
+
+
+def market(con, now: datetime, limit: int = 40) -> dict:
+    """For the dashboard: the latest sold prices, and how the bot's own calls turned out.
+
+    A call is a pick whose auction then sold. It is "under the max" when the
+    final bid was at or below the max the bot gave, so a snipe at that max
+    would have been in the running.
+    """
+    rows = [dict(r) for r in con.execute(
+        "SELECT s.item_id, s.title, s.price, s.shipping, s.bids, s.sold_at, s.image, p.data "
+        "FROM sales s LEFT JOIN picks p USING (item_id) ORDER BY s.sold_at DESC")]
+    week = now.timestamp() - 7 * 86400
+    sold, under, over, gaps = [], 0, 0, []
+    for row in rows:
+        pick = json.loads(row.pop("data")) if row["data"] else None
+        total = round(row["price"] + (row["shipping"] or 0), 2)
+        call = None
+        if pick and pick.get("max") is not None:
+            won = row["price"] <= pick["max"]
+            under, over = under + won, over + (not won)
+            if pick.get("value"):
+                gaps.append(abs(total - pick["value"]) / pick["value"])
+            call = {"tier": pick.get("tier"), "max": pick["max"], "value": pick.get("value"),
+                    "under_max": won}
+        if len(sold) < limit:
+            sold.append({
+                "item_id": row["item_id"], "title": row["title"], "price": row["price"],
+                "shipping": row["shipping"], "total": total, "bids": row["bids"],
+                "sold_at": datetime.fromtimestamp(row["sold_at"], config.TZ).isoformat(
+                    timespec="minutes"),
+                "image": row["image"], "url": f"https://www.ebay.com/itm/{row['item_id']}",
+                "call": call})
+    return {
+        "count": len(rows), "count_7d": sum(r["sold_at"] >= week for r in rows),
+        "calls": under + over, "under_max": under, "over_max": over,
+        # how far the going-rate guess was from the real final price, typically
+        "value_gap_pct": round(100 * statistics.median(gaps)) if gaps else None,
+        "sold": sold,
+    }
 
 
 def count(con, since: float = 0) -> int:

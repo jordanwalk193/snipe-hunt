@@ -44,6 +44,19 @@ CARDS = [
     ("2023 Chrome Rookie #209", "In binder", 2.02, "RD"),
 ]
 SELLERS = ["cardbarn_consign", "topshelfbreaks", "dugout_deals", "rookie_row"]
+# (card, final bid, shipping, bids, hours ago, the bot's call as (tier, max, value) or None, colour)
+SOLD = [
+    ("2023 Chrome Rookie Auto Refractor /499", 38.00, 4.99, 14, 2, ("fire", 45.45, 62), "#c9a227"),
+    ("2022 Chrome Sapphire Prospects PSA 10", 36.00, 4.99, 15, 5, ("green", 30.30, 44), "#1e63c9"),
+    ("2023 Finest Purple Refractor /250 BGS 9.5", 18.50, 5.99, 10, 9, ("green", 20.20, 27), "#8e24aa"),
+    ("2023 Cosmic Chrome Rookie #151", 1.76, 4.99, 3, 13, None, "#d2452f"),
+    ("2021 Platinum Top Prospects Auto", 22.50, 4.99, 14, 20, ("fire", 25.25, 32), "#00897b"),
+    ("2023 Chrome Update Sepia Refractor RC", 3.75, 1.25, 5, 26, ("yellow", 4.04, 6), "#b0872c"),
+    ("2024 Chrome Green Geometric Refractor /99", 3.10, 4.99, 3, 31, None, "#2e9d57"),
+    ("2020 Bowman's Best Auto PSA 9", 46.01, 4.99, 15, 40, ("fire", 35.35, 55), "#b03a48"),
+    ("2023 Holiday Santa Hat variation SP", 2.25, 1.36, 4, 52, ("yellow", 3.03, 4.5), "#5d6d7e"),
+    ("2022 Bowman Chrome Prospects #BCP-20", 0.99, 1.10, 1, 70, None, "#546e7a"),
+]
 
 
 def _art(colour: str, label: str) -> str:
@@ -57,6 +70,21 @@ def _art(colour: str, label: str) -> str:
            f"<text x='60' y='148' font-family='Arial' font-size='15' font-weight='700' fill='#fff' "
            f"text-anchor='middle'>{label}</text></svg>")
     return "data:image/svg+xml;utf8," + quote(svg)
+
+
+def _market(now: datetime) -> dict:
+    sold = []
+    for n, (card, price, ship, bids, hours, call, colour) in enumerate(SOLD):
+        item_id = str(410000200003 + n * 6151)
+        sold.append({
+            "item_id": item_id, "title": card, "price": price, "shipping": ship,
+            "total": round(price + ship, 2), "bids": bids,
+            "sold_at": (now - timedelta(hours=hours)).isoformat(timespec="minutes"),
+            "image": _art(colour, "SOLD"), "url": f"https://www.ebay.com/itm/{item_id}",
+            "call": call and {"tier": call[0], "max": call[1], "value": float(call[2]),
+                              "under_max": price <= call[1]}})
+    return {"count": 212, "count_7d": 41, "calls": 31, "under_max": 22, "over_max": 9,
+            "value_gap_pct": 14, "sold": sold}
 
 
 def build(now: datetime | None = None) -> dict:
@@ -151,6 +179,7 @@ def build(now: datetime | None = None) -> dict:
                    "recent_losses": [{"title": "2023 Chrome Superfractor 1/1", "price": None,
                                       "date": (now - timedelta(days=1)).date().isoformat(),
                                       "seller": SELLERS[1]}]},
+        "market": _market(now),
         "wantlist": snapshot.wantlist(),
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": None,
