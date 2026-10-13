@@ -112,6 +112,7 @@ def build(now: datetime | None = None) -> dict:
             "auctions": sum(p["is_auction"] for p in picks),
             "buy_now": sum(not p["is_auction"] for p in picks),
             "fire": 3, "green": 3, "yellow": 3, "sales_based": 3, "held_overnight": 0,
+            "sold_prices": 212, "sold_prices_7d": 41,
             "searching": False, "skipped": 0, "last_report": None,
             "cost_today": 0.84, "calls_today": 19, "cost_month": 11.37,
             "need_snipe": [p["item_id"] for p in picks if p["is_auction"] and p["snipe"] is None

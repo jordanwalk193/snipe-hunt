@@ -20,6 +20,7 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Finds steals.** Auctions ending soon, new Buy It Now and Best Offer listings, autos, patches, numbered cards, and typo listings other buyers miss.
 - **Knows what you own.** It skips cards already in `inventory.csv` unless a copy is clearly better.
 - **Sets a max.** Each pick comes with a snipe price where winning still beats recent sales, shipping counted, and says whether that came from real sales or an estimate.
+- **Learns what cards sell for.** After every auction it has seen closes, it asks eBay what the final bid was and keeps it. The next time the same card comes up, the price comes from that sale and not from a guess.
 - **Rates the deal.** One to five stars for how far under the going rate you would pay, shipping included: the asking price for Buy It Now, the max for an auction. Five stars is half price or better.
 - **Alerts your phone** through Home Assistant or [ntfy](https://ntfy.sh), with quiet hours that urgent auctions can break through. Alerts are optional: without them, picks still reach the dashboard.
 - **Watches limited drops.** A daily check for Topps Now and other print-to-order cards of your player, and a weekly check of new product checklists.
@@ -178,7 +179,7 @@ Watch the dashboard's cost sensors for the first day before leaving it running.
 
 **Can it follow more than one player?** One player per bot. Run a second copy with its own home folder and port for another.
 
-**How good are the prices?** The max and the going rate come from Claude reading recent sold listings when it can, and estimating when it can't. Each pick says which. Treat them as a well-informed second opinion, and check anything expensive yourself.
+**How good are the prices?** They get better the longer it runs. eBay blocks its sold-listings pages, so at first most prices are Claude's estimate, with a web lookup for the dearer cards. But the bot also records the final bid of every auction for your player that it saw close (one free eBay API call each, kept for 180 days), and shows Claude the sales that look like the card being scored. Each pick says whether its max came from real sales or an estimate. Only auctions are recorded: a Buy It Now that sold may have gone for a lower accepted offer, so it isn't counted. Treat the prices as a well-informed second opinion, and check anything expensive yourself.
 
 ## License
 

@@ -20,6 +20,14 @@ CREATE TABLE IF NOT EXISTS seen (
     alerted_at     INTEGER
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS sales (
+    item_id   TEXT PRIMARY KEY,
+    title     TEXT,
+    price     REAL NOT NULL,
+    shipping  REAL,
+    bids      INTEGER,
+    sold_at   INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS picks (
     item_id     TEXT PRIMARY KEY,
     data        TEXT NOT NULL,
@@ -38,6 +46,9 @@ CREATE TABLE IF NOT EXISTS mail_events (
 """
 
 PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
+# Added to `seen` after the first release, so sales.py can look up closed auctions.
+SEEN_ADDED = {"is_auction": "INTEGER", "end_ts": "INTEGER", "shipping": "REAL",
+              "closed_at": "INTEGER"}
 
 
 def connect() -> sqlite3.Connection:
@@ -46,6 +57,10 @@ def connect() -> sqlite3.Connection:
     con = sqlite3.connect(config.SEEN_DB, timeout=30)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    have = {row["name"] for row in con.execute("PRAGMA table_info(seen)")}
+    for name, kind in SEEN_ADDED.items():
+        if name not in have:
+            con.execute(f"ALTER TABLE seen ADD COLUMN {name} {kind}")
     return con
 
 
@@ -53,12 +68,16 @@ def _dropped(old: float | None, new: float) -> bool:
     return old is not None and old > 0 and new <= old * (1 - PRICE_DROP)
 
 
-def touch(con, item_id: str, title: str) -> None:
+def touch(con, item_id: str, title: str, is_auction: bool | None = None,
+          end_ts: float | None = None, shipping: float | None = None) -> None:
     now = int(time.time())
     con.execute(
-        "INSERT INTO seen (item_id, title, first_seen, last_seen) VALUES (?,?,?,?) "
-        "ON CONFLICT(item_id) DO UPDATE SET last_seen=excluded.last_seen",
-        (item_id, title, now, now),
+        "INSERT INTO seen (item_id, title, first_seen, last_seen, is_auction, end_ts, shipping)"
+        " VALUES (?,?,?,?,?,?,?) "
+        "ON CONFLICT(item_id) DO UPDATE SET last_seen=excluded.last_seen, "
+        "is_auction=excluded.is_auction, end_ts=excluded.end_ts, shipping=excluded.shipping",
+        (item_id, title, now, now, None if is_auction is None else int(is_auction),
+         None if end_ts is None else int(end_ts), shipping),
     )
 
 

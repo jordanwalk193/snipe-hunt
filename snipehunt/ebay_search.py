@@ -1,7 +1,7 @@
 """eBay Browse API search for the player's cards.
 
-Read-only: this module only ever calls the search endpoint. It never bids,
-buys, makes offers or messages sellers.
+Read-only: this module only ever calls the search endpoint and reads single
+listings. It never bids, buys, makes offers or messages sellers.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from . import config, profile, settings
 
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+ITEM_URL = "https://api.ebay.com/buy/browse/v1/item/get_item_by_legacy_id"
 SCOPE = "https://api.ebay.com/oauth/api_scope"
 ALL_FORMATS = "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}"
 
@@ -122,6 +123,7 @@ class EbayClient:
 
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         """One HTTP call, retried with backoff on rate limits and 5xx."""
+        missing_ok = kwargs.pop("missing_ok", False)
         delay = 2.0
         for attempt in range(5):
             try:
@@ -132,6 +134,8 @@ class EbayClient:
                 print(f"ebay: {type(exc).__name__}, retry in {delay:.0f}s", file=sys.stderr)
             else:
                 if resp.status_code not in (429, 500, 502, 503, 504):
+                    if missing_ok and resp.status_code in (400, 404):
+                        return resp
                     if resp.status_code >= 400:
                         raise RuntimeError(
                             f"eBay {resp.status_code} for {url}: {resp.text[:300]}")
@@ -146,19 +150,28 @@ class EbayClient:
             delay *= 2
         raise RuntimeError("unreachable")
 
-    def search(self, q: str, flt: str, sort: str | None, limit: int = 100) -> list[dict]:
-        params = {"q": q, "category_ids": self.category, "filter": flt, "limit": limit}
-        if sort:
-            params["sort"] = sort
-        headers = {
+    def _headers(self) -> dict:
+        return {
             "Authorization": f"Bearer {self._token()}",
             "X-EBAY-C-MARKETPLACE-ID": self.marketplace,
             "X-EBAY-C-ENDUSERCTX": "contextualLocation=country%3DUS"
             + (f"%2Czip%3D{config.get('EBAY_ZIP')}" if config.get("EBAY_ZIP") else ""),
         }
+
+    def search(self, q: str, flt: str, sort: str | None, limit: int = 100) -> list[dict]:
+        params = {"q": q, "category_ids": self.category, "filter": flt, "limit": limit}
+        if sort:
+            params["sort"] = sort
         self.calls += 1
-        resp = self._request("GET", SEARCH_URL, params=params, headers=headers)
+        resp = self._request("GET", SEARCH_URL, params=params, headers=self._headers())
         return resp.json().get("itemSummaries", []) or []
+
+    def item(self, item_id: str) -> dict | None:
+        """One listing by its item number, ended or not. None once eBay has dropped it."""
+        self.calls += 1
+        resp = self._request("GET", ITEM_URL, params={"legacy_item_id": item_id},
+                             headers=self._headers(), missing_ok=True)
+        return resp.json() if resp.status_code == 200 else None
 
 
 def _money(node: dict | None) -> tuple[float | None, str]:

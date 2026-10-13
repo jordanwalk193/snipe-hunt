@@ -138,7 +138,7 @@ def test_first_run_sends_one_welcome_instead_of_a_flood(con, monkeypatch):
     monkeypatch.setitem(config.load(), "NTFY_URL", "https://ntfy.example/topic")
     monkeypatch.setattr(jobs.ebay_search, "search_all", lambda verbose=False: items)
 
-    def all_fire(fresh, verbose=False, on_batch=None):
+    def all_fire(fresh, verbose=False, on_batch=None, con=None):
         picks = [pick(item_id=i.item_id, total=2.0) for i in fresh]
         on_batch(fresh, picks)
         return picks, fresh

@@ -11,7 +11,7 @@ import sys
 from datetime import datetime
 
 from . import (config, db, ebay_search, gitsync, inventory_sync, limited_drops,
-               notify, ops, profile, report, score)
+               notify, ops, profile, report, sales, score)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -25,10 +25,20 @@ def hourly(dry_run: bool = False) -> str:
     first_run = con.execute("SELECT count(*) FROM seen").fetchone()[0] == 0
     listings = ebay_search.search_all(verbose=True)
     for item in listings:
-        db.touch(con, item.item_id, item.title)
+        db.touch(con, item.item_id, item.title, item.is_auction,
+                 datetime.fromisoformat(item.end_time).timestamp() if item.end_time else None,
+                 item.shipping)
     # Save now: if scoring fails, an open write here would block the failure
     # from being recorded, and these listings are still on eBay either way.
     con.commit()
+    if not dry_run:
+        try:   # what closed auctions went for; scoring prices from these
+            sold = sales.collect(con)
+            print(f"sales: {sold} new sold prices, {sales.count(con)} on record",
+                  file=sys.stderr)
+        except Exception as exc:   # bookkeeping must not stop the hunt
+            con.rollback()
+            print(f"sales: {exc}", file=sys.stderr)
     fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
 
     def save(batch, batch_picks) -> None:
@@ -42,7 +52,7 @@ def hourly(dry_run: bool = False) -> str:
             db.save_pick(con, p)
         con.commit()
 
-    picks, scored = (score.score(fresh, verbose=True, on_batch=save)
+    picks, scored = (score.score(fresh, verbose=True, on_batch=save, con=con)
                      if fresh else ([], []))
     if first_run and not dry_run:
         return _welcome(con, listings, picks)

@@ -15,7 +15,7 @@ import sys
 
 from datetime import datetime
 
-from . import config, profile, settings, usage
+from . import config, profile, sales, settings, usage
 from .ebay_search import Listing
 
 WEB_TOOLS = "WebFetch,WebSearch"
@@ -65,7 +65,7 @@ unless preferences.md asks for a different style. The max is the bid itself, \
 shipping not included, set so that winning AT the max plus shipping still \
 beats recent sales.
 {lookup_rule}
-- Set "value" to what this exact card (same parallel, serial and grade) has \
+{sold_rule}- Set "value" to what this exact card (same parallel, serial and grade) has \
 recently sold for, shipping included: the going rate, not your max. Use any \
 sold prices you looked up; when you have none, give your honest best estimate.
 - Auctions whose current price already exceeds your max are not steals; leave \
@@ -91,8 +91,18 @@ Best Refractor PSA 10", "tier": "fire|green|yellow", "max": 12.12, "max_basis": 
 === inventory.csv ===
 {inventory}
 
-=== listings (JSON lines) ===
+{sold}=== listings (JSON lines) ===
 {listings}
+"""
+
+SOLD_RULE = """- "sold prices seen" below are real eBay auction results this bot recorded \
+itself. When one is the same card (same set, parallel, serial and grade), \
+price from it: set max_basis to "sales", quote it in comps, and spend no \
+lookup on that card. A sale of a different parallel or grade is only a hint.
+"""
+SOLD = """=== sold prices seen (date | final bid, shipping | title) ===
+{lines}
+
 """
 
 
@@ -132,9 +142,12 @@ def inventory_for_scoring() -> str:
     return out.getvalue()
 
 
-def build_prompt(items: list[Listing], lookups: int = 8) -> str:
+def build_prompt(items: list[Listing], lookups: int = 8,
+                 sold: list[dict] | None = None) -> str:
     who = profile.get()
     return PROMPT.format(
+        sold_rule=SOLD_RULE if sold else "",
+        sold=SOLD.format(lines=sales.lines(sold)) if sold else "",
         app=who.app_name, collector=who.collector, player=who.described,
         name=who.player,
         lookup_rule=LOOKUPS.format(lookups=lookups) if lookups else NO_LOOKUPS,
@@ -221,13 +234,14 @@ def _pick_dict(item: Listing, raw: dict) -> dict | None:
     }
 
 
-def score(items: list[Listing], verbose: bool = False, on_batch=None
+def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
           ) -> tuple[list[dict], list[Listing]]:
     """Return (picks, listings that were actually scored).
 
     `on_batch(batch, batch_picks)` runs after each batch so the caller can
     save progress. A batch that fails ends the run early; what was scored
-    before it is kept and the rest waits for the next hourly run.
+    before it is kept and the rest waits for the next hourly run. With `con`,
+    each batch is shown what similar cards sold for (see sales.py).
     """
     items = sorted(items, key=lambda i: (not i.is_auction, i.end_time or "9"))
     # Sold-price lookups are close to half of what a run costs; 0 turns them off.
@@ -238,8 +252,9 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None
     for n, batch in enumerate(batches, 1):
         by_id = {i.item_id: i for i in batch}
         try:
+            sold = sales.relevant(con, batch) if con is not None else []
             reply = extract_json(ask_claude(
-                build_prompt(batch, lookups), tools=WEB_TOOLS if lookups else ""))
+                build_prompt(batch, lookups, sold), tools=WEB_TOOLS if lookups else ""))
         except Exception as exc:
             if not scored:
                 raise
