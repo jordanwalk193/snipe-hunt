@@ -74,6 +74,36 @@ def _art(colour: str, label: str) -> str:
     return "data:image/svg+xml;utf8," + quote(svg)
 
 
+# (card, print run, auto, price, shipping, hours until it ends or None, bids, colour)
+RAREST = [
+    ("2023 Chrome Update Rookie Auto Superfractor 1/1 PSA 9", 1, True, 2499.0, 0.0, None, 0, "#c9a227"),
+    ("2024 Dynasty Rookie Patch Auto Printing Plate 1/1", 1, True, 310.0, 4.99, 30.0, 12, "#263238"),
+    ("2022 Trinity Patch Auto Emerald 2/3", 3, True, 189.0, 5.25, None, 0, "#2e9d57"),
+    ("2023 Dynasty Rookie Patch Auto Silver 4/5", 5, True, 152.5, 4.99, 9.0, 21, "#78909c"),
+    ("2023 Cosmic Chrome Supernova Red /5", 5, False, 64.0, 4.99, 50.0, 6, "#d2452f"),
+    ("2023 Three and Two Quad Patch Auto 1/8", 8, True, 95.0, 4.5, None, 0, "#8e24aa"),
+    ("2024 Sterling Swings Relic Auto Blue 1/10", 10, True, 41.0, 4.99, 3.5, 9, "#1e63c9"),
+    ("2023 Chrome Sapphire Padparadscha /10 PSA 10", 10, False, 120.0, 0.0, None, 0, "#e57373"),
+    ("2023 Museum Collection Signature Swatches /15", 15, True, 58.0, 4.99, 70.0, 2, "#00897b"),
+    ("2025 Archives Fan Favorites Auto Gold 09/18", 18, True, 33.0, 1.25, 26.0, 4, "#b0872c"),
+]
+
+
+def _rarest(now: datetime) -> list[dict]:
+    out = []
+    for n, (card, run, auto, price, ship, hours, bids, colour) in enumerate(RAREST):
+        item_id = str(410000300007 + n * 5417)
+        out.append({
+            "item_id": item_id, "title": card, "run": run, "auto": auto,
+            "graded": "PSA" in card, "price": price, "shipping": ship,
+            "is_auction": bool(hours), "best_offer": not hours and n % 2 == 0, "bids": bids,
+            "end_time": (now + timedelta(hours=hours)).isoformat(timespec="minutes")
+            if hours else None,
+            "seller": SELLERS[n % len(SELLERS)], "url": f"https://www.ebay.com/itm/{item_id}",
+            "image": _art(colour, "1/1" if run == 1 else f"/{run}")})
+    return out
+
+
 def _market(now: datetime) -> dict:
     sold = []
     for n, (card, price, ship, bids, hours, call, colour) in enumerate(SOLD):
@@ -182,6 +212,7 @@ def build(now: datetime | None = None) -> dict:
                                       "date": (now - timedelta(days=1)).date().isoformat(),
                                       "seller": SELLERS[1]}]},
         "market": _market(now),
+        "rarest": _rarest(now),
         "wantlist": snapshot.wantlist(),
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": None,

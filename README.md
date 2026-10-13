@@ -27,6 +27,7 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Keeps the inventory current** from your eBay and Gixen emails (optional, read-only).
 - **Shows your Gixen snipes** next to its own picks, so you can see which good auctions have no snipe yet (optional, read-only).
 - **Hunts for what slipped through the cracks**: price mistakes on Buy It Now listings, cards hidden by a misspelled or thin title, and auctions about to end with nobody watching. Each one is labelled on the dashboard and leads the phone alert.
+- **Ranks the rarest cards for sale**: the ten lowest print runs on eBay right now (1/1s, then /5, /10 and so on), read from the listing titles on every search at no Claude cost.
 - **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes, and what the week's auctions sold for.
 - **Shows what it costs.** Every Claude call's cost is added up per day and month and shown on the dashboard.
 
@@ -35,6 +36,8 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 <img src="docs/phone.png" width="24%" alt="The dashboard on a phone">
 
 ![Sold prices the bot recorded itself, and how its picks turned out against them](docs/sold.png)
+
+![The rarest cards for sale right now, next to the Top 10 deals and the top pick (demo data)](docs/rarest.png)
 </p>
 
 ## Try it in two minutes

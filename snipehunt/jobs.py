@@ -11,7 +11,7 @@ import sys
 from datetime import datetime
 
 from . import (config, db, ebay_search, gitsync, inventory_sync, limited_drops,
-               notify, ops, profile, report, sales, score)
+               notify, ops, profile, rarity, report, sales, score)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -28,6 +28,8 @@ def hourly(dry_run: bool = False) -> str:
         db.touch(con, item.item_id, item.title, item.is_auction,
                  datetime.fromisoformat(item.end_time).timestamp() if item.end_time else None,
                  item.shipping)
+    if not dry_run:
+        rarity.save(con, listings)   # the lowest print runs for sale, for the dashboard
     # Save now: if scoring fails, an open write here would block the failure
     # from being recorded, and these listings are still on eBay either way.
     con.commit()
