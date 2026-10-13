@@ -103,3 +103,11 @@ def test_claude_cost_adds_up_by_day_and_month():
     assert (today["cost_today"], today["calls_today"], today["cost_month"]) == (0.75, 2, 0.75)
     later = usage.summary(con, datetime(2031, 1, 1, tzinfo=config.TZ))
     assert (later["cost_today"], later["cost_month"]) == (0.0, 0.0)
+
+
+def test_a_card_that_slipped_through_says_so_and_leads_the_alert():
+    plain, steal = pick(item_id="1"), pick(item_id="2", tier="yellow", edge="mispriced")
+    assert notify.format_pick(steal).startswith("💎 PRICE MISTAKE\n")
+    assert "PRICE MISTAKE" not in notify.format_pick(plain)
+    body = notify.format_bundle([plain, steal])[1]
+    assert body.startswith("💎 PRICE MISTAKE")

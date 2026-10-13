@@ -13,6 +13,8 @@ from . import config, profile, settings, snapshot
 
 # (tier, card, price, shipping, max, value, hours until it ends or None for Buy It Now,
 #  basis, snipe, why, colour)
+# Which demo picks slipped through the cracks, by position in PICKS.
+EDGES = {0: "sleeper", 2: "hidden", 4: "mispriced"}
 PICKS = [
     ("fire", "2023 Chrome Rookie Auto Gold Refractor /50", 18.50, 4.99, 45.45, 110, 1.4, "sales",
      None, "Rookie auto /50 sitting at $18.50; last three sold $98 to $125.", "#c9a227"),
@@ -105,7 +107,7 @@ def build(now: datetime | None = None) -> dict:
             "seller": SELLERS[n % len(SELLERS)], "why": why,
             "url": f"https://www.ebay.com/itm/{item_id}", "image": _art(colour, "/" + label if "/" in card else label),
             "snipe": snipe, "bid_now": price if snipe else None, "value": float(value),
-            "deal": stars, "deal_pct": max(pct, 0)})
+            "deal": stars, "deal_pct": max(pct, 0), "edge": EDGES.get(n)})
         if snipe:
             snipes.append({"item_id": item_id, "end_time": end, "max_bid": snipe,
                            "current_bid": price, "outbid": False, "title": card,

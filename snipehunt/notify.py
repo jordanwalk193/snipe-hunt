@@ -110,6 +110,11 @@ def split_for_quiet_hours(picks: list[dict], now: datetime | None = None
             [p for p in live if not is_urgent(p, now)])
 
 
+# Why a pick is more than a fair price (score.EDGES), as the phone shows it.
+EDGE_LABEL = {"mispriced": "💎 PRICE MISTAKE", "hidden": "🕵️ SLIPPED THROUGH",
+              "sleeper": "😴 SLEEPER AUCTION"}
+
+
 def deal_line(pick: dict) -> str:
     """★★★★☆ 42% under $25 value. For an auction that is at the max, not today's bid."""
     stars = "★" * pick["deal"] + "☆" * (5 - pick["deal"])
@@ -132,6 +137,8 @@ def format_pick(pick: dict) -> str:
     elif not pick.get("is_auction"):
         line2 += " · Buy It Now" + ("/Offer" if pick.get("best_offer") else "")
     lines = [f"{icon} {pick['card']}", line2]
+    if pick.get("edge") in EDGE_LABEL:
+        lines.insert(0, EDGE_LABEL[pick["edge"]])
     if pick.get("max") is not None:
         lines.append(f"Max: {pick['max']:.2f} ({pick.get('max_basis', 'estimate')})")
     if pick.get("deal"):
@@ -143,7 +150,9 @@ def format_pick(pick: dict) -> str:
 
 
 def _rank(pick: dict) -> tuple:
-    return (TIER_ORDER.get(pick.get("tier"), 9), pick.get("end_time") or "9")
+    """Cards that slipped through the cracks lead a bundle, then tier, then what ends first."""
+    return (pick.get("edge") not in EDGE_LABEL, TIER_ORDER.get(pick.get("tier"), 9),
+            pick.get("end_time") or "9")
 
 
 def format_bundle(picks: list[dict], part: str = ""

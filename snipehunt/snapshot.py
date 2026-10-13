@@ -43,6 +43,7 @@ def _slim(pick: dict) -> dict:
         "image": pick.get("image"), "snipe": pick.get("snipe"),
         "bid_now": pick.get("bid_now"), "value": pick.get("value"),
         "deal": pick.get("deal"), "deal_pct": pick.get("deal_pct"),
+        "edge": pick.get("edge"),
     }
 
 

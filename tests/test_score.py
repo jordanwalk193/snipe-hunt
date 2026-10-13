@@ -52,3 +52,25 @@ def test_price_lookups_off_means_no_web_tools_and_says_so(monkeypatch):
     settings.update(db.connect(), {"price_lookups": 0})
     score.score([item])
     assert calls[-1][1] == "" and "no web access" in calls[-1][0]
+
+
+def test_an_edge_is_kept_only_when_the_numbers_back_it():
+    from snipehunt.ebay_search import Listing
+
+    def judged(edge, value, auction=False, price=10.0):
+        item = Listing(item_id="1", title="2023 Topps Chrome rookie auto", price=price,
+                       currency="USD", shipping=1.0,
+                       buying_options=["AUCTION"] if auction else ["FIXED_PRICE"], bid_count=0,
+                       end_time="2026-10-20T00:00:00Z" if auction else None, seller="s",
+                       url="u", image=None)
+        return score._pick_dict(item, {"item_id": "1", "tier": "fire", "max": 12.12,
+                                       "value": value, "edge": edge})["edge"]
+
+    assert judged("mispriced", 40.0) == "mispriced"          # $11 delivered on a $40 card
+    assert judged("mispriced", 13.0) is None                 # about the going rate: no edge
+    assert judged("hidden", 40.0) == "hidden"
+    assert judged("sleeper", 40.0, auction=True, price=1.0) == "sleeper"
+    assert judged("mispriced", 40.0, auction=True, price=1.0) is None   # only a fixed price
+    assert judged("bargain", 40.0) is None and judged("", 40.0) is None
+    assert judged("hidden", None) is None                    # no going rate, no claim
+    assert '"edge"' in score.PROMPT and "slipped through the cracks" in score.PROMPT

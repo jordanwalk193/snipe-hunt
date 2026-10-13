@@ -23,6 +23,10 @@ BATCH = 80
 MAX_BATCHES = 6          # anything beyond this waits for the next hourly run
 TIMEOUT = 1200
 TIERS = {"fire", "green", "yellow"}
+# Why a pick is more than a fair price: a seller's pricing mistake, a listing
+# buyers won't find, or an auction nobody is watching.
+EDGES = {"mispriced", "hidden", "sleeper"}
+EDGE_MIN_PCT = 25         # an edge has to be this far under the going rate
 UNKNOWN_SHIPPING = 5.00   # what the prompt tells Claude to assume for "ship ?"
 # The inventory columns that say which card a row is. Scoring only needs these
 # to tell what is already owned; order dates, sellers and notes are left out
@@ -71,6 +75,16 @@ sold prices you looked up; when you have none, give your honest best estimate.
 - Auctions whose current price already exceeds your max are not steals; leave \
 them out. Buy It Now only counts when the price is at or under \
 your max.
+- Hunt hardest for cards that slipped through the cracks, and say which kind in \
+"edge": "mispriced" = a Buy It Now or best-offer listing priced well under what \
+the card sells for (a seller's mistake or a quick-sale price); "hidden" = one \
+other buyers will not find or will pass over: the player's name misspelled or \
+missing, the wrong year or set, a key feature (autograph, serial number, short \
+print, grade) left out of the title, a poor photo of a good card, or a good \
+card buried in a lot; "sleeper" = an auction ending within about a day with \
+few or no bids and still far under its going rate. Use "" for a card that is \
+only a fair price. Claim an edge only when you are fairly sure of the going \
+rate and paying your max plus shipping would still be at least 25% under it.
 - Tiers: "fire" = brag-worthy (autos, patch autos, /50 or lower, case hits, \
 SSPs, want-list hits); "green" = numbered or clear value; "yellow" = cheap \
 card not yet in the collection.
@@ -80,7 +94,8 @@ Reply with ONLY one JSON object, no prose, no code fence:
 {{"picks": [{{"item_id": "…", "card": "short card name, e.g. 2023 Bowman's \
 Best Refractor PSA 10", "tier": "fire|green|yellow", "max": 12.12, "max_basis": \
 "sales|estimate", "comps": "what recent sales show, or why it is an estimate", \
-"value": 25.00, "why": "one short phone-friendly line"}}], "not_player": ["item_id", …]}}
+"value": 25.00, "edge": "mispriced|hidden|sleeper or empty", "why": "one short \
+phone-friendly line; for an edge, say what the seller got wrong"}}], "not_player": ["item_id", …]}}
 
 === preferences.md ===
 {preferences}
@@ -221,9 +236,14 @@ def _pick_dict(item: Listing, raw: dict) -> dict | None:
     # What you would really pay: the asking price, or the snipe if it wins at its max.
     ship = item.shipping if item.shipping is not None else UNKNOWN_SHIPPING
     deal, deal_pct = rate((max_bid if item.is_auction else item.price) + ship, value)
+    edge = str(raw.get("edge") or "").lower()
+    if edge not in EDGES or (deal_pct or 0) < EDGE_MIN_PCT or (
+            edge == "mispriced" and item.is_auction):
+        edge = None   # the numbers have to back the claim
     return {
         "item_id": item.item_id, "card": str(raw.get("card") or item.title)[:90],
         "tier": tier, "max": max_bid, "value": value, "deal": deal, "deal_pct": deal_pct,
+        "edge": edge,
         "max_basis": "sales" if raw.get("max_basis") == "sales" else "estimate",
         "comps": str(raw.get("comps", ""))[:300], "why": str(raw.get("why", ""))[:140],
         "title": item.title, "price": item.price, "shipping": item.shipping,

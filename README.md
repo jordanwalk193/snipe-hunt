@@ -26,6 +26,7 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Watches limited drops.** A daily check for Topps Now and other print-to-order cards of your player, and a weekly check of new product checklists.
 - **Keeps the inventory current** from your eBay and Gixen emails (optional, read-only).
 - **Shows your Gixen snipes** next to its own picks, so you can see which good auctions have no snipe yet (optional, read-only).
+- **Hunts for what slipped through the cracks**: price mistakes on Buy It Now listings, cards hidden by a misspelled or thin title, and auctions about to end with nobody watching. Each one is labelled on the dashboard and leads the phone alert.
 - **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes, and what the week's auctions sold for.
 - **Shows what it costs.** Every Claude call's cost is added up per day and month and shown on the dashboard.
 
