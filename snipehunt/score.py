@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 
-from . import config, profile
+from . import config, profile, usage
 from .ebay_search import Listing
 
 BATCH = 80
@@ -140,6 +140,7 @@ def ask_claude(prompt: str, tools: str = "WebFetch,WebSearch",
         raise RuntimeError(f"claude -p exit {proc.returncode}: "
                            f"{(proc.stderr or proc.stdout)[:300]}")
     outer = json.loads(proc.stdout)
+    usage.record(outer.get("total_cost_usd") or 0)
     if outer.get("is_error"):
         raise RuntimeError(f"claude -p error: {str(outer.get('result'))[:300]}")
     return outer.get("result", "")

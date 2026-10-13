@@ -22,6 +22,7 @@ def hourly(dry_run: bool = False) -> str:
             gitsync.pull()
         except RuntimeError as exc:   # GitHub being down shouldn't stop the hunt
             print(f"hourly: {exc}; using the local copy", file=sys.stderr)
+    first_run = con.execute("SELECT count(*) FROM seen").fetchone()[0] == 0
     listings = ebay_search.search_all(verbose=True)
     for item in listings:
         db.touch(con, item.item_id, item.title)
@@ -43,9 +44,25 @@ def hourly(dry_run: bool = False) -> str:
 
     picks, scored = (score.score(fresh, verbose=True, on_batch=save)
                      if fresh else ([], []))
+    if first_run and not dry_run:
+        return _welcome(con, listings, picks)
     sent = notify.deliver(con, picks, dry_run=dry_run)
     return (f"{len(listings)} listings, {len(fresh)} new, {len(scored)} scored, "
             f"{len(picks)} picks, {sent} alerted")
+
+
+def _welcome(con, listings: list, picks: list[dict]) -> str:
+    """The very first run finds everything at once. Send one note, not a flood."""
+    for p in picks:
+        db.mark_alerted(con, p["item_id"], p["total"])
+    con.commit()
+    who = profile.get()
+    if notify.configured():
+        notify.send(f"{who.app_name} is up and running",
+                    f"First search done: {len(listings)} {who.player} listings on eBay, "
+                    f"{len(picks)} picks waiting on your dashboard. From here on you'll "
+                    "only hear about new ones.")
+    return f"first run: {len(listings)} listings, {len(picks)} picks, one welcome alert"
 
 
 def daily(dry_run: bool = False) -> str:

@@ -4,6 +4,9 @@
   python -m snipehunt check    show what is configured (never prints secrets)
   python -m snipehunt serve    run the API and the scheduler (what the container runs)
 
+Set SNIPEHUNT_DEMO=1 to serve made-up data instead: a way to see the dashboard
+before you have eBay or Claude keys.
+
 Single jobs: python -m snipehunt.jobs hourly|daily|weekly [--dry-run]
 """
 from __future__ import annotations
@@ -39,8 +42,12 @@ def check() -> None:
 
 def serve() -> None:
     who = profile.get()   # fail now, with a clear message, if the profile is missing
-    print(f"{who.app_name}: hunting {who.player} cards", file=sys.stderr)
-    threading.Thread(target=scheduler.run_forever, daemon=True).start()
+    if api.demo_mode():
+        print(f"{who.app_name}: DEMO MODE. Serving made-up data; no searches, no alerts.",
+              file=sys.stderr)
+    else:
+        print(f"{who.app_name}: hunting {who.player} cards", file=sys.stderr)
+        threading.Thread(target=scheduler.run_forever, daemon=True).start()
     api.serve()
 
 

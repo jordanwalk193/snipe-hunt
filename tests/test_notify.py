@@ -79,3 +79,27 @@ def test_alert_shows_the_deal_rating():
     assert "Deal: ★★★★☆ 42% under $45 value at max" in lines
     assert lines[-1] == "123456789012"
     assert not any(l.startswith("Deal") for l in notify.format_pick(pick()).split("\n"))
+
+
+def test_minimum_stars_setting_filters_rated_picks_only():
+    from snipehunt import db, settings
+    con = db.connect()
+    assert notify.worth_alerting(pick(deal=1))
+    settings.update(con, {"alert_min_stars": 3})
+    assert not notify.worth_alerting(pick(deal=2))
+    assert notify.worth_alerting(pick(deal=3))
+    assert notify.worth_alerting(pick())                   # never rated: still alerts
+    assert notify.worth_alerting(pick(tier="drop", deal=1))
+
+
+def test_claude_cost_adds_up_by_day_and_month():
+    from datetime import datetime
+    from snipehunt import config, db, usage
+    usage.record(0.25)
+    usage.record("0.5")
+    usage.record(None)                                     # a bad figure is ignored
+    con = db.connect()
+    today = usage.summary(con)
+    assert (today["cost_today"], today["calls_today"], today["cost_month"]) == (0.75, 2, 0.75)
+    later = usage.summary(con, datetime(2031, 1, 1, tzinfo=config.TZ))
+    assert (later["cost_today"], later["cost_month"]) == (0.0, 0.0)

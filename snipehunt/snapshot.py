@@ -13,6 +13,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import config, db, gixen, inventory, profile, report, scheduler, settings
+from . import usage
 from .notify import TIER_ORDER
 
 VERSION = 1
@@ -264,6 +265,7 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         gix = gixen_view(sniped, problem, read_at, picks, now)
     picks = ranked(picks)
     state = status(con, picks, now)
+    state.update(usage.summary(con, now))
     state["need_snipe"] = need_snipe(picks, now, cfg["need_snipe_hours"],
                                      bool(gix and gix["available"]))
     return {

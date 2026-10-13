@@ -14,7 +14,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import actions, config, db, settings, snapshot
+from . import actions, config, db, demo, settings, snapshot
 
 MAX_BODY = 64 * 1024
 CACHE_SECONDS = 15   # several dashboards polling at once share one snapshot
@@ -23,7 +23,13 @@ _lock = threading.Lock()   # one snapshot or action at a time
 _cache: dict = {"at": 0.0, "body": b""}
 
 
+def demo_mode() -> bool:
+    return (config.get("SNIPEHUNT_DEMO") or "").lower() in ("1", "true", "yes", "on")
+
+
 def _snapshot_body(fresh: bool = False) -> bytes:
+    if demo_mode():
+        return json.dumps(demo.build(), ensure_ascii=False).encode()
     if fresh or time.time() - _cache["at"] > CACHE_SECONDS:
         con = db.connect()
         try:
@@ -36,6 +42,8 @@ def _snapshot_body(fresh: bool = False) -> bytes:
 
 def act(data: dict) -> tuple[int, bytes]:
     """Run one of the button actions; the outcome is kept for the dashboard."""
+    if demo_mode():
+        return 200, _reply(True, "Demo mode: nothing was changed.")
     con = db.connect()
     try:
         ok, message = actions.handle(con, data)
@@ -46,6 +54,8 @@ def act(data: dict) -> tuple[int, bytes]:
 
 
 def change_settings(data: dict) -> tuple[int, bytes]:
+    if demo_mode():
+        return 200, _reply(True, "Demo mode: settings aren't saved.")
     con = db.connect()
     try:
         settings.update(con, data)

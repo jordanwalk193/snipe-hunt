@@ -229,3 +229,45 @@ def test_profile_defaults_come_from_the_name():
     assert p.binder_page("2024") == "unsorted"
     with pytest.raises(profile.ProfileError):
         profile.parse('[player]\nname = "Cher"\n')
+
+
+def test_scheduler_tick_runs_one_job_at_a_time(con, monkeypatch):
+    from snipehunt import scheduler
+    started = []
+
+    class FakeJob:
+        done = False
+
+        def __init__(self, cmd):
+            started.append(cmd[-1])
+
+        def poll(self):
+            return 0 if FakeJob.done else None
+    monkeypatch.setattr(scheduler.subprocess, "Popen", FakeJob)
+    monkeypatch.setattr(scheduler, "_proc", None)
+    now = datetime(2026, 10, 11, 18, 50, tzinfo=config.TZ)        # hourly and weekly are due
+    assert scheduler.tick(con, now) == "hourly" and scheduler.running("hourly")
+    assert scheduler.tick(con, now) is None                       # busy: nothing else starts
+    assert snapshot.snapshot(con, NOW)["status"]["searching"] is True
+    FakeJob.done = True
+    assert scheduler.tick(con, now) == "weekly"                   # the next due job
+    assert scheduler.trigger("hourly") is True                    # "Search now" button
+    assert scheduler.tick(con, now) == "hourly"                   # requested job goes first
+    assert scheduler.tick(con, now) is None and started == ["hourly", "weekly", "hourly"]
+
+
+def test_demo_mode_serves_made_up_data_and_changes_nothing(con, server, monkeypatch):
+    from snipehunt import demo
+    real = set(snapshot.snapshot(con, NOW))
+    fake = demo.build(NOW)
+    assert real <= set(fake) and set(snapshot.snapshot(con, NOW)["status"]) <= set(fake["status"])
+    add(con, "111111111111")
+    con.commit()
+    real_pick = snapshot.snapshot(con, NOW)["picks"][0]
+    assert set(real_pick) == set(fake["picks"][0])
+    monkeypatch.setitem(config.load(), "SNIPEHUNT_DEMO", "1")
+    code, snap = call(server + "/api/snapshot")
+    assert code == 200 and snap["demo"] is True and len(snap["picks"]) == 9
+    code, out = call(server + "/api/action", {"action": "skip", "item_id": "111111111111"})
+    assert out["ok"] and "Demo mode" in out["message"]
+    assert snapshot.skipped_ids(con) == []

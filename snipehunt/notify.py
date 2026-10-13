@@ -88,6 +88,8 @@ def worth_alerting(pick: dict) -> bool:
     tier = pick.get("tier")
     if tier == "drop":
         return True
+    if pick.get("deal") is not None and pick["deal"] < cfg["alert_min_stars"]:
+        return False   # not a good enough price; picks with no rating still pass
     if tier in ("fire", "green"):
         return cfg[f"alert_{tier}"]
     # Unknown shipping can't count as "$2 or less".

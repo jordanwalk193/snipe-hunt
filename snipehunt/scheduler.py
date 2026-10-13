@@ -77,6 +77,18 @@ def _start(con, job: str) -> None:
         _proc = subprocess.Popen([sys.executable, "-m", "snipehunt.jobs", job])
 
 
+def tick(con, now: datetime) -> str | None:
+    """Start the next job if nothing is running: a requested one first, then a due one."""
+    if running():
+        return None
+    with _lock:
+        job = _wanted.pop(0) if _wanted else None
+    job = job or next(iter(due_jobs(con, now)), None)
+    if job:
+        _start(con, job)
+    return job
+
+
 def run_forever() -> None:
     con = db.connect()
     # A fresh install shouldn't fire every job the moment it starts.
@@ -86,12 +98,7 @@ def run_forever() -> None:
     con.commit()
     while True:
         try:
-            if not running():
-                with _lock:
-                    job = _wanted.pop(0) if _wanted else None
-                job = job or next(iter(due_jobs(con, datetime.now(config.TZ))), None)
-                if job:
-                    _start(con, job)
+            tick(con, datetime.now(config.TZ))
         except Exception as exc:   # the clock must keep ticking
             print(f"scheduler: {type(exc).__name__}: {exc}", file=sys.stderr)
         time.sleep(TICK)

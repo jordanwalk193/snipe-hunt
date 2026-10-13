@@ -127,3 +127,27 @@ def test_a_run_that_fails_while_scoring_is_still_recorded(con, monkeypatch):
     assert ops.guarded("hourly", jobs.hourly) == 1
     assert db.kv_get(con, "failing:hourly") == "1"
     assert con.execute("SELECT count(*) FROM seen").fetchone()[0] == 1   # still tracked
+
+
+def test_first_run_sends_one_welcome_instead_of_a_flood(con, monkeypatch):
+    from snipehunt.ebay_search import Listing
+    items = [Listing(str(100000000000 + n), "2023 Topps Jordan Walker RC", 1.0, "USD", 1.0,
+                     ["AUCTION"], 0, "2026-10-13T21:00-04:00", "s", "u", None) for n in range(3)]
+    monkeypatch.setitem(config.load(), "EBAY_CLIENT_ID", "x")
+    monkeypatch.setitem(config.load(), "EBAY_CLIENT_SECRET", "y")
+    monkeypatch.setitem(config.load(), "NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(jobs.ebay_search, "search_all", lambda verbose=False: items)
+
+    def all_fire(fresh, verbose=False, on_batch=None):
+        picks = [pick(item_id=i.item_id, total=2.0) for i in fresh]
+        on_batch(fresh, picks)
+        return picks, fresh
+    monkeypatch.setattr(jobs.score, "score", all_fire)
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda title, msg, *a, **kw: sent.append(title))
+    assert jobs.hourly().startswith("first run: 3 listings, 3 picks")
+    assert sent == ["Snipe Hunt is up and running"]
+    items.append(Listing("100000000009", "2023 Topps Jordan Walker RC", 1.0, "USD", 1.0,
+                         ["AUCTION"], 0, "2026-10-13T21:00-04:00", "s", "u", None))
+    assert jobs.hourly().endswith("1 picks, 1 alerted")           # only the new one
+    assert len(sent) == 2 and sent[1] == "Snipe Hunt: 1 steal"

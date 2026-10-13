@@ -24,6 +24,7 @@ DEFAULTS: dict = {
     "alert_green": True,
     "alert_cheap_yellow": True,
     "yellow_max_total": 2.00,        # a yellow pick alerts at this total or less
+    "alert_min_stars": 1,            # rated picks alert only at this many deal stars or more
     "quiet_hours": True,
     "quiet_start": "23:00",
     "quiet_end": "07:00",
@@ -39,6 +40,7 @@ DEFAULTS: dict = {
 RANGES = {
     "yellow_max_total": (0, 25),
     "urgent_hours": (0, 24),
+    "alert_min_stars": (1, 5),
     "need_snipe_hours": (1, 168),
     "monthly_budget": (0, 5000),
     "gixen_relogin_minutes": (0, 1440),
