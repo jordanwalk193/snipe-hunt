@@ -163,7 +163,13 @@ eBay disables a Production keyset until your app answers its Marketplace Account
 
 **Is this allowed by eBay?** It uses eBay's official Browse API with your own developer keys and only searches. Sixteen or so searches an hour is far inside the default daily limit.
 
-**What does it cost to run?** eBay's API is free. Claude is the cost, and it is not trivial: in the one setup this has run on, a single hourly run that scored 48 new listings (with the whole inventory in the prompt and a few sold-price lookups) came to about $0.50 at API prices on the CLI's default model. A quiet player costs far less; a busy one at that rate would be several dollars a day. Set `CLAUDE_MODEL` to a smaller model to cut it, and watch the dashboard's cost sensors for the first day before leaving it running.
+**What does it cost to run?** eBay's API is free. Claude is the cost, and it is not trivial: in the one setup this has run on, an hourly run that scored 48 new listings came to about $0.45 at API prices on the CLI's default model. About 40% of that was sold-price web lookups, and most of the rest was Claude reading the prompt and writing its answer. A quiet player costs far less; a busy one at that rate would be several dollars a day. Three things cut it:
+
+- **Price lookups** (a setting in Home Assistant, 0 to 8, default 8): how many sold prices Claude may look up per run. At 0 it prices every card from what it knows and uses no web tools. In that same setup only about a third of the picks worth looking up ended with a real sold price, so fewer lookups costs less accuracy than you might expect. Replaying those 48 listings with lookups at 0 cost $0.25 and picked the same 9 cards, with lower maxes on three of them.
+- **`CLAUDE_EFFORT=medium`** in `.env`: Claude thinks less before answering. On a replay of the same 48 listings it cost roughly a tenth less and found 8 of the same 9 picks, with two of them a tier lower.
+- **`CLAUDE_MODEL`** in `.env`: a smaller model costs much less per run. Not measured here; compare its picks with the default for a day before trusting it.
+
+Watch the dashboard's cost sensors for the first day before leaving it running.
 
 **Does it work for football, basketball, hockey, Pokémon?** The searching and filtering work for any name. Set `EBAY_CATEGORY` if your cards aren't in Sports Trading Card Singles, and fill in `sport` and the word lists in your profile. It has only been run for real on one baseball player so far.
 

@@ -6,19 +6,33 @@ prices and nothing that can act on eBay or Gixen.
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import os
 import subprocess
 import sys
 
-from . import config, profile, usage
+from datetime import datetime
+
+from . import config, profile, settings, usage
 from .ebay_search import Listing
 
+WEB_TOOLS = "WebFetch,WebSearch"
 BATCH = 80
 MAX_BATCHES = 6          # anything beyond this waits for the next hourly run
 TIMEOUT = 1200
 TIERS = {"fire", "green", "yellow"}
 UNKNOWN_SHIPPING = 5.00   # what the prompt tells Claude to assume for "ship ?"
+# The inventory columns that say which card a row is. Scoring only needs these
+# to tell what is already owned; order dates, sellers and notes are left out
+# because every extra word is paid for on every run.
+CARD_COLUMNS = ("year", "set", "card", "parallel", "card_no", "serial", "rc", "auto",
+                "relic", "graded", "status")
+# Replaces the Claude CLI's own long coding-assistant instructions, which this
+# job has no use for.
+SYSTEM = ("You are a careful sports card collecting assistant. You read and "
+          "recommend; you never bid, buy or contact anyone. Today is {today}.")
 # A deal's stars: how far under its going rate you would pay, shipping included.
 STARS = ((50, 5), (35, 4), (20, 3), (10, 2))
 
@@ -50,12 +64,9 @@ seller is a known cheap-shipping consignment seller.
 unless preferences.md asks for a different style. The max is the bid itself, \
 shipping not included, set so that winning AT the max plus shipping still \
 beats recent sales.
-- For anything you would max above $10, check recent sold prices with web \
-fetch/search (130point.com, eBay sold listings) and set max_basis to "sales". \
-Otherwise use "estimate". Do at most {lookups} lookups; if one fails, use \
-"estimate" and say so in comps.
+{lookup_rule}
 - Set "value" to what this exact card (same parallel, serial and grade) has \
-recently sold for, shipping included: the going rate, not your max. Use the \
+recently sold for, shipping included: the going rate, not your max. Use any \
 sold prices you looked up; when you have none, give your honest best estimate.
 - Auctions whose current price already exceeds your max are not steals; leave \
 them out. Buy It Now only counts when the price is at or under \
@@ -96,14 +107,40 @@ def _compact(item: Listing) -> str:
     }, ensure_ascii=False)
 
 
+LOOKUPS = """- For anything you would max above $10, check recent sold prices with web \
+search (130point.com, eBay sold listings) and set max_basis to "sales". \
+Otherwise use "estimate". Do at most {lookups} lookups and ask for them all in \
+one step; if one fails, use "estimate" and say so in comps. Do not open \
+ebay.com pages: eBay blocks them, so a fetch there is wasted."""
+NO_LOOKUPS = """- You have no web access in this run. Price every card from what you \
+know, set max_basis to "estimate", and be more cautious with your max the less \
+sure you are."""
+
+
+def inventory_for_scoring() -> str:
+    """The inventory cut down to the columns that identify a card."""
+    text = config.INVENTORY.read_text()
+    reader = csv.DictReader(io.StringIO(text))
+    keep = [c for c in reader.fieldnames or [] if c in CARD_COLUMNS]
+    if len(keep) < 3:   # a layout of the collector's own: send it as it is
+        return text
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=keep, extrasaction="ignore",
+                            lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(reader)
+    return out.getvalue()
+
+
 def build_prompt(items: list[Listing], lookups: int = 8) -> str:
     who = profile.get()
     return PROMPT.format(
         app=who.app_name, collector=who.collector, player=who.described,
-        name=who.player, lookups=lookups,
+        name=who.player,
+        lookup_rule=LOOKUPS.format(lookups=lookups) if lookups else NO_LOOKUPS,
         preferences=config.PREFERENCES.read_text(),
         wantlist=config.WANTLIST.read_text(),
-        inventory=config.INVENTORY.read_text(),
+        inventory=inventory_for_scoring(),
         listings="\n".join(_compact(i) for i in items))
 
 
@@ -114,7 +151,7 @@ def extract_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
-def ask_claude(prompt: str, tools: str = "WebFetch,WebSearch",
+def ask_claude(prompt: str, tools: str = WEB_TOOLS,
                timeout: int = TIMEOUT) -> str:
     """Run `claude -p` in the state directory, away from any project files.
 
@@ -123,11 +160,16 @@ def ask_claude(prompt: str, tools: str = "WebFetch,WebSearch",
     file edits) and `--strict-mcp-config` drops any MCP servers set up for this user.
     """
     cmd = [config.get("CLAUDE_BIN"), "-p", "--output-format", "json",
-           "--tools", tools, "--strict-mcp-config"]
+           "--tools", tools, "--strict-mcp-config",
+           "--no-session-persistence",   # or every call leaves a transcript on disk
+           "--system-prompt",
+           SYSTEM.format(today=datetime.now(config.TZ).strftime("%A, %B %-d, %Y"))]
     if tools:
         cmd += ["--allowedTools", tools]
     if config.get("CLAUDE_MODEL"):   # a smaller model costs less; see the README
         cmd += ["--model", config.get("CLAUDE_MODEL")]
+    if config.get("CLAUDE_EFFORT"):   # how hard Claude thinks: low, medium or high
+        cmd += ["--effort", config.get("CLAUDE_EFFORT")]
     env = dict(os.environ)
     if config.get("ANTHROPIC_API_KEY"):   # may come from the env file, not the environment
         env["ANTHROPIC_API_KEY"] = config.get("ANTHROPIC_API_KEY")
@@ -188,13 +230,16 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None
     before it is kept and the rest waits for the next hourly run.
     """
     items = sorted(items, key=lambda i: (not i.is_auction, i.end_time or "9"))
+    # Sold-price lookups are close to half of what a run costs; 0 turns them off.
+    lookups = settings.load()["price_lookups"]
     picks: list[dict] = []
     scored: list[Listing] = []
     batches = [items[i:i + BATCH] for i in range(0, len(items), BATCH)][:MAX_BATCHES]
     for n, batch in enumerate(batches, 1):
         by_id = {i.item_id: i for i in batch}
         try:
-            reply = extract_json(ask_claude(build_prompt(batch)))
+            reply = extract_json(ask_claude(
+                build_prompt(batch, lookups), tools=WEB_TOOLS if lookups else ""))
         except Exception as exc:
             if not scored:
                 raise
