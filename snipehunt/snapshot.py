@@ -81,9 +81,11 @@ def live_picks(con, now: datetime) -> list[dict]:
 
 
 def ranked(picks: list[dict]) -> list[dict]:
-    """Best first: tier, then cheapest, then ending soonest."""
-    return sorted(picks, key=lambda p: (TIER_ORDER.get(p.get("tier"), 9),
-                                        p.get("total") or 0, p.get("end_time") or "9"))
+    """Best first: real steals ahead of fair-price picks, then cards that slipped
+    through the cracks, then tier, most deal stars, cheapest, ending soonest."""
+    return sorted(picks, key=lambda p: (
+        p.get("deal") == 1, not p.get("edge"), TIER_ORDER.get(p.get("tier"), 9),
+        -(p.get("deal") or 0), p.get("total") or 0, p.get("end_time") or "9"))
 
 
 def need_snipe(picks: list[dict], now: datetime, hours: float,
