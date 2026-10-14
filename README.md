@@ -20,9 +20,9 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Finds steals.** Auctions ending soon, new Buy It Now and Best Offer listings, autos, patches, numbered cards, and typo listings other buyers miss.
 - **Knows what you own.** It skips cards already in `inventory.csv` unless a copy is clearly better.
 - **Sets a max.** Each pick comes with a snipe price where winning still beats recent sales, shipping counted, and says whether that came from real sales or an estimate.
-- **Learns what cards sell for.** After every auction it has seen closes, it asks eBay what the final bid was and keeps it. The next time the same card comes up, the price comes from that sale and not from a guess. The dashboard lists the sales and keeps score: how many of its picks closed under the max it gave, and how far its going rate was from the real price.
-- **Rates the deal.** One to five stars for how far under the going rate you would pay, shipping included: the asking price for Buy It Now, the max for an auction. Five stars is half price or better.
-- **Alerts your phone** through Home Assistant or [ntfy](https://ntfy.sh), with quiet hours that urgent auctions can break through. Alerts are optional: without them, picks still reach the dashboard.
+- **Learns what cards sell for.** After every auction it has seen closes, it asks eBay what the final bid was and keeps it, along with Buy It Nows that sold at their listed price. The next time the same card comes up, the price comes from that sale and not from a guess. See [Gets smarter over time](#gets-smarter-over-time). The dashboard lists the sales and keeps score: how many of its picks closed under the max it gave, and how far its going rate was from the real price.
+- **Rates the deal.** One to five stars for how far under the going rate you would pay, shipping included: the asking price for Buy It Now, the max for an auction. Five stars is half price or better. A seller you already have an open order with, and who combines shipping, counts as $0 shipping.
+- **Alerts your phone** through Home Assistant or [ntfy](https://ntfy.sh), with quiet hours and one "enter before bed" alert in place of overnight wake-ups. Before a held alert goes out its price is checked again, and the same card from several sellers arrives as one entry. Alerts are optional: without them, picks still reach the dashboard.
 - **Watches limited drops.** A daily check for Topps Now and other print-to-order cards of your player, and a weekly check of new product checklists.
 - **Keeps the inventory current** from your eBay and Gixen emails (optional, read-only).
 - **Shows your Gixen snipes** next to its own picks, so you can see which good auctions have no snipe yet (optional, read-only).
@@ -143,11 +143,32 @@ Run any of them by hand, with `--dry-run` to see what it would do:
 docker compose exec snipe-hunt python -m snipehunt.jobs hourly --dry-run
 ```
 
+## Gets smarter over time
+
+Nothing here needs setting up. The longer the bot runs, the more it has to go on.
+
+- **Sold prices of its own.** Every auction it has seen is looked up once after it closes, and the final bid is kept for 180 days. That includes auctions it never found itself: every snipe in your Gixen list for your player is noted, so its closing price is recorded too.
+- **Buy It Now sales that are clean.** A fixed-price listing that takes no offers can only sell at its listed price. Once one drops out of the search the bot asks eBay whether it sold, and keeps it as a fixed-price sale (marked BIN). Anything with Best Offer is never recorded, because the price it really went for isn't shown.
+- **Comps that are the same card.** A sold price counts for a listing only when the grade, autograph and print run match. The same card number and year match even when the titles share few words, and a different card number never matches. A sale of another grade or print run is shown to Claude as a hint, one per listing, marked "(different grade/parallel)".
+- **Your taste.** When you hide a pick, the bot keeps what it was. When you set a snipe, it keeps your amount next to its own max. Scoring is shown the latest fifteen of each, picks fewer cards like the hidden ones and more like the sniped ones, and leans toward your maxes where they keep running above or below its own.
+- **Missed steals.** A sale it made no pick for that closed 35% or more under the usual price of the same card (at least two earlier sales) is a missed steal. The weekly report lists the week's ten biggest, the dashboard counts them, and scoring is shown the latest five as the kind of listing to watch for.
+- **Corrections per price band.** Once enough of its picks have sold, the bot tells Claude how far off its going rates have been running, separately for cards valued under $10, $10 to $50 and over $50, since cheap and dear cards tend to miss in different directions.
+
+Where a sale didn't state its shipping, $5 is assumed, the same as everywhere else, and the total is marked as estimated.
+
+## Alerts and quiet hours
+
+- **Quiet hours** (11pm to 7am unless you change them) hold alerts until morning. A limited drop still comes through.
+- **Bedtime bundle** (on by default): on the first search of quiet hours you get one alert, "enter before bed (N)", listing every alert-worthy auction that ends before quiet hours are over or within two hours after. Gixen does the sniping, so nothing wakes you for an auction during the night. Turn `bedtime_bundle` off for the older behaviour, where an auction ending within `urgent_hours` breaks through quiet hours.
+- **Fresh prices.** A pick that was held overnight, or left over from a full run, takes the price from the latest search before it is sent. An auction already bid past its max is dropped, and so is a Buy It Now that has been out of the search for two hours.
+- **One entry per card.** When several sellers list the same card, the alert shows the card once with a line per listing (price, shipping, end time, max, item number) and a reminder that a Gixen group bid covers them all.
+- **Combined shipping.** Scoring is told which sellers you have an unpaid or unshipped order with. For the ones named in `combined_ship_sellers`, the deal stars count $0 shipping and the alert says "combined ship w/ open order".
+
 ## Home Assistant dashboard
 
 Install the [Snipe Hunt integration](https://github.com/jordanwalk193/ha-snipe-hunt) through HACS: add that address as a custom repository of type Integration, download it, restart Home Assistant, then add the **Snipe Hunt** integration. Give it the bot's address, `http://<bot machine>:8766`, and your `API_TOKEN`.
 
-You get a five-tab dashboard, about fifty entities, an auctions calendar, and every setting as a switch or number: which tiers alert, the minimum deal rating worth an alert, quiet hours, the cheap-card limit, a monthly budget, watched sellers and extra searches.
+You get a five-tab dashboard, about fifty entities, an auctions calendar, and every setting as a switch or number: which tiers alert, the minimum deal rating worth an alert, quiet hours, the bedtime bundle, the cheap-card limit, a monthly budget, watched sellers, sellers who combine shipping and extra searches.
 
 ## Without Docker
 
@@ -196,7 +217,7 @@ Watch the dashboard's cost sensors for the first day before leaving it running.
 
 **Can it follow more than one player?** One player per bot. Run a second copy with its own home folder and port for another.
 
-**How good are the prices?** They get better the longer it runs. eBay blocks its sold-listings pages, so at first most prices are Claude's estimate, with a web lookup for the dearer cards. But the bot also records the final bid of every auction for your player that it saw close (one free eBay API call each, kept for 180 days), and shows Claude the sales that look like the card being scored. Each pick says whether its max came from real sales or an estimate. Only auctions are recorded: a Buy It Now that sold may have gone for a lower accepted offer, so it isn't counted. Treat the prices as a well-informed second opinion, and check anything expensive yourself. Once enough of its picks have sold, the bot also tells Claude how far off its going rates have been running, so the estimates correct themselves.
+**How good are the prices?** They get better the longer it runs. eBay blocks its sold-listings pages, so at first most prices are Claude's estimate, with a web lookup for the dearer cards. But the bot also records the final bid of every auction for your player that it saw close (one free eBay API call each, kept for 180 days), and shows Claude the sales of the same card as the one being scored. Each pick says whether its max came from real sales or an estimate. A Buy It Now is recorded only when it takes no offers, because then it can only have sold at the listed price; one with Best Offer may have gone for a lower accepted offer, so it isn't counted. Treat the prices as a well-informed second opinion, and check anything expensive yourself. Once enough of its picks have sold, the bot also tells Claude how far off its going rates have been running in each price band, so the estimates correct themselves. More in [Gets smarter over time](#gets-smarter-over-time).
 
 **Can I look up a price myself?** Yes. `python -m snipehunt sold gold refractor /50` lists every recorded sale with those words in the title, with the range and the typical price. With no words it lists the latest sales.
 
