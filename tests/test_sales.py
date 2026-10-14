@@ -232,3 +232,22 @@ def test_a_gixen_snipe_the_search_never_found_still_gets_its_sold_price(monkeypa
     assert sales.collect(con, ebay, now=NOW + 3600) == 2
     sale = dict(con.execute("SELECT * FROM sales WHERE item_id='1'").fetchone())
     assert (sale["price"], sale["title"]) == (4.25, "2023 Bowman Chrome Jordan Walker Blue /150")
+
+
+def test_a_sale_with_no_shipping_stated_is_totalled_like_everything_else():
+    from datetime import datetime
+    con = db.connect()
+    title = "2023 Topps Chrome Jordan Walker Gold Refractor /50 #45"
+    for item_id, shipping, value in (("1", None, 20.0), ("2", 1.0, 20.0)):
+        con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                    "VALUES (?,?,10.0,?,3,?)", (item_id, title, shipping, NOW - int(item_id)))
+        db.save_pick(con, {"item_id": item_id, "tier": "green", "max": 12.12, "value": value})
+    unknown, known = sales.with_calls(con)
+    assert (unknown["total"], unknown["estimated"]) == (10.0 + sales.UNKNOWN_SHIPPING, True)
+    assert (known["total"], known["estimated"]) == (11.0, False)
+    assert unknown["off"] == -0.25               # $15 delivered against a $20 value, not $10
+    view = sales.market(con, datetime.fromtimestamp(NOW, config.TZ))
+    assert [s["estimated"] for s in view["sold"]] == [True, False]
+    assert view["history"][0]["prices"] == [11.0, 15.0] and view["history"][0]["estimated"]
+    assert sales.last_sold(sales.with_calls(con), title)["estimated"] is True
+    assert "1 of them didn't state shipping; $5 is assumed." in sales.price_check(con, "gold")

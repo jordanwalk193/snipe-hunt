@@ -143,6 +143,11 @@ def relevant(con, items: list[Listing]) -> list[dict]:
     return sorted(chosen.values(), key=lambda s: -s["sold_at"])[:MAX_LINES]
 
 
+def delivered(price: float, shipping: float | None) -> float:
+    """Price plus shipping, with the usual assumption when the shipping wasn't stated."""
+    return round(price + (UNKNOWN_SHIPPING if shipping is None else shipping), 2)
+
+
 def bid_count(bids: int) -> str:
     return "1 bid" if bids == 1 else f"{bids} bids"
 
@@ -182,7 +187,8 @@ def with_calls(con, since: float = 0) -> list[dict]:
             "ORDER BY s.sold_at DESC", (since,)):
         row = dict(row)
         pick = json.loads(row.pop("data")) if row["data"] else None
-        row["total"] = round(row["price"] + (row["shipping"] or 0), 2)
+        row["total"] = delivered(row["price"], row["shipping"])
+        row["estimated"] = row["shipping"] is None   # the total assumes UNKNOWN_SHIPPING
         row["call"] = None
         if pick and pick.get("max") is not None:
             value = pick.get("value")
@@ -238,7 +244,8 @@ def market(con, now: datetime, limit: int = 40) -> dict:
     week = now.timestamp() - 7 * 86400
     sold = [{
         "item_id": r["item_id"], "title": r["title"], "price": r["price"],
-        "shipping": r["shipping"], "total": r["total"], "bids": r["bids"],
+        "shipping": r["shipping"], "total": r["total"], "estimated": r["estimated"],
+        "bids": r["bids"],
         "sold_at": datetime.fromtimestamp(r["sold_at"], config.TZ).isoformat(
             timespec="minutes"),
         "image": r["image"], "url": f"https://www.ebay.com/itm/{r['item_id']}",
@@ -294,6 +301,8 @@ def history(con, limit: int = 12) -> list[dict]:
             "title": g["title"], "image": g["image"], "n": len(totals), "prices": totals[-12:],
             "last": totals[-1], "low": min(totals), "high": max(totals),
             "typical": round(statistics.median(totals), 2),
+            # some of these totals assume the usual shipping because none was stated
+            "estimated": any(s["estimated"] for s in g["sales"]),
             "last_at": datetime.fromtimestamp(g["sales"][0]["sold_at"], config.TZ).isoformat(
                 timespec="minutes"),
             "url": f"https://www.ebay.com/itm/{g['item_id']}"})
@@ -308,6 +317,7 @@ def last_sold(rows: list[dict], title: str, item_id: str = "") -> dict | None:
     if not same:
         return None
     return {"total": same[0]["total"], "price": same[0]["price"], "n": len(same),
+            "estimated": same[0]["estimated"],
             "at": datetime.fromtimestamp(same[0]["sold_at"], config.TZ).date().isoformat()}
 
 
@@ -329,6 +339,9 @@ def price_check(con, query: str) -> str:
     out = [lines(found), "",
            f"{len(found)} sales · ${prices[0]:.2f} to ${prices[-1]:.2f} with shipping · "
            f"typical ${statistics.median(prices):.2f}"]
+    unknown = sum(r["estimated"] for r in found)
+    if unknown:
+        out.append(f"{unknown} of them didn't state shipping; ${UNKNOWN_SHIPPING:.0f} is assumed.")
     return "\n".join(out)
 
 

@@ -60,7 +60,9 @@ def going_rate(con, snipe: dict, rows: list[dict], cache: dict) -> dict | None:
     last = sales.last_sold(rows, snipe.get("title") or "", snipe["item_id"])
     if last:
         return {"value": last["total"], "basis": "sold",
-                "note": f"the same card sold for ${last['total']:.2f} delivered on {last['at']}"
+                "note": f"the same card sold for ${last['total']:.2f} delivered"
+                        + (" (shipping assumed)" if last["estimated"] else "")
+                        + f" on {last['at']}"
                         + (f" ({last['n']} sales on record)" if last["n"] > 1 else "")}
     return cache.get(snipe["item_id"])
 

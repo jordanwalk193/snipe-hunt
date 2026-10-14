@@ -192,7 +192,7 @@ def fast_worth(con, item) -> bool:
     if item.match == "unclear":      # a misspelled or thin title: where mistakes hide
         return True
     # the same card has sold for clearly more than this one is asking
-    return any(s["price"] + (s["shipping"] or 0) > item.total * 1.3
+    return any(sales.delivered(s["price"], s["shipping"]) > item.total * 1.3
                for s in sales.relevant(con, [item])) or item.price >= FAST_MIN_PRICE
 
 
