@@ -159,7 +159,7 @@ def test_scoring_is_told_when_its_going_rates_have_been_running_off():
     sale(con, "7", "card 7", 15.0, value=10.0, max_bid=6.06)
     sale(con, "8", "no pick on this one", 99.0)
     line = sales.track_record(con)
-    assert "last 8 picks" in line and "50% more" in line
+    assert "valued $10 to $50, final prices ran 50% more" in line and "last 8 picks" in line
     item = listing("9", "Sam Example 2023 Topps Chrome Refractor #45")
     assert line in score.build_prompt([item], track=line)
     con.execute("DELETE FROM sales")
@@ -367,3 +367,23 @@ def test_an_older_sales_table_gains_the_kind_column_with_auctions_as_the_default
     old.commit()
     old.close()
     assert sales.with_calls(db.connect())[0]["kind"] == "auction"
+
+
+def test_the_track_record_is_kept_per_price_band():
+    con = db.connect()
+    for n in range(8):       # cheap cards sold for less than the bot thought
+        sale(con, f"1{n}", f"cheap {n}", 5.0, value=7.0, max_bid=3.03, ago=n)
+    for n in range(8):       # mid-priced ones were about right
+        sale(con, f"2{n}", f"mid {n}", 20.5, value=20.0, max_bid=12.12, ago=n)
+    for n in range(7):       # dear ones ran high, but there are too few to say so yet
+        sale(con, f"3{n}", f"dear {n}", 90.0, value=60.0, max_bid=35.35, ago=n)
+    line = sales.track_record(con)
+    assert "for cards valued under $10, final prices ran 29% less than your \"value\"" in line
+    assert "$10 to $50" not in line and "over $50" not in line
+    bands = sales.scorecard(sales.with_calls(con))["bands"]
+    assert [(b["band"], b["calls"], b["value_bias_pct"]) for b in bands] == [
+        ("under $10", 8, -29), ("$10 to $50", 8, 2), ("over $50", 7, 50)]
+    sale(con, "37", "dear 7", 90.0, value=60.0, max_bid=35.35)
+    assert "over $50, final prices ran 50% more" in sales.track_record(con)
+    assert sales.scorecard([])["bands"][0] == {
+        "band": "under $10", "calls": 0, "value_gap_pct": None, "value_bias_pct": None}

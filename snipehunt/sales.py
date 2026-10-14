@@ -38,9 +38,12 @@ HINTS_PER_LISTING = 1   # of those, sales of another grade or print run of the c
 MIN_OVERLAP = 0.5
 HINT = " (different grade/parallel)"
 UNKNOWN_SHIPPING = 5.00
-TRACK_CALLS = 30        # the latest calls the scoring prompt's track record looks at
-TRACK_MIN = 8           # fewer than this says nothing yet
+TRACK_CALLS = 30        # the latest calls per price band the track record looks at
+TRACK_MIN = 8           # fewer than this in a band says nothing yet
 TRACK_OFF = 10          # percent the going rate has to be off before it is mentioned
+# Cheap cards and dear ones miss in different directions, so the going rate is
+# checked per band of the pick's value: (from, up to, how the prompt names it).
+BANDS = ((0, 10, "under $10"), (10, 50, "$10 to $50"), (50, None, "over $50"))
 # "#42" or "#US-123", but not the copy number in "#07/50".
 HASH_NUMBER = re.compile(r"#\s?([A-Z]{0,4}-?\d{1,4}[A-Z]?)\b(?!\s?/\s?\d)", re.I)
 # US123 or HMT45 written without a dash. Capitals only, so "Lot12" isn't one.
@@ -314,6 +317,27 @@ def with_calls(con, since: float = 0) -> list[dict]:
     return out
 
 
+def band(value: float) -> str:
+    """Which price band a going rate falls in."""
+    return next(name for low, high, name in BANDS if high is None or value < high)
+
+
+def by_band(rows: list[dict], latest: int | None = None) -> list[dict]:
+    """How far off the going rates ran in each price band, cheapest band first.
+
+    `rows` are newest first; `latest` looks only at that many calls per band.
+    """
+    out = []
+    for _, _, name in BANDS:
+        off = [r["off"] for r in rows if r["call"] and r["off"] is not None
+               and band(r["call"]["value"]) == name][:latest]
+        out.append({
+            "band": name, "calls": len(off),
+            "value_gap_pct": round(100 * statistics.median(abs(o) for o in off)) if off else None,
+            "value_bias_pct": round(100 * statistics.median(off)) if off else None})
+    return out
+
+
 def scorecard(rows: list[dict]) -> dict:
     """How the calls among these sales turned out.
 
@@ -332,21 +356,26 @@ def scorecard(rows: list[dict]) -> dict:
         # and which way: above zero means cards sold for more than the guess
         "value_bias_pct": round(100 * statistics.median(off)) if off else None,
         "valued": len(off),
+        # the same two numbers for cheap, mid-priced and dear cards apart
+        "bands": by_band(made),
     }
 
 
 def track_record(con) -> str:
-    """One line for the scoring prompt when the going rates have been running off."""
-    recent = [r for r in with_calls(con) if r["call"] and r["off"] is not None][:TRACK_CALLS]
-    if len(recent) < TRACK_MIN:
+    """One line for the scoring prompt when the going rates have been running off.
+
+    Each price band is judged on its own: a band is mentioned once it has
+    TRACK_MIN calls and its going rates are TRACK_OFF percent out or more.
+    """
+    off = [f"for cards valued {b['band']}, final prices ran {abs(b['value_bias_pct'])}% "
+           f"{'more' if b['value_bias_pct'] > 0 else 'less'} than your \"value\" "
+           f"(last {b['calls']} picks)"
+           for b in by_band(with_calls(con), TRACK_CALLS)
+           if b["calls"] >= TRACK_MIN and abs(b["value_bias_pct"]) >= TRACK_OFF]
+    if not off:
         return ""
-    bias = round(100 * statistics.median(r["off"] for r in recent))
-    if abs(bias) < TRACK_OFF:
-        return ""
-    way = "more" if bias > 0 else "less"
-    return (f"- Your track record: of your last {len(recent)} picks whose auctions then sold, "
-            f"the real final price with shipping was typically {abs(bias)}% {way} than the "
-            f"\"value\" you gave. Correct for that when you estimate a going rate.\n")
+    return ("- Your track record on picks whose auctions then sold, real final price with "
+            f"shipping: {'; '.join(off)}. Correct for that when you estimate a going rate.\n")
 
 
 def market(con, now: datetime, limit: int = 40) -> dict:

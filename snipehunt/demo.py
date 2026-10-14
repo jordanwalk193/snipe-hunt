@@ -161,6 +161,10 @@ def _market(now: datetime) -> dict:
                               "under_max": price <= call[1]}})
     return {"count": 212, "count_7d": 41, "calls": 31, "under_max": 22, "over_max": 9,
             "under_win": 28, "value_gap_pct": 14, "value_bias_pct": 6, "valued": 28,
+            "bands": [
+                {"band": "under $10", "calls": 12, "value_gap_pct": 22, "value_bias_pct": -18},
+                {"band": "$10 to $50", "calls": 13, "value_gap_pct": 11, "value_bias_pct": 6},
+                {"band": "over $50", "calls": 3, "value_gap_pct": 9, "value_bias_pct": 8}],
             "sold": sold, "history": _history(now)}
 
 
