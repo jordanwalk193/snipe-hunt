@@ -35,6 +35,7 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Checks your Gixen amounts**: reads the snipes you set (never changes them) and says how each amount sits against the card's going rate: over it, a fair bid that should win, a real discount, or a long shot. A card it has no price for gets one Claude appraisal, kept so it is paid for once.
 - **Ranks the rarest cards for sale**: the ten lowest print runs on eBay right now (1/1s, then /5, /10 and so on), read from the listing titles on every search at no Claude cost.
 - **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes, and what the week's auctions sold for.
+- **Reviews and tunes itself.** A weekly self-review of its own numbers proposes fixes, and may adjust one bounded setting a week and put it back if things get worse. It never changes its own code. See [How it improves itself](#how-it-improves-itself).
 - **Shows what it costs.** Every Claude call's cost is added up per day and month and shown on the dashboard.
 
 <p>
@@ -136,6 +137,7 @@ One process runs everything. Times are in `SNIPEHUNT_TZ`.
 | Every hour, on the hour | Search, score, alert |
 | 9:00am | Limited-drops check, inventory sync from email |
 | Sunday 6:45pm | Weekly report (the first Sunday adds a value check, duplicates and grading candidates) |
+| Sunday 7:30pm | Weekly self-review; see [How it improves itself](#how-it-improves-itself) |
 
 Run any of them by hand, with `--dry-run` to see what it would do:
 
@@ -155,6 +157,39 @@ Nothing here needs setting up. The longer the bot runs, the more it has to go on
 - **Corrections per price band.** Once enough of its picks have sold, the bot tells Claude how far off its going rates have been running, separately for cards valued under $10, $10 to $50 and over $50, since cheap and dear cards tend to miss in different directions.
 
 Where a sale didn't state its shipping, $5 is assumed, the same as everywhere else, and the total is marked as estimated.
+
+## How it improves itself
+
+Three levels, from fully automatic to one that waits for you. The rule across all of them: **the bot never changes its own code.** It can change a few of its own settings, inside fixed bounds; code changes only arrive as pull requests a person merges.
+
+**1. A weekly self-review (automatic).** On Sunday evening, after the weekly report, the bot adds up its own numbers: how its picks sold overall and per price band, the steals it missed by type of card, how many picks you hid or sniped and how your maxes compare with its own, alerts sent, held and dropped as stale, what Claude cost per job and per pick, eBay calls per run, failed runs and Gixen sign-outs. It shows them to Claude next to the four weeks before and asks what it is getting wrong and what the three to five most valuable fixes are, each with its evidence, expected effect, a way to measure it and its risk. The result is written to `reports/reflect-YYYY-MM-DD.md`. It also follows up the last four reviews: which proposals were done, and whether the metric each one aimed at moved.
+
+The review sees numbers and nothing else. Listing titles, seller names and email text are written by strangers, so none of it is ever put in front of a prompt that can lead to a change. Claude gets no tools for this call: no web, no shell.
+
+With `GITHUB_REPO` and `GITHUB_TOKEN` set, the week's proposals also go to one GitHub issue, "Weekly self-review YYYY-MM-DD", labelled `self-review`, as a checklist. Use a fine-grained token for that one repository with **Issues read and write only**. Without a token you get a short phone alert that links the report. On a public repository the issue is public, and it holds your week's numbers (counts, percentages, Claude cost).
+
+**2. Bounded self-tuning (automatic, reversible).** The review may change one setting a week, from this list and no other, inside these bounds:
+
+| Setting | What it does | Default | Range | Most it moves in a week |
+|---|---|---|---|---|
+| `edge_min_pct` | How far under the going rate a card must be to be called a price mistake, hidden or a sleeper | 25 | 15 to 40 | 5 |
+| `min_overlap` | Share of title words a sold price must share with a listing to count as a comp | 0.5 | 0.4 to 0.7 | 0.05 |
+| `track_off` | How far off the going rates must run before scoring is told | 10 | 5 to 20 | 5 |
+| `price_lookups` | Sold-price web lookups per scoring call | 8 | 0 to 12 | 2 |
+| `fast_min_price` | Asking price at which a plain card is worth a fast-lane call | 15 | 5 to 30 | 5 |
+| `yellow_max_total` | The cheap-card alert limit | 2 | 1 to 4 | 0.5 |
+
+Every change is logged with its reason and the metric it is judged by, measured over the four weeks before. Two weeks later the metric is measured again. Worse by more than noise (15% of itself, and at least 3 points) and the setting is put back. Fewer than 8 results before or after is "inconclusive, keep watching", for up to six weeks. A setting you have changed by hand since is never put back. The log is on the dashboard and in the weekly report, and the `self_tuning` switch freezes all of it. Never tunable: anything about the read-only rules, quiet hours, which alerts are on, credentials or how the bot signs in to Gixen.
+
+**3. A monthly improvement pull request (you approve).** [`docs/SELF_IMPROVE.md`](docs/SELF_IMPROVE.md) holds the instructions for a Claude Code session, run by you or on a schedule and never by the bot itself: read the open `self-review` issues and the last four reviews, pick the single most valuable code proposal, implement it with tests on a branch, and open a pull request with the problem, the evidence, how to measure success and how to roll back. It never merges and never pushes to main. `make improve` prints the instructions.
+
+`tests/test_guards.py` runs in CI on every pull request and fails if a read-only guard goes missing: Claude's tool limits, the "never bid or buy" rules in the prompt, Gixen being read-only, the price check on every pick, the self-review having no tools. No pull request, including one Claude writes, can quietly drop them.
+
+Run a review by hand, without changing anything:
+
+```
+docker compose exec snipe-hunt python -m snipehunt.jobs reflect --dry-run
+```
 
 ## Alerts and quiet hours
 
@@ -201,7 +236,7 @@ eBay disables a Production keyset until your app answers its Marketplace Account
 
 **What does it cost to run?** eBay's API is free. Claude is the cost, and it is not trivial: in the one setup this has run on, an hourly run that scored 48 new listings came to about $0.45 at API prices on the CLI's default model. About 40% of that was sold-price web lookups, and most of the rest was Claude reading the prompt and writing its answer. A quiet player costs far less; a busy one at that rate would be several dollars a day. Three things cut it:
 
-- **Price lookups** (a setting in Home Assistant, 0 to 8, default 8): how many sold prices Claude may look up per run. At 0 it prices every card from what it knows and uses no web tools. In that same setup only about a third of the picks worth looking up ended with a real sold price, so fewer lookups costs less accuracy than you might expect. Replaying those 48 listings with lookups at 0 cost $0.25 and picked the same 9 cards, with lower maxes on three of them.
+- **Price lookups** (a setting in Home Assistant, 0 to 12, default 8): how many sold prices Claude may look up per run. At 0 it prices every card from what it knows and uses no web tools. In that same setup only about a third of the picks worth looking up ended with a real sold price, so fewer lookups costs less accuracy than you might expect. Replaying those 48 listings with lookups at 0 cost $0.25 and picked the same 9 cards, with lower maxes on three of them.
 - **`CLAUDE_EFFORT=medium`** in `.env`: Claude thinks less before answering. On a replay of the same 48 listings it cost roughly a tenth less and found 8 of the same 9 picks, with two of them a tier lower.
 - **`CLAUDE_MODEL`** in `.env`: a smaller model costs much less per run. Not measured here; compare its picks with the default for a day before trusting it.
 
