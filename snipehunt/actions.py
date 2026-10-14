@@ -24,6 +24,7 @@ def skip(con, data: dict) -> str:
         raise ValueError("not an eBay item number")
     ids = [i for i in snapshot.skipped_ids(con) if i != item] + [item]
     db.kv_set(con, snapshot.SKIPPED_KEY, json.dumps(ids[-MAX_SKIPPED:]))
+    db.note_passed(con, item)   # which card it was, so scoring picks fewer like it
     con.commit()
     return "Hidden. It won't come back unless you restore skipped picks."
 
@@ -31,6 +32,7 @@ def skip(con, data: dict) -> str:
 def unskip_all(con, data: dict) -> str:
     count = len(snapshot.skipped_ids(con))
     db.kv_set(con, snapshot.SKIPPED_KEY, "[]")
+    db.kv_set(con, db.PASSED_KEY, "[]")   # restored picks are no longer "passed on"
     con.commit()
     return f"Restored {count} skipped pick{'s' if count != 1 else ''}."
 

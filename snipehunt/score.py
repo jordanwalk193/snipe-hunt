@@ -15,7 +15,7 @@ import sys
 
 from datetime import datetime
 
-from . import config, profile, sales, settings, usage
+from . import config, db, profile, sales, settings, usage
 from .ebay_search import Listing
 
 WEB_TOOLS = "WebFetch,WebSearch"
@@ -146,16 +146,46 @@ MISSED = """=== cards you passed on that sold cheap. Watch for these kinds of li
 """
 
 
-def learned(con) -> str:
-    """What the bot has learned since it started, as extra sections for the prompt.
+TASTE_SHOWN = 15          # hidden picks, and snipes, shown as examples of taste
+TASTE_RULE = """- {collector}'s own choices are listed below: picks hidden from the dashboard \
+and auctions sniped. Pick fewer cards like the hidden ones and more like the sniped \
+ones. If the snipe maxes keep running higher or lower than yours on a kind of card, \
+lean that way.
+"""
+PASSED = """=== recently passed on (don't pick more like these) ===
+{lines}
 
-    Each section appears only when there is something to put in it.
+"""
+SNIPED = """=== recently sniped (more like these) | their max vs your max ===
+{lines}
+
+"""
+
+
+def learned(con) -> tuple[str, str]:
+    """What the bot has learned from its misses and from the collector's own choices.
+
+    Returns (extra rules, extra sections) for the prompt. Each part is there
+    only when there is something to say, and all of it is kept short.
     """
-    out = ""
+    rules = sections = ""
     missed = sales.missed(con)[:MISSED_SHOWN]
     if missed:
-        out += MISSED.format(lines=sales.missed_lines(missed))
-    return out
+        sections += MISSED.format(lines=sales.missed_lines(missed))
+    passed = db.passed(con)[-TASTE_SHOWN:][::-1]
+    if passed:
+        sections += PASSED.format(lines="\n".join(
+            str(p.get("card") or p.get("title"))[:80]
+            + (f" | ${p['price']:.2f}" if p.get("price") is not None else "") for p in passed))
+    sniped = db.recent_snipes(con, TASTE_SHOWN)
+    if sniped:
+        sections += SNIPED.format(lines="\n".join(
+            f"{str(s['title'])[:80]} | {s['my_max']:.2f} vs "
+            + (f"{s['bot_max']:.2f}" if s["bot_max"] is not None else "no pick")
+            for s in sniped))
+    if passed or sniped:
+        rules = TASTE_RULE.format(collector=profile.get().collector)
+    return rules, sections
 
 
 def _compact(item: Listing) -> str:
@@ -197,11 +227,12 @@ def inventory_for_scoring() -> str:
 
 
 def build_prompt(items: list[Listing], lookups: int = 8,
-                 sold: list[dict] | None = None, track: str = "", learned: str = "") -> str:
+                 sold: list[dict] | None = None, track: str = "",
+                 learned: tuple[str, str] = ("", "")) -> str:
     who = profile.get()
     return PROMPT.format(
-        learned=learned,
-        sold_rule=(SOLD_RULE if sold else "") + track,
+        learned=learned[1],
+        sold_rule=(SOLD_RULE if sold else "") + track + learned[0],
         sold=SOLD.format(lines=sales.lines(sold)) if sold else "",
         app=who.app_name, collector=who.collector, player=who.described,
         name=who.player,
@@ -318,7 +349,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
             track = sales.track_record(con) if con is not None else ""
             reply = extract_json(ask_claude(
                 build_prompt(batch, lookups, sold, track,
-                             learned(con) if con is not None else ""),
+                             learned(con) if con is not None else ("", "")),
                 tools=WEB_TOOLS if lookups else ""))
         except Exception as exc:
             if not scored:

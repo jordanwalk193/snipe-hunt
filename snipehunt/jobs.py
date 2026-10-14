@@ -93,7 +93,8 @@ def _gixen_list(con) -> list[dict]:
 
 def _note_snipes(con, now: float | None = None) -> int:
     """Put every Gixen snipe on the player's cards in `seen`, so sales.collect asks
-    eBay what it closed at. Returns how many were noted."""
+    eBay what it closed at, and in `snipe_log`, so scoring learns what gets sniped
+    and for how much. Returns how many were noted."""
     now = now or time.time()
     noted = 0
     for s in _gixen_list(con):
@@ -102,6 +103,8 @@ def _note_snipes(con, now: float | None = None) -> int:
         # an ended snipe has no time left on the page: ask eBay on the next run
         end_ts = datetime.fromisoformat(s["end_time"]).timestamp() if s["end_time"] else now
         db.note_snipe(con, s["item_id"], s["title"], end_ts, s.get("seller"))
+        if s.get("max_bid"):
+            db.log_snipe(con, s)
         noted += 1
     con.commit()
     return noted

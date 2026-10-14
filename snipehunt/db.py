@@ -43,8 +43,18 @@ CREATE TABLE IF NOT EXISTS mail_events (
     logged_at  INTEGER NOT NULL,
     UNIQUE (date, type, item_id, title)
 );
+CREATE TABLE IF NOT EXISTS snipe_log (
+    item_id    TEXT PRIMARY KEY,
+    title      TEXT,
+    my_max     REAL,
+    bot_max    REAL,
+    bot_value  REAL,
+    logged_at  INTEGER NOT NULL
+);
 """
 
+PASSED_KEY = "passed_picks"   # what was hidden with the Skip button, to learn taste from
+MAX_PASSED = 300
 PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
 # Added to `seen` after the first release, so sales.py can look up closed auctions.
 # `price` and `seller` came later still, for price drops and relists (watch.py).
@@ -177,6 +187,46 @@ def mail_events(con, since_date: str) -> list[dict]:
     rows = con.execute(
         "SELECT data FROM mail_events WHERE date>=? ORDER BY date", (since_date,))
     return [json.loads(r["data"]) for r in rows]
+
+
+def note_passed(con, item_id: str) -> None:
+    """Remember what a hidden pick was, not just its number, so scoring can learn from it."""
+    row = con.execute("SELECT data FROM picks WHERE item_id=?", (item_id,)).fetchone()
+    if row is None:
+        return
+    pick = json.loads(row["data"])
+    kept = [p for p in passed(con) if p["item_id"] != item_id]
+    kept.append({"item_id": item_id, "title": pick.get("title"), "card": pick.get("card"),
+                 "tier": pick.get("tier"), "price": pick.get("price"), "at": int(time.time())})
+    kv_set(con, PASSED_KEY, json.dumps(kept[-MAX_PASSED:], ensure_ascii=False))
+
+
+def passed(con) -> list[dict]:
+    """The picks hidden with the Skip button, oldest first."""
+    return json.loads(kv_get(con, PASSED_KEY, "[]"))
+
+
+def log_snipe(con, snipe: dict) -> None:
+    """Keep a Gixen snipe's amount next to the max and going rate the bot gave that auction.
+
+    The amount follows the snipe if it is changed; a snipe on an auction the
+    bot never picked is kept too, with no bot numbers.
+    """
+    row = con.execute("SELECT data FROM picks WHERE item_id=?", (snipe["item_id"],)).fetchone()
+    pick = json.loads(row["data"]) if row else {}
+    con.execute(
+        "INSERT INTO snipe_log (item_id, title, my_max, bot_max, bot_value, logged_at) "
+        "VALUES (?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET my_max=excluded.my_max, "
+        "bot_max=COALESCE(excluded.bot_max, snipe_log.bot_max), "
+        "bot_value=COALESCE(excluded.bot_value, snipe_log.bot_value)",
+        (snipe["item_id"], pick.get("card") or snipe.get("title"), snipe.get("max_bid"),
+         pick.get("max"), pick.get("value"), int(time.time())))
+
+
+def recent_snipes(con, limit: int) -> list[dict]:
+    """The latest snipes logged, newest first."""
+    return [dict(r) for r in con.execute(
+        "SELECT * FROM snipe_log ORDER BY logged_at DESC, rowid DESC LIMIT ?", (limit,))]
 
 
 def kv_get(con, key: str, default: str | None = None) -> str | None:

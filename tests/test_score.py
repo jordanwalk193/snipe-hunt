@@ -74,3 +74,47 @@ def test_an_edge_is_kept_only_when_the_numbers_back_it():
     assert judged("bargain", 40.0) is None and judged("", 40.0) is None
     assert judged("hidden", None) is None                    # no going rate, no claim
     assert '"edge"' in score.PROMPT and "slipped through the cracks" in score.PROMPT
+
+
+def test_scoring_learns_taste_from_what_was_hidden_and_what_was_sniped(monkeypatch):
+    from snipehunt import actions, db, jobs
+    from snipehunt.ebay_search import Listing
+    con = db.connect()
+    item = Listing("9", "2023 Topps Chrome Jordan Walker Refractor #45", 1.0, "USD", 1.0,
+                   ["AUCTION"], 0, None, "s", "u", None)
+    plain = score.build_prompt([item])
+    assert "passed on" not in plain and "sniped" not in plain        # nothing to say: no cost
+    db.save_pick(con, {"item_id": "111111111111", "card": "2024 Topps Holiday Relic",
+                       "title": "2024 Topps Holiday Jordan Walker Relic", "tier": "yellow",
+                       "max": 2.02, "price": 0.99})
+    db.save_pick(con, {"item_id": "222222222222", "card": "2023 Bowman's Best Auto /99",
+                       "tier": "fire", "max": 20.2, "value": 45.0})
+    assert actions.skip(con, {"item_id": "111111111111"}).startswith("Hidden")
+    assert db.passed(con)[0] == {
+        "item_id": "111111111111", "title": "2024 Topps Holiday Jordan Walker Relic",
+        "card": "2024 Topps Holiday Relic", "tier": "yellow", "price": 0.99,
+        "at": db.passed(con)[0]["at"]}
+    snipes = [{"item_id": "222222222222", "title": "2023 Bowmans Best Jordan Walker Auto 12/99",
+               "seller": "x", "end_time": None, "max_bid": 31.31, "current_bid": 5.0,
+               "status": "SCHEDULED"},
+              {"item_id": "333333333333", "title": "2022 Bowman Chrome Jordan Walker Mojo",
+               "seller": "x", "end_time": None, "max_bid": 4.04, "current_bid": 1.0,
+               "status": "SCHEDULED"}]
+    monkeypatch.setitem(config.load(), "GIXEN_USER", "me")
+    monkeypatch.setattr(jobs.gixen, "snipes", lambda con: (snipes, None, 0))
+    jobs._note_snipes(con)
+    snipes[0]["max_bid"] = 35.35                                      # the amount was raised
+    jobs._note_snipes(con)
+    logged = {r["item_id"]: r for r in db.recent_snipes(con, 10)}
+    assert len(logged) == 2 and (logged["222222222222"]["my_max"], logged["222222222222"][
+        "bot_max"], logged["222222222222"]["bot_value"]) == (35.35, 20.2, 45.0)
+    rules, sections = score.learned(con)
+    assert "lean that way" in rules
+    assert "(don't pick more like these) ===\n2024 Topps Holiday Relic | $0.99\n" in sections
+    assert "2023 Bowman's Best Auto /99 | 35.35 vs 20.20" in sections
+    assert "2022 Bowman Chrome Jordan Walker Mojo | 4.04 vs no pick" in sections
+    prompt = score.build_prompt([item], learned=(rules, sections))
+    assert prompt.index("lean that way") < prompt.index("Reply with ONLY")
+    assert prompt.index("recently sniped") < prompt.index("=== listings")
+    actions.unskip_all(con, {})
+    assert db.passed(con) == []                                       # restored: not passed on

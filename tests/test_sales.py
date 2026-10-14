@@ -405,11 +405,12 @@ def test_a_cheap_sale_nobody_picked_is_a_missed_steal():
     assert (miss["item_id"], miss["total"], miss["typical"], miss["pct"], miss["n"]) == (
         "4", 12.0, 22.0, 45, 3)
     assert sales.find_missed(con, NOW + 40 * 86400) == []              # long ago by then
-    assert sales.missed(con) == [] and "passed on that sold cheap" not in score.learned(con)
+    assert sales.missed(con) == [] and score.learned(con) == ("", "")
     assert sales.save_missed(con, NOW) == 1
-    text = score.learned(con)
+    rules, text = score.learned(con)
     assert "$12.00 delivered, typically $22.00 | Jordan Walker 2023 Topps Chrome Blue" in text
-    prompt = score.build_prompt([listing("9", blue)], learned=text)
+    assert rules == ""                                                 # no taste to go on yet
+    prompt = score.build_prompt([listing("9", blue)], learned=(rules, text))
     assert prompt.index("passed on that sold cheap") < prompt.index("=== listings")
     view = sales.market(con, datetime.fromtimestamp(NOW, config.TZ))
     assert view["missed_steals"] == 1 and view["missed"][0]["item_id"] == "4"
