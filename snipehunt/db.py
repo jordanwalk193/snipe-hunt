@@ -86,6 +86,26 @@ def touch(con, item_id: str, title: str, is_auction: bool | None = None,
     )
 
 
+def note_snipe(con, item_id: str, title: str, end_ts: float | None,
+               seller: str | None = None) -> None:
+    """Remember an auction from the Gixen list so its final price gets looked up.
+
+    The search may never have returned it. Only gaps are filled: whatever a
+    search already recorded about the listing (title, end, seller) is better
+    than Gixen's copy and is left alone, and so is when it was last seen.
+    """
+    now = int(time.time())
+    con.execute(
+        "INSERT INTO seen (item_id, title, first_seen, last_seen, is_auction, end_ts, seller)"
+        " VALUES (?,?,?,?,1,?,?) "
+        "ON CONFLICT(item_id) DO UPDATE SET is_auction=1, "
+        "title=COALESCE(NULLIF(seen.title, ''), excluded.title), "
+        "end_ts=COALESCE(seen.end_ts, excluded.end_ts), "
+        "seller=COALESCE(seen.seller, excluded.seller)",
+        (item_id, title, now, now, None if end_ts is None else int(end_ts), seller or None),
+    )
+
+
 def needs_scoring(con, item_id: str, total: float) -> bool:
     row = con.execute(
         "SELECT scored_total FROM seen WHERE item_id=?", (item_id,)

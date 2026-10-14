@@ -200,3 +200,35 @@ def test_cards_that_sold_more_than_once_get_a_price_history():
     last = sales.last_sold(sales.with_calls(con), "Sam Example 2023 Topps Chrome Gold Refractor /50 #45")
     assert (last["total"], last["n"]) == (52.0, 3)
     assert sales.last_sold(sales.with_calls(con), "2024 Panini Prizm Silver #12") is None
+
+
+def test_a_gixen_snipe_the_search_never_found_still_gets_its_sold_price(monkeypatch):
+    from datetime import datetime
+    from snipehunt import jobs
+    con = db.connect()
+    ends = datetime.fromtimestamp(NOW + 1800, config.TZ).isoformat(timespec="minutes")
+    db.touch(con, "2", "2023 Topps Chrome Jordan Walker Refractor #45 RC", True, NOW + 900,
+             1.25, 3.0, "searchseller")
+    snipes = [
+        {"item_id": "1", "title": "2023 Bowman Chrome Jordan Walker Blue /150", "seller":
+         "dcsports87", "end_time": ends, "max_bid": 6.06, "current_bid": 1.0,
+         "status": "SCHEDULED"},
+        {"item_id": "2", "title": "2023 Topps Chrome Jordan Walker Refr...", "seller": "x",
+         "end_time": ends, "max_bid": 3.03, "current_bid": 1.0, "status": "SCHEDULED"},
+        {"item_id": "3", "title": "2023 Prizm Football Tom Brady Silver", "seller": "x",
+         "end_time": ends, "max_bid": 9.09, "current_bid": 1.0, "status": "SCHEDULED"}]
+    monkeypatch.setitem(config.load(), "GIXEN_USER", "me")
+    monkeypatch.setattr(jobs.gixen, "snipes", lambda con: (snipes, None, NOW))
+    assert jobs._note_snipes(con, NOW) == 2          # the football card isn't the player's
+    rows = {r["item_id"]: dict(r) for r in con.execute("SELECT * FROM seen")}
+    assert set(rows) == {"1", "2"}
+    assert (rows["1"]["is_auction"], rows["1"]["end_ts"], rows["1"]["seller"]) == (
+        1, int(NOW + 1800), "dcsports87")
+    # what the search recorded is better than Gixen's copy and is kept
+    assert (rows["2"]["title"], rows["2"]["end_ts"], rows["2"]["seller"], rows["2"]["price"]) == (
+        "2023 Topps Chrome Jordan Walker Refractor #45 RC", int(NOW + 900), "searchseller", 3.0)
+    ebay = FakeEbay({"1": ended(4.25, end=NOW + 1800), "2": ended(2.0, end=NOW + 900)})
+    assert sales.collect(con, ebay, now=NOW) == 0 and ebay.asked == []   # still running
+    assert sales.collect(con, ebay, now=NOW + 3600) == 2
+    sale = dict(con.execute("SELECT * FROM sales WHERE item_id='1'").fetchone())
+    assert (sale["price"], sale["title"]) == (4.25, "2023 Bowman Chrome Jordan Walker Blue /150")

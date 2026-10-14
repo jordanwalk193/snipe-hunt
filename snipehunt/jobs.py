@@ -41,6 +41,11 @@ def hourly(dry_run: bool = False) -> str:
     # from being recorded, and these listings are still on eBay either way.
     con.commit()
     if not dry_run:
+        try:   # snipes set on auctions the search never returned still get a sold price
+            _note_snipes(con)
+        except Exception as exc:
+            con.rollback()
+            print(f"gixen: {exc}", file=sys.stderr)
         try:   # what closed auctions went for; scoring prices from these
             sold = sales.collect(con)
             print(f"sales: {sold} new sold prices, {sales.count(con)} on record",
@@ -75,11 +80,32 @@ def hourly(dry_run: bool = False) -> str:
             f"{len(picks)} picks, {sent} alerted")
 
 
+def _gixen_list(con) -> list[dict]:
+    """The Gixen snipe list (a cached read), or nothing when Gixen is off."""
+    if not (settings.load(con)["gixen_enabled"] and config.get("GIXEN_USER")):
+        return []
+    return gixen.snipes(con)[0]
+
+
+def _note_snipes(con, now: float | None = None) -> int:
+    """Put every Gixen snipe on the player's cards in `seen`, so sales.collect asks
+    eBay what it closed at. Returns how many were noted."""
+    now = now or time.time()
+    noted = 0
+    for s in _gixen_list(con):
+        if not s.get("title") or ebay_search.classify(s["title"]) == "no":
+            continue   # a snipe on something else; its price is no use here
+        # an ended snipe has no time left on the page: ask eBay on the next run
+        end_ts = datetime.fromisoformat(s["end_time"]).timestamp() if s["end_time"] else now
+        db.note_snipe(con, s["item_id"], s["title"], end_ts, s.get("seller"))
+        noted += 1
+    con.commit()
+    return noted
+
+
 def _appraise_snipes(con) -> None:
     """Price the scheduled Gixen snipes the bot has no pick or sale for (cached reads only)."""
-    if not (settings.load(con)["gixen_enabled"] and config.get("GIXEN_USER")):
-        return
-    sniped, _, _ = gixen.snipes(con)
+    sniped = _gixen_list(con)
     now = datetime.now(config.TZ).isoformat(timespec="minutes")
     live = [s for s in sniped if s["status"] == "SCHEDULED" and s["end_time"]
             and s["end_time"] > now]
