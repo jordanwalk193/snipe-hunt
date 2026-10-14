@@ -221,3 +221,36 @@ def test_a_night_with_nothing_to_enter_sends_no_bundle_and_does_not_wake_you_lat
     settings.update(con, {"bedtime_bundle": False})                 # the old way wakes you
     soon = pick(item_id="8", end_time="2026-10-12T02:00-04:00")
     assert notify.deliver(con, [soon], now=at(12, 1)) == 2 and sent[0][0] == "Snipe Hunt: 2 steals"
+
+
+def test_the_same_card_from_several_sellers_is_one_entry_with_a_line_each(monkeypatch):
+    import json
+    from snipehunt import db
+    con, sent = db.connect(), _phone(monkeypatch)
+    card = "2023 Topps Chrome Jordan Walker Blue Refractor /150 #45"
+    a = pick(item_id="111111111111", title=card, card="2023 Chrome Blue /150", tier="green",
+             end_time="2026-10-12T21:14-04:00")
+    b = pick(item_id="222222222222", title="Jordan Walker 2023 Topps Chrome Blue Refractor "
+             "77/150 #45", card="2023 Topps Chrome Blue Refractor /150", tier="green",
+             price=9.0, shipping=0.0, max=22.22, end_time="2026-10-12T19:00-04:00")
+    c = pick(item_id="333333333333", title=card + " PSA 10", card="2023 Chrome Blue PSA 10")
+    entries = notify.group_same([a, b, c])
+    assert [len(notify.members(e)) for e in entries] == [1, 2]       # the graded copy stands alone
+    lines = notify.format_pick(entries[1]).split("\n")
+    assert lines[0] == "🟢 2023 Topps Chrome Blue Refractor /150 (2 listings)"   # ends first, so leads
+    assert lines[1] == "$9.00 + free ship · ends Mon 7:00 PM EDT · max 22.22 · 222222222222"
+    assert lines[2] == "$12.50 + $1.25 ship · ends Mon 9:14 PM EDT · max 25.25 · 111111111111"
+    assert lines[-1] == "Tip: use a Gixen group bid."
+    # a group is one pick toward a message, and every listing in it is marked alerted
+    extra = [pick(item_id=str(n), title=f"2023 Topps Jordan Walker insert {n}", tier="yellow",
+                  total=1.5) for n in range(notify.PER_MESSAGE - 1)]
+    for p in [a, b, c] + extra:
+        db.touch(con, p["item_id"], "t")
+    assert notify.deliver(con, [a, b] + extra, now=NOW_DAY) == notify.PER_MESSAGE + 1
+    assert [title for title, _ in sent] == [f"Snipe Hunt: {notify.PER_MESSAGE} steals"]
+    assert not db.may_alert(con, "111111111111", 13.75)
+    assert not db.may_alert(con, "222222222222", 13.75)
+    assert json.loads(db.kv_get(con, notify.PENDING_KEY)) == []
+    # two Buy It Nows of one card are grouped too, without the Gixen tip
+    buy = [pick(item_id=str(n), title=card, is_auction=False, end_time=None) for n in (7, 8)]
+    assert notify.GROUP_TIP not in notify.format_pick(notify.group_same(buy)[0])

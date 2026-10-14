@@ -8,12 +8,13 @@ from datetime import datetime, timedelta
 
 import requests
 
-from . import config, db, profile, score, settings
+from . import config, db, profile, sales, score, settings
 
 TIER_ICON = {"fire": "🔥", "green": "🟢", "yellow": "🟡", "drop": "⏰"}
 TIER_ORDER = {"drop": 0, "fire": 1, "green": 2, "yellow": 3}
 # Quiet hours, the urgent window and which tiers alert are in settings.py.
 PER_MESSAGE = 5                  # picks per notification, so a phone shows them all
+GROUP_TIP = "Tip: use a Gixen group bid."   # one snipe across several auctions of a card
 MAX_MESSAGES = 3                 # per run; the rest go out on the next run
 PENDING_KEY = "pending_picks"
 BEDTIME_KEY = "bedtime_bundle_night"
@@ -133,7 +134,7 @@ def split_for_bedtime(held: list[dict], now: datetime) -> tuple[list[dict], list
 
 def format_bedtime(picks: list[dict]) -> tuple[str, str, str | None, str | None]:
     """One alert with every snipe to enter tonight, soonest first."""
-    title = f"{profile.get().app_name}: enter before bed ({len(picks)})"
+    title = f"{profile.get().app_name}: enter before bed ({len(flat(picks))})"
     return (title, "\n\n".join(format_pick(p) for p in picks),
             picks[0].get("url"), picks[0].get("image"))
 
@@ -180,20 +181,74 @@ def deal_line(pick: dict) -> str:
             + (" at max" if pick.get("is_auction") else ""))
 
 
-def format_pick(pick: dict) -> str:
-    """Four short lines, with the item number alone on the last one for copying."""
-    icon = TIER_ICON.get(pick.get("tier"), "•")
+def _price_line(pick: dict) -> str:
+    """$12.50 + $1.25 ship · ends Mon 9:14 PM EDT"""
     ship = pick.get("shipping")
     ship_txt = "ship ?" if ship is None else ("free ship" if ship == 0 else f"${ship:.2f} ship")
-    line2 = f"${pick['price']:.2f} + {ship_txt}"
+    line = f"${pick['price']:.2f} + {ship_txt}"
     if pick.get("combined_ship"):
-        line2 += " (combined ship w/ open order)"
+        line += " (combined ship w/ open order)"
     end = _ends(pick)
     if end and pick.get("is_auction"):
-        line2 += f" · ends {config.local(end).strftime('%a %-I:%M %p %Z')}"
+        line += f" · ends {config.local(end).strftime('%a %-I:%M %p %Z')}"
     elif not pick.get("is_auction"):
-        line2 += " · Buy It Now" + ("/Offer" if pick.get("best_offer") else "")
-    lines = [f"{icon} {pick['card']}", line2]
+        line += " · Buy It Now" + ("/Offer" if pick.get("best_offer") else "")
+    return line
+
+
+def members(entry: dict) -> list[dict]:
+    """The picks in one alert entry: the pick itself, then other listings of the same card."""
+    return [{k: v for k, v in entry.items() if k != "others"}] + entry.get("others", [])
+
+
+def flat(entries: list[dict]) -> list[dict]:
+    return [pick for entry in entries for pick in members(entry)]
+
+
+def group_same(picks: list[dict]) -> list[dict]:
+    """Put listings of the same card from several sellers into one entry.
+
+    The best-ranked listing leads and carries the rest under "others", so a
+    group takes one place in a message. Only picks that kept their listing
+    title can be compared; a limited drop is never grouped.
+    """
+    entries: list[dict] = []
+    for pick in sorted(picks, key=_rank):
+        title = pick.get("title") if pick.get("tier") != "drop" else None
+        lead = next((e for e in entries if title and e.get("title") and e.get("tier") != "drop"
+                     and sales._same(title, e["title"])), None)
+        if lead is None:
+            entries.append(dict(pick))
+        else:
+            lead.setdefault("others", []).append(pick)
+    return entries
+
+
+def format_group(entry: dict) -> str:
+    """One card listed by several sellers: the card, then a line for each listing."""
+    listings = sorted(members(entry), key=lambda p: p.get("end_time") or "9")
+    icon = TIER_ICON.get(entry.get("tier"), "•")
+    lines = [f"{icon} {entry['card']} ({len(listings)} listings)"]
+    if entry.get("edge") in EDGE_LABEL:
+        lines.insert(0, EDGE_LABEL[entry["edge"]])
+    for p in listings:
+        lines.append(_price_line(p) + (f" · max {p['max']:.2f}" if p.get("max") is not None
+                                       else "") + f" · {p['item_id']}")
+    if entry.get("deal"):
+        lines.append(deal_line(entry))
+    if entry.get("why"):
+        lines.append(entry["why"])
+    if sum(bool(p.get("is_auction")) for p in listings) > 1:
+        lines.append(GROUP_TIP)
+    return "\n".join(lines)
+
+
+def format_pick(pick: dict) -> str:
+    """Four short lines, with the item number alone on the last one for copying."""
+    if pick.get("others"):
+        return format_group(pick)
+    icon = TIER_ICON.get(pick.get("tier"), "•")
+    lines = [f"{icon} {pick['card']}", _price_line(pick)]
     if pick.get("edge") in EDGE_LABEL:
         lines.insert(0, EDGE_LABEL[pick["edge"]])
     if pick.get("max") is not None:
@@ -227,7 +282,7 @@ def plan_messages(picks: list[dict], now: datetime | None = None
     """Split picks into phone-sized messages. Returns (messages, overflow).
 
     Anything urgent goes first, then by tier, so what is left for the next
-    run is the least time-sensitive.
+    run is the least time-sensitive. A group from group_same() counts as one.
     """
     now = now or datetime.now(config.TZ)
     ordered = sorted(picks, key=lambda p: (not is_urgent(p, now), *_rank(p)))
@@ -282,8 +337,10 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
     # Once a night, as quiet hours begin: the snipes to enter before going to bed.
     bedtime_night = quiet_night(now)[0] if bedtime_due(con, now) else None
     bedtime, hold = split_for_bedtime(hold, now) if bedtime_night else ([], hold)
-    messages, overflow = plan_messages(send_now, now)
-    hold = hold + overflow
+    bedtime = sorted(group_same(bedtime), key=lambda p: p.get("end_time") or "9")
+    # the same card from several sellers goes out as one entry
+    messages, overflow = plan_messages(group_same(send_now), now)
+    hold = hold + flat(overflow)
     outbox = [(*format_bedtime(bedtime), bedtime)] if bedtime else []
     for n, chunk in enumerate(messages, 1):
         part = f" ({n}/{len(messages)})" if len(messages) > 1 else ""
@@ -295,13 +352,13 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
                 print(f"--- would send ---\n{title}\n{body}\nurl={url}\n", file=sys.stderr)
             else:
                 send(title, body, url, image)
-                for p in chunk:
+                for p in flat(chunk):
                     db.mark_alerted(con, p["item_id"], p["total"])
             done += 1
-            sent += len(chunk)
+            sent += len(flat(chunk))
     except Exception:
         # Keep what didn't go out so the next run tries again.
-        hold = hold + [p for *_, chunk in outbox[done:] for p in chunk]
+        hold = hold + [p for *_, chunk in outbox[done:] for p in flat(chunk)]
         raise
     finally:
         if not dry_run:
