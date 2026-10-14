@@ -16,6 +16,8 @@ TIER_ORDER = {"drop": 0, "fire": 1, "green": 2, "yellow": 3}
 PER_MESSAGE = 5                  # picks per notification, so a phone shows them all
 MAX_MESSAGES = 3                 # per run; the rest go out on the next run
 PENDING_KEY = "pending_picks"
+BEDTIME_KEY = "bedtime_bundle_night"
+BEDTIME_AFTER = 2                # hours past the end of quiet hours the bedtime bundle covers
 BIN_GONE = 2 * 3600              # a Buy It Now out of the results this long has likely sold
 
 
@@ -79,9 +81,61 @@ def _ends(pick: dict) -> datetime | None:
 def is_urgent(pick: dict, now: datetime) -> bool:
     if pick.get("tier") == "drop":
         return True
+    cfg = settings.load()
+    if cfg["bedtime_bundle"] and is_quiet(now):
+        return False   # the snipe was entered before bed; nothing to wake up for
     end = _ends(pick)
-    window = timedelta(hours=settings.load()["urgent_hours"])
+    window = timedelta(hours=cfg["urgent_hours"])
     return bool(pick.get("is_auction") and end and end - now <= window)
+
+
+def quiet_night(now: datetime) -> tuple[str, datetime] | None:
+    """During quiet hours: (the date the night began, when it ends). None by day.
+
+    The date names the night, so 11:30pm and 2am of the same night give the
+    same one and the bedtime bundle goes out once.
+    """
+    if not is_quiet(now):
+        return None
+    cfg = settings.load()
+    start = settings.parse_time(cfg["quiet_start"])
+    end = settings.parse_time(cfg["quiet_end"])
+    began = now.date()
+    if start > end and now.time() < end:   # past midnight: the night began yesterday
+        began -= timedelta(days=1)
+    ends = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
+    if ends <= now:
+        ends += timedelta(days=1)
+    return began.isoformat(), ends
+
+
+def bedtime_due(con, now: datetime) -> bool:
+    """Is this the first run of tonight's quiet hours, with the bundle switched on?"""
+    night = quiet_night(now)
+    return bool(night and settings.load(con)["bedtime_bundle"]
+                and db.kv_get(con, BEDTIME_KEY) != night[0])
+
+
+def split_for_bedtime(held: list[dict], now: datetime) -> tuple[list[dict], list[dict]]:
+    """Return (snipes to enter before bed, still held until morning).
+
+    Before bed means every auction ending during quiet hours, and those ending
+    in the first couple of hours after, before the morning alert is likely read.
+    """
+    night = quiet_night(now)
+    if night is None:
+        return [], held
+    until = night[1] + timedelta(hours=BEDTIME_AFTER)
+    tonight = [p for p in held if p.get("is_auction") and _ends(p) and _ends(p) <= until]
+    return (sorted(tonight, key=lambda p: _ends(p)),
+            [p for p in held if p not in tonight])
+
+
+def format_bedtime(picks: list[dict]) -> tuple[str, str, str | None, str | None]:
+    """One alert with every snipe to enter tonight, soonest first."""
+    title = f"{profile.get().app_name}: enter before bed ({len(picks)})"
+    return (title, "\n\n".join(format_pick(p) for p in picks),
+            picks[0].get("url"), picks[0].get("image"))
 
 
 def worth_alerting(pick: dict) -> bool:
@@ -223,27 +277,35 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
     candidates = [p for p in candidates if worth_alerting(p)]
     candidates = [p for p in candidates if db.may_alert(con, p["item_id"], p["total"])]
     send_now, hold = split_for_quiet_hours(candidates, now)
+    # Once a night, as quiet hours begin: the snipes to enter before going to bed.
+    bedtime_night = quiet_night(now)[0] if bedtime_due(con, now) else None
+    bedtime, hold = split_for_bedtime(hold, now) if bedtime_night else ([], hold)
     messages, overflow = plan_messages(send_now, now)
     hold = hold + overflow
-    sent = 0
+    outbox = [(*format_bedtime(bedtime), bedtime)] if bedtime else []
+    for n, chunk in enumerate(messages, 1):
+        part = f" ({n}/{len(messages)})" if len(messages) > 1 else ""
+        outbox.append((*format_bundle(chunk, part), chunk))
+    sent = done = 0
     try:
-        for n, chunk in enumerate(messages, 1):
-            part = f" ({n}/{len(messages)})" if len(messages) > 1 else ""
-            title, body, url, image = format_bundle(chunk, part)
+        for title, body, url, image, chunk in outbox:
             if dry_run:
                 print(f"--- would send ---\n{title}\n{body}\nurl={url}\n", file=sys.stderr)
             else:
                 send(title, body, url, image)
                 for p in chunk:
                     db.mark_alerted(con, p["item_id"], p["total"])
+            done += 1
             sent += len(chunk)
     except Exception:
         # Keep what didn't go out so the next run tries again.
-        hold = hold + [p for chunk in messages for p in chunk][sent:]
+        hold = hold + [p for *_, chunk in outbox[done:] for p in chunk]
         raise
     finally:
         if not dry_run:
             db.kv_set(con, PENDING_KEY, json.dumps(hold))
+            if bedtime_night and (done or not bedtime):   # tonight's bundle is dealt with
+                db.kv_set(con, BEDTIME_KEY, bedtime_night)
             con.commit()
     return sent
 

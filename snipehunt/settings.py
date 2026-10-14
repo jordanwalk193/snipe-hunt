@@ -30,6 +30,7 @@ DEFAULTS: dict = {
     "quiet_start": "23:00",
     "quiet_end": "07:00",
     "urgent_hours": 2.0,             # auctions ending this soon ignore quiet hours
+    "bedtime_bundle": True,          # one "enter before bed" alert, no overnight wake-ups
     "need_snipe_hours": 24,          # "needs a snipe" looks this far ahead
     "monthly_budget": 0.0,
     "gixen_enabled": True,

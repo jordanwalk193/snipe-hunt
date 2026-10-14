@@ -31,9 +31,15 @@ def test_yellow_threshold():
 
 
 def test_quiet_hours():
+    from snipehunt import db, settings
     far = pick()
     soon = pick(item_id="2", end_time="2026-10-12T00:45-04:00")
     drop = pick(item_id="3", tier="drop", is_auction=False, end_time=None)
+    # with the bedtime bundle on, only a limited drop breaks through
+    send, hold = notify.split_for_quiet_hours([far, soon, drop], NOW_NIGHT)
+    assert [p["item_id"] for p in send] == ["3"]
+    assert [p["item_id"] for p in hold] == ["123456789012", "2"]
+    settings.update(db.connect(), {"bedtime_bundle": False})   # the old way: urgent auctions too
     send, hold = notify.split_for_quiet_hours([far, soon, drop], NOW_NIGHT)
     assert [p["item_id"] for p in send] == ["2", "3"]
     assert [p["item_id"] for p in hold] == ["123456789012"]
@@ -150,3 +156,68 @@ def test_a_held_pick_is_checked_against_todays_price_before_it_is_sent(monkeypat
     assert "$5.00 + free ship" in body and "75% under $20 value" in body    # rated again
     assert "$12.50" not in body and "$8.00" not in body
     assert json.loads(db.kv_get(con, notify.PENDING_KEY)) == []
+
+
+def at(day, hour, minute=0):
+    return datetime(2026, 10, day, hour, minute, tzinfo=config.TZ)
+
+
+def test_the_night_is_named_for_the_evening_it_began_on_both_sides_of_midnight():
+    from snipehunt import db, settings
+    assert notify.quiet_night(at(11, 22, 59)) is None
+    assert notify.quiet_night(at(11, 23)) == ("2026-10-11", at(12, 7))
+    assert notify.quiet_night(at(12, 0, 5)) == ("2026-10-11", at(12, 7))
+    assert notify.quiet_night(at(12, 6, 59)) == ("2026-10-11", at(12, 7))
+    assert notify.quiet_night(at(12, 7)) is None
+    assert notify.quiet_night(at(12, 23, 30))[0] == "2026-10-12"
+    settings.update(db.connect(), {"quiet_start": "00:30", "quiet_end": "06:00"})
+    assert notify.quiet_night(at(12, 0, 15)) is None             # a night owl's hours
+    assert notify.quiet_night(at(12, 1)) == ("2026-10-12", at(12, 6))
+
+
+def test_one_bedtime_bundle_a_night_with_the_snipes_to_enter_before_sleeping(monkeypatch):
+    import json
+    from snipehunt import db
+    con, sent = db.connect(), _phone(monkeypatch)
+    overnight = pick(item_id="1", end_time="2026-10-12T03:10-04:00")
+    early = pick(item_id="2", end_time="2026-10-12T08:30-04:00")      # just after quiet hours
+    tomorrow = pick(item_id="3", end_time="2026-10-12T21:00-04:00")
+    buy_now = pick(item_id="4", is_auction=False, end_time=None)
+    drop = pick(item_id="5", tier="drop", is_auction=False, end_time=None)
+    db.touch(con, "1", "t")
+    # 10pm: still daytime, everything goes out as usual and no bundle is due
+    assert notify.deliver(con, [pick(item_id="9")], now=at(11, 22)) == 1
+    assert sent.pop()[0] == "Snipe Hunt: 1 steal"
+    # 11pm, the first run of quiet hours
+    assert notify.deliver(con, [early, overnight, tomorrow, buy_now, drop], now=at(11, 23)) == 3
+    assert [title for title, _ in sent] == ["Snipe Hunt: enter before bed (2)",
+                                            "Snipe Hunt: 1 steal"]      # the drop still alerts
+    lines = sent[0][1].split("\n")
+    assert lines.index("1") < lines.index("2")                      # what ends first leads
+    held = [p["item_id"] for p in json.loads(db.kv_get(con, notify.PENDING_KEY))]
+    assert held == ["3", "4"]
+    assert not db.may_alert(con, "1", 13.75)                        # marked alerted
+    # after midnight on the same night: nothing more, even for an auction ending in an hour
+    del sent[:]
+    late = pick(item_id="6", end_time="2026-10-12T01:20-04:00")
+    assert notify.deliver(con, [late], now=at(12, 0, 5)) == 0 and sent == []
+    # morning: what was held goes out, bar the auction that ended in the night
+    assert notify.deliver(con, [], now=at(12, 7)) == 2
+    assert [title for title, _ in sent] == ["Snipe Hunt: 2 steals"]
+    # the next night gets its own bundle
+    del sent[:]
+    again = pick(item_id="7", end_time="2026-10-13T02:00-04:00")
+    assert notify.deliver(con, [again], now=at(12, 23)) == 1
+    assert sent[0][0] == "Snipe Hunt: enter before bed (1)"
+
+
+def test_a_night_with_nothing_to_enter_sends_no_bundle_and_does_not_wake_you_later(monkeypatch):
+    from snipehunt import db, settings
+    con, sent = db.connect(), _phone(monkeypatch)
+    assert notify.deliver(con, [], now=at(11, 23)) == 0
+    assert db.kv_get(con, notify.BEDTIME_KEY) == "2026-10-11"
+    assert notify.deliver(con, [pick(end_time="2026-10-12T02:00-04:00")], now=at(12, 0)) == 0
+    assert sent == []
+    settings.update(con, {"bedtime_bundle": False})                 # the old way wakes you
+    soon = pick(item_id="8", end_time="2026-10-12T02:00-04:00")
+    assert notify.deliver(con, [soon], now=at(12, 1)) == 2 and sent[0][0] == "Snipe Hunt: 2 steals"
