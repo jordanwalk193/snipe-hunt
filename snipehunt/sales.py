@@ -18,6 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from . import config, db, profile
+from .hidden import CODE, YEAR
 from .ebay_search import EbayClient, Listing, _money
 
 PER_RUN = 60            # look-ups per hourly run; the rest wait for the next one
@@ -26,11 +27,20 @@ GONE_AFTER = 3 * 3600   # a listing from before this feature, not seen for this 
 KEEP_DAYS = 180
 PER_LISTING = 3         # sold prices offered to Claude for one listing
 MAX_LINES = 60          # and for one scoring call, because every line is paid for
+HINTS_PER_LISTING = 1   # of those, sales of another grade or print run of the card
 MIN_OVERLAP = 0.5
+HINT = " (different grade/parallel)"
 UNKNOWN_SHIPPING = 5.00
 TRACK_CALLS = 30        # the latest calls the scoring prompt's track record looks at
 TRACK_MIN = 8           # fewer than this says nothing yet
 TRACK_OFF = 10          # percent the going rate has to be off before it is mentioned
+# "#42" or "#US-123", but not the copy number in "#07/50".
+HASH_NUMBER = re.compile(r"#\s?([A-Z]{0,4}-?\d{1,4}[A-Z]?)\b(?!\s?/\s?\d)", re.I)
+# US123 or HMT45 written without a dash. Capitals only, so "Lot12" isn't one.
+BARE_NUMBER = re.compile(r"(?<![A-Za-z0-9/#-])([A-Z]{1,4}\d{2,4})(?![A-Za-z0-9])")
+# Letters in front of a number that make it a grade or a count, not a card number.
+NOT_NUMBER = {"PSA", "BGS", "SGC", "CGC", "CSG", "HGA", "TAG", "GEM", "MT", "MINT", "NM",
+              "LOT", "AUTO", "QTY"}
 # Words that say nothing about which card it is.
 FILLER = {"the", "and", "card", "cards", "baseball", "football", "basketball", "hockey",
           "mlb", "nfl", "nba", "nhl", "rookie", "rc", "sp", "free", "shipping", "ship",
@@ -116,8 +126,63 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
     return added
 
 
+def card_number(title: str) -> str | None:
+    """The card's number as printed, without "#" or dashes: BCP-236, #42, US123, TN-12."""
+    for code in CODE.findall(title.upper()):   # the same pattern the no-name search uses
+        left, right = code.split("-")
+        if (any(ch.isdigit() for ch in right) and any(ch.isalpha() for ch in left)
+                and left not in NOT_NUMBER):
+            return left + right
+    found = HASH_NUMBER.search(title)
+    if found:
+        return found.group(1).upper().replace("-", "")
+    for token in BARE_NUMBER.findall(title):
+        if token.rstrip("0123456789") not in NOT_NUMBER:
+            return token
+    return None
+
+
+def _number_match(a: str, b: str) -> bool | None:
+    """True for the same card number, False for different ones, None when one is missing."""
+    one, two = card_number(a), card_number(b)
+    if not one or not two:
+        return None
+    if one == two:
+        return True
+    # "#236" on one listing and "BCP-236" on the other is the same card
+    short, long = sorted((one, two), key=len)
+    return short.isdigit() and long.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ") == short
+
+
+def _year(title: str) -> str | None:
+    found = YEAR.search(title)
+    return found.group(1) if found else None
+
+
+def _closeness(title: str, mine: frozenset[str], sale: dict) -> float | None:
+    """How well a sale's title fits a listing's, or None when it isn't the same card.
+
+    A different card number rules a sale out however alike the words are. The
+    same card number and year is a strong match even when the titles share
+    few words, which is how a listing with a thin title gets its comps.
+    """
+    numbers = _number_match(title, sale["title"])
+    if numbers is False:
+        return None
+    overlap = len(mine & sale["words"]) / len(mine | sale["words"])
+    if numbers and _year(title) and _year(title) == _year(sale["title"]):
+        return 1 + overlap
+    return overlap if overlap >= MIN_OVERLAP else None
+
+
 def relevant(con, items: list[Listing]) -> list[dict]:
-    """Past sales whose titles look like these listings, newest first."""
+    """Past sales of the same cards as these listings, newest first.
+
+    A sale counts when its title is close enough (see _closeness) and its
+    grade, autograph and print run are the listing's. A sale that differs only
+    in grade or print run is offered too, one per listing at most, and comes
+    back with "hint" set so the prompt marks it as a different card.
+    """
     sales = [dict(r) for r in con.execute(
         "SELECT item_id, title, price, shipping, bids, sold_at FROM sales "
         "ORDER BY sold_at DESC")]
@@ -125,22 +190,32 @@ def relevant(con, items: list[Listing]) -> list[dict]:
         return []
     for sale in sales:
         sale["words"] = words(sale["title"])
+        sale["traits"] = traits(sale["title"])
     chosen: dict[str, dict] = {}
+    exact: set[str] = set()
     for item in items:
         mine = words(item.title)
         if not mine:
             continue
-        close = []
+        grade, auto, run = traits(item.title)
+        same, hints = [], []
         for sale in sales:
             if sale["item_id"] == item.item_id or not sale["words"]:
                 continue
-            overlap = len(mine & sale["words"]) / len(mine | sale["words"])
-            if overlap >= MIN_OVERLAP:
-                close.append((overlap, sale))
-        close.sort(key=lambda pair: (-pair[0], -pair[1]["sold_at"]))
-        for _, sale in close[:PER_LISTING]:
+            close = _closeness(item.title, mine, sale)
+            if close is None or sale["traits"][1] != auto:
+                continue   # an autograph against an unsigned copy tells nothing
+            (same if sale["traits"] == (grade, auto, run) else hints).append((close, sale))
+        for group in (same, hints):
+            group.sort(key=lambda pair: (-pair[0], -pair[1]["sold_at"]))
+        same = same[:PER_LISTING]
+        exact.update(sale["item_id"] for _, sale in same)
+        for _, sale in same + hints[:min(HINTS_PER_LISTING, PER_LISTING - len(same))]:
             chosen[sale["item_id"]] = sale
-    return sorted(chosen.values(), key=lambda s: -s["sold_at"])[:MAX_LINES]
+    out = sorted(chosen.values(), key=lambda s: -s["sold_at"])[:MAX_LINES]
+    for sale in out:   # a hint for one listing may be the very card of another
+        sale["hint"] = sale["item_id"] not in exact
+    return out
 
 
 def delivered(price: float, shipping: float | None) -> float:
@@ -159,7 +234,8 @@ def lines(sales: list[dict]) -> str:
         day = datetime.fromtimestamp(s["sold_at"], timezone.utc).astimezone(config.TZ)
         ship = "ship ?" if s["shipping"] is None else f"+{s['shipping']:.2f} ship"
         bids = f", {bid_count(s['bids'])}" if s["bids"] else ""
-        out.append(f"{day:%Y-%m-%d} | ${s['price']:.2f} {ship}{bids} | {s['title']}")
+        out.append(f"{day:%Y-%m-%d} | ${s['price']:.2f} {ship}{bids} | {s['title']}"
+                   + (HINT if s.get("hint") else ""))
     return "\n".join(out)
 
 
@@ -276,10 +352,11 @@ def traits(title: str) -> tuple:
 
 
 def _same(a: str, b: str) -> bool:
-    """Two titles for the same card: like words, and the same grade, autograph and print run."""
+    """Two titles for the same card: like words, the same grade, autograph and print run,
+    and no card numbers that disagree."""
     one, two = card_key(a), card_key(b)
     return (bool(one and two) and len(one & two) / len(one | two) >= SAME_CARD
-            and traits(a) == traits(b))
+            and traits(a) == traits(b) and _number_match(a, b) is not False)
 
 
 def history(con, limit: int = 12) -> list[dict]:

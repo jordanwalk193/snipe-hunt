@@ -193,7 +193,8 @@ def fast_worth(con, item) -> bool:
         return True
     # the same card has sold for clearly more than this one is asking
     return any(sales.delivered(s["price"], s["shipping"]) > item.total * 1.3
-               for s in sales.relevant(con, [item])) or item.price >= FAST_MIN_PRICE
+               for s in sales.relevant(con, [item]) if not s["hint"]
+               ) or item.price >= FAST_MIN_PRICE
 
 
 def _fast_calls_today(con) -> int:

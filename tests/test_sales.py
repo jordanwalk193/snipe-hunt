@@ -251,3 +251,60 @@ def test_a_sale_with_no_shipping_stated_is_totalled_like_everything_else():
     assert view["history"][0]["prices"] == [11.0, 15.0] and view["history"][0]["estimated"]
     assert sales.last_sold(sales.with_calls(con), title)["estimated"] is True
     assert "1 of them didn't state shipping; $5 is assumed." in sales.price_check(con, "gold")
+
+
+def test_card_numbers_are_read_from_the_ways_sellers_write_them():
+    number = sales.card_number
+    assert number("2020 Bowman Chrome Jordan Walker 1st Bowman BCP-236") == "BCP236"
+    assert number("2020 Bowman Draft Chrome Jordan Walker #BDC-57 Refractor") == "BDC57"
+    assert number("2023 Topps Now Jordan Walker TN-12 RC") == "TN12"
+    assert number("2023 Topps Update Jordan Walker RC US123 Cardinals") == "US123"
+    assert number("2023 Topps Chrome Jordan Walker #42 Refractor") == "42"
+    assert number("2023 Topps Chrome Jordan Walker Gold #07/50 PSA 10") is None   # a copy number
+    assert number("2023-24 Jordan Walker 1st-Bowman PSA-10 GEM MT10 Lot12") is None
+
+
+def test_comps_are_the_same_grade_and_print_run_with_one_marked_hint_at_most():
+    con = db.connect()
+    raw = "2020 Bowman Chrome Jordan Walker 1st Bowman Refractor /499 BCP-236"
+    sale(con, "1", raw, 30.0, ago=10)
+    sale(con, "2", "2020 Bowman Chrome Jordan Walker 1st Bowman Refractor /499 BCP-236 PSA 10",
+         120.0, ago=20)
+    sale(con, "3", "2020 Bowman Chrome Jordan Walker 1st Bowman Refractor /499 BCP-236 PSA 9",
+         60.0, ago=30)
+    sale(con, "4", "2020 Bowman Chrome Jordan Walker 1st Bowman Refractor Auto /499 BCP-236",
+         300.0, ago=40)                      # signed: never a comp for an unsigned copy
+    found = sales.relevant(con, [listing("9", raw + " Cardinals")])
+    assert [(s["item_id"], s["hint"]) for s in found] == [("1", False), ("2", True)]
+    text = sales.lines(found)
+    assert text.splitlines()[0].endswith("BCP-236")
+    assert text.splitlines()[1].endswith("PSA 10 (different grade/parallel)")
+    # the graded copy is the very card for a PSA 10 listing, and unmarked there
+    found = sales.relevant(con, [listing("9", raw + " PSA 10"), listing("8", raw)])
+    assert {s["item_id"]: s["hint"] for s in found} == {"1": False, "2": False, "3": True}
+
+
+def test_a_different_print_run_is_a_hint_and_a_different_card_number_is_no_match():
+    con = db.connect()
+    sale(con, "1", "2023 Topps Chrome Jordan Walker Refractor /99 #45 RC", 40.0, ago=10)
+    sale(con, "2", "2023 Topps Chrome Jordan Walker Refractor /150 #45 RC", 22.0, ago=20)
+    sale(con, "3", "2023 Topps Chrome Jordan Walker Refractor /150 #212 RC", 5.0, ago=30)
+    found = sales.relevant(con, [listing("9", "2023 Topps Chrome Jordan Walker Refractor "
+                                              "12/150 #45 RC")])
+    assert [(s["item_id"], s["hint"]) for s in found] == [("1", True), ("2", False)]
+    rows = sales.with_calls(con)
+    assert sales.last_sold(rows, "2023 Topps Chrome Jordan Walker Refractor /150 #212")[
+        "total"] == 5.0                      # the history keeps #45 and #212 apart too
+    assert sales.last_sold(rows, "2023 Topps Chrome Jordan Walker Refractor /150 #45 RC")[
+        "n"] == 1
+
+
+def test_the_same_card_number_and_year_match_even_when_the_titles_share_few_words():
+    con = db.connect()
+    sale(con, "1", "Jordan Walker 2020 Bowman Draft Chrome 1st Bowman Prospect Rookie St Louis "
+                   "Top Outfield BD-57", 9.0, ago=10)
+    sale(con, "2", "Jordan Walker 2021 Bowman Chrome Prospects Rookie St Louis Top Outfield "
+                   "BD-57", 3.0, ago=20)     # the same number in another year's set
+    thin = listing("9", "2020 Bowman Draft #BD-57")
+    assert [s["item_id"] for s in sales.relevant(con, [thin])] == ["1"]
+    assert sales.relevant(con, [listing("9", "2020 Bowman Draft BD-58")]) == []

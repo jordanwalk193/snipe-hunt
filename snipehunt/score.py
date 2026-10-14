@@ -129,7 +129,8 @@ phone-friendly line; for an edge, say what the seller got wrong"}}], "not_player
 SOLD_RULE = """- "sold prices seen" below are real eBay auction results this bot recorded \
 itself. When one is the same card (same set, parallel, serial and grade), \
 price from it: set max_basis to "sales", quote it in comps, and spend no \
-lookup on that card. A sale of a different parallel or grade is only a hint.
+lookup on that card. A line ending "(different grade/parallel)" is the same \
+card in another grade or print run: only a hint, never a price.
 """
 SOLD = """=== sold prices seen (date | final bid, shipping | title) ===
 {lines}
