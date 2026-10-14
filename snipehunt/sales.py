@@ -80,7 +80,7 @@ def _due(con, now: float) -> list:
         " OR (is_auction IS NULL AND last_seen<?)"
         " OR (is_auction=0 AND last_seen<? AND last_seen>?"
         "     AND (checked_at IS NULL OR checked_at<?))) "
-        "ORDER BY is_auction=0, end_ts IS NULL, end_ts, last_seen DESC LIMIT ?",
+        "ORDER BY COALESCE(is_auction, 1)=0, end_ts IS NULL, end_ts, last_seen DESC LIMIT ?",
         (now - SETTLE, now - GONE_AFTER, now - GONE_AFTER, now - BIN_GIVE_UP,
          now - BIN_RECHECK, PER_RUN)).fetchall()
 
