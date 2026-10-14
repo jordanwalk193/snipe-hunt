@@ -186,6 +186,8 @@ def format_pick(pick: dict) -> str:
     ship = pick.get("shipping")
     ship_txt = "ship ?" if ship is None else ("free ship" if ship == 0 else f"${ship:.2f} ship")
     line2 = f"${pick['price']:.2f} + {ship_txt}"
+    if pick.get("combined_ship"):
+        line2 += " (combined ship w/ open order)"
     end = _ends(pick)
     if end and pick.get("is_auction"):
         line2 += f" · ends {config.local(end).strftime('%a %-I:%M %p %Z')}"

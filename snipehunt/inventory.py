@@ -9,6 +9,7 @@ from . import config
 # Statuses only ever move forward along this line.
 ORDER = ["Won", "Awaiting payment", "In transit", "Delivered", "In binder"]
 FROZEN = {"In binder", "Sold-Traded"}
+UNPAID = ("Won", "Awaiting payment")
 
 
 def read() -> tuple[list[str], list[dict]]:
@@ -54,3 +55,17 @@ def advance(row: dict, status: str) -> bool:
         return False
     row["status"] = status
     return True
+
+
+def open_sellers(rows: list[dict], events: list[dict]) -> set[str]:
+    """Sellers with an order still open, in lower case: one more card can ride along.
+
+    That is a card won or awaiting payment in the inventory, or a recent "won"
+    email with no payment, shipping or delivery email after it.
+    """
+    sellers = {r.get("seller") for r in rows if r.get("status") in UNPAID}
+    settled = {str(e.get("item_id")) for e in events
+               if e.get("type") in ("paid", "shipped", "delivered")}
+    sellers |= {e.get("seller") for e in events if e.get("type") in ("won", "offer_accepted")
+                and str(e.get("item_id")) not in settled}
+    return {s.strip().lower() for s in sellers if s and s.strip()}

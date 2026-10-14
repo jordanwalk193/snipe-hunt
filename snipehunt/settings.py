@@ -37,6 +37,8 @@ DEFAULTS: dict = {
     "gixen_relogin_minutes": 120,    # after being signed out, leave your own session alone
     "sellers": [],                   # eBay sellers whose listings get their own search
     "extra_searches": [],
+    # sellers who combine shipping: with an order already open, another card ships for $0
+    "combined_ship_sellers": ["dcsports87"],
 }
 
 RANGES = {
@@ -50,6 +52,7 @@ RANGES = {
 }
 ITEM = {
     "sellers": re.compile(r"[A-Za-z0-9._*\-]{1,64}"),
+    "combined_ship_sellers": re.compile(r"[A-Za-z0-9._*\-]{1,64}"),
     "extra_searches": re.compile(r"[A-Za-z0-9 ./#'&+\-]{2,80}"),
 }
 

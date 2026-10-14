@@ -118,3 +118,38 @@ def test_scoring_learns_taste_from_what_was_hidden_and_what_was_sniped(monkeypat
     assert prompt.index("recently sniped") < prompt.index("=== listings")
     actions.unskip_all(con, {})
     assert db.passed(con) == []                                       # restored: not passed on
+
+
+def test_a_seller_with_an_open_order_who_combines_shipping_costs_nothing_to_add_to():
+    from snipehunt import db, inventory, notify, settings
+    from snipehunt.ebay_search import Listing
+    con = db.connect()
+    assert score.open_order_sellers(con) == set() and "open orders" not in score.learned(con)[1]
+    fields, rows = inventory.read()
+    rows.append(dict.fromkeys(fields, "") | {"id": "90", "status": "Won", "seller": "DCSports87"})
+    rows.append(dict.fromkeys(fields, "") | {"id": "91", "status": "In transit",
+                                             "seller": "shippedalready"})
+    inventory.write(fields, rows)
+    today = score.datetime.now(config.TZ).strftime("%Y-%m-%d")
+    db.log_mail_events(con, [
+        {"date": today, "type": "won", "is_player": True, "item_id": "1", "seller": "slowpay"},
+        {"date": today, "type": "won", "is_player": True, "item_id": "2", "seller": "paidup"},
+        {"date": today, "type": "paid", "is_player": True, "item_id": "2", "seller": "paidup"}])
+    assert score.open_order_sellers(con) == {"dcsports87", "slowpay"}
+    assert ("treat added shipping as about $0 if the seller combines): dcsports87, slowpay"
+            in score.learned(con)[1])
+    # only a seller named in the setting gets the $0, whatever orders are open
+    assert score.combined_sellers(con) == {"dcsports87"}
+    raw = {"tier": "green", "max": 6.06, "value": 20}
+    card = Listing("1", "t", 0.99, "USD", 4.0, ["AUCTION"], 0, None, "dcsports87", "u", None)
+    plain = score._pick_dict(card, raw)
+    riding = score._pick_dict(card, raw, score.combined_sellers(con))
+    assert (plain["deal_pct"], plain["combined_ship"]) == (50, False)      # 10.06 against 20
+    assert (riding["deal_pct"], riding["combined_ship"]) == (70, True)     # 6.06 against 20
+    assert score.rerate(dict(riding, shipping=5.0))["deal_pct"] == 70      # still rides along
+    other = Listing("2", "t", 0.99, "USD", 4.0, ["AUCTION"], 0, None, "slowpay", "u", None)
+    assert score._pick_dict(other, raw, score.combined_sellers(con))["combined_ship"] is False
+    line = notify.format_pick(dict(riding, card="c", url="u")).split("\n")[1]
+    assert line.startswith("$0.99 + $4.00 ship (combined ship w/ open order)")
+    settings.update(con, {"combined_ship_sellers": "slowpay, dcsports87"})
+    assert score.combined_sellers(con) == {"dcsports87", "slowpay"}

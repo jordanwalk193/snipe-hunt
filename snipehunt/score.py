@@ -13,9 +13,9 @@ import os
 import subprocess
 import sys
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from . import config, db, profile, sales, settings, usage
+from . import config, db, inventory, profile, sales, settings, usage
 from .ebay_search import Listing
 
 WEB_TOOLS = "WebFetch,WebSearch"
@@ -53,6 +53,8 @@ def rate(pay: float, value: float | None) -> tuple[int | None, int | None]:
 def rerate(pick: dict) -> dict:
     """Work a pick's deal stars out again after its price or shipping changed."""
     ship = pick["shipping"] if pick.get("shipping") is not None else UNKNOWN_SHIPPING
+    if pick.get("combined_ship"):
+        ship = 0   # rides along with an order already open with this seller
     pay = (pick["max"] if pick.get("is_auction") else pick["price"]) + ship
     pick["deal"], pick["deal_pct"] = rate(pay, pick.get("value"))
     if pick.get("edge") and (pick["deal_pct"] or 0) < EDGE_MIN_PCT:
@@ -146,6 +148,13 @@ MISSED = """=== cards you passed on that sold cheap. Watch for these kinds of li
 """
 
 
+OPEN_ORDER_DAYS = 14      # how long a "won" email with no payment after it counts as open
+OPEN_SHOWN = 20
+OPEN = """=== open orders ===
+Open orders with these sellers (shipping is usually already covered; treat added \
+shipping as about $0 if the seller combines): {sellers}
+
+"""
 TASTE_SHOWN = 15          # hidden picks, and snipes, shown as examples of taste
 TASTE_RULE = """- {collector}'s own choices are listed below: picks hidden from the dashboard \
 and auctions sniped. Pick fewer cards like the hidden ones and more like the sniped \
@@ -160,6 +169,18 @@ SNIPED = """=== recently sniped (more like these) | their max vs your max ===
 {lines}
 
 """
+
+
+def open_order_sellers(con) -> set[str]:
+    """Sellers there is an unpaid or unshipped order with right now, in lower case."""
+    since = (datetime.now(config.TZ) - timedelta(days=OPEN_ORDER_DAYS)).strftime("%Y-%m-%d")
+    return inventory.open_sellers(inventory.read()[1], db.mail_events(con, since))
+
+
+def combined_sellers(con) -> frozenset[str]:
+    """Open-order sellers known to combine shipping: their next card ships for $0."""
+    known = {s.lower() for s in settings.load(con)["combined_ship_sellers"]}
+    return frozenset(open_order_sellers(con) & known)
 
 
 def learned(con) -> tuple[str, str]:
@@ -185,6 +206,9 @@ def learned(con) -> tuple[str, str]:
             for s in sniped))
     if passed or sniped:
         rules = TASTE_RULE.format(collector=profile.get().collector)
+    open_with = sorted(open_order_sellers(con))[:OPEN_SHOWN]
+    if open_with:
+        sections += OPEN.format(sellers=", ".join(open_with))
     return rules, sections
 
 
@@ -289,7 +313,13 @@ def ask_claude(prompt: str, tools: str = WEB_TOOLS,
     return outer.get("result", "")
 
 
-def _pick_dict(item: Listing, raw: dict) -> dict | None:
+def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
+               ) -> dict | None:
+    """One of Claude's picks as the bot keeps it, or None when it doesn't hold up.
+
+    `combined` are sellers (lower case) with an open order who combine
+    shipping: for them the deal is worked out with $0 shipping.
+    """
     tier = str(raw.get("tier", "")).lower()
     try:
         max_bid = round(float(raw["max"]), 2)
@@ -306,6 +336,9 @@ def _pick_dict(item: Listing, raw: dict) -> dict | None:
         value = None
     # What you would really pay: the asking price, or the snipe if it wins at its max.
     ship = item.shipping if item.shipping is not None else UNKNOWN_SHIPPING
+    combined_ship = bool(ship) and (item.seller or "").lower() in combined
+    if combined_ship:
+        ship = 0
     deal, deal_pct = rate((max_bid if item.is_auction else item.price) + ship, value)
     edge = str(raw.get("edge") or "").lower()
     if edge not in EDGES or (deal_pct or 0) < EDGE_MIN_PCT or (
@@ -314,8 +347,9 @@ def _pick_dict(item: Listing, raw: dict) -> dict | None:
     return {
         "item_id": item.item_id, "card": str(raw.get("card") or item.title)[:90],
         "tier": tier, "max": max_bid, "value": value, "deal": deal, "deal_pct": deal_pct,
-        "edge": edge,
-        "win": sales.win_bid(value, item.shipping, max_bid) if item.is_auction else None,
+        "edge": edge, "combined_ship": combined_ship,
+        "win": sales.win_bid(value, 0.0 if combined_ship else item.shipping, max_bid)
+        if item.is_auction else None,
         "max_basis": "sales" if raw.get("max_basis") == "sales" else "estimate",
         "comps": str(raw.get("comps", ""))[:300], "why": str(raw.get("why", ""))[:140],
         "title": item.title, "price": item.price, "shipping": item.shipping,
@@ -342,6 +376,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
     picks: list[dict] = []
     scored: list[Listing] = []
     batches = [items[i:i + BATCH] for i in range(0, len(items), BATCH)][:MAX_BATCHES]
+    combined = combined_sellers(con) if con is not None else frozenset()
     for n, batch in enumerate(batches, 1):
         by_id = {i.item_id: i for i in batch}
         try:
@@ -360,7 +395,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
         batch_picks: list[dict] = []
         for raw in reply.get("picks", []) or []:
             item = by_id.get(str(raw.get("item_id")))
-            pick = _pick_dict(item, raw) if item else None
+            pick = _pick_dict(item, raw, combined) if item else None
             if pick:
                 batch_picks.append(pick)
         picks.extend(batch_picks)

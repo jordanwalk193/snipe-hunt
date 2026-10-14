@@ -8,7 +8,7 @@ from . import config, db, inventory, profile, sales, settings
 from .notify import TIER_ICON, TIER_ORDER
 from .score import ask_claude
 
-UNPAID = ("Won", "Awaiting payment")
+UNPAID = inventory.UNPAID
 
 MONTHLY_PROMPT = """Today is {today}. {collector} collects {player}. Recommend \
 only; you may only read web pages.
