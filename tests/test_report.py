@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -131,15 +131,16 @@ def test_a_run_that_fails_while_scoring_is_still_recorded(con, monkeypatch):
 
 def test_first_run_sends_one_welcome_instead_of_a_flood(con, monkeypatch):
     from snipehunt.ebay_search import Listing
+    ends = (datetime.now(config.TZ) + timedelta(days=2)).isoformat(timespec="minutes")
     items = [Listing(str(100000000000 + n), "2023 Topps Jordan Walker RC", 1.0, "USD", 1.0,
-                     ["AUCTION"], 0, "2026-10-13T21:00-04:00", "s", "u", None) for n in range(3)]
+                     ["AUCTION"], 0, ends, "s", "u", None) for n in range(3)]
     monkeypatch.setitem(config.load(), "EBAY_CLIENT_ID", "x")
     monkeypatch.setitem(config.load(), "EBAY_CLIENT_SECRET", "y")
     monkeypatch.setitem(config.load(), "NTFY_URL", "https://ntfy.example/topic")
     monkeypatch.setattr(jobs.ebay_search, "search_all", lambda verbose=False: items)
 
     def all_fire(fresh, verbose=False, on_batch=None, con=None):
-        picks = [pick(item_id=i.item_id, total=2.0) for i in fresh]
+        picks = [pick(item_id=i.item_id, total=2.0, end_time=ends) for i in fresh]
         on_batch(fresh, picks)
         return picks, fresh
     monkeypatch.setattr(jobs.score, "score", all_fire)
@@ -150,7 +151,7 @@ def test_first_run_sends_one_welcome_instead_of_a_flood(con, monkeypatch):
     settings.update(con, {"quiet_hours": False})    # so this passes at night too
     assert sent == ["Snipe Hunt is up and running"]
     items.append(Listing("100000000009", "2023 Topps Jordan Walker RC", 1.0, "USD", 1.0,
-                         ["AUCTION"], 0, "2026-10-13T21:00-04:00", "s", "u", None))
+                         ["AUCTION"], 0, ends, "s", "u", None))
     assert jobs.hourly().endswith("1 picks, 1 alerted")           # only the new one
     assert len(sent) == 2 and sent[1] == "Snipe Hunt: 1 steal"
 
