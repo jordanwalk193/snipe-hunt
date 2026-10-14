@@ -75,7 +75,9 @@ def hourly(dry_run: bool = False) -> str:
                      if fresh else ([], []))
     if first_run and not dry_run:
         return _welcome(con, listings, picks)
-    sent = notify.deliver(con, picks, dry_run=dry_run)
+    # held and left-over picks are checked against this run's prices before they go out
+    sent = notify.deliver(con, picks, dry_run=dry_run,
+                          current={i.item_id: i for i in listings})
     return (f"{len(listings)} listings, {len(fresh)} new, {len(scored)} scored, "
             f"{len(picks)} picks, {sent} alerted")
 

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from . import config, db, profile, settings
+from . import config, db, profile, score, settings
 
 TIER_ICON = {"fire": "🔥", "green": "🟢", "yellow": "🟡", "drop": "⏰"}
 TIER_ORDER = {"drop": 0, "fire": 1, "green": 2, "yellow": 3}
@@ -16,6 +16,7 @@ TIER_ORDER = {"drop": 0, "fire": 1, "green": 2, "yellow": 3}
 PER_MESSAGE = 5                  # picks per notification, so a phone shows them all
 MAX_MESSAGES = 3                 # per run; the rest go out on the next run
 PENDING_KEY = "pending_picks"
+BIN_GONE = 2 * 3600              # a Buy It Now out of the results this long has likely sold
 
 
 def configured() -> bool:
@@ -180,15 +181,46 @@ def plan_messages(picks: list[dict], now: datetime | None = None
             ordered[cut:])
 
 
+def refresh(con, pick: dict, current: dict, now: datetime) -> dict | None:
+    """A pick with today's price, or None when it is no longer worth sending.
+
+    A pick held overnight, or left over from a full run, still carries the
+    price it was scored at. `current` is this run's search results by item
+    number. An auction bid past its max is dropped, and so is a Buy It Now
+    that has been out of the results long enough to have sold.
+    """
+    if pick.get("tier") == "drop":
+        return pick   # a print-to-order drop is not an eBay listing
+    item = current.get(pick["item_id"])
+    if item is None:
+        if pick.get("is_auction"):
+            return pick   # not in this search; its end time still rules it out when over
+        row = con.execute("SELECT last_seen FROM seen WHERE item_id=?",
+                          (pick["item_id"],)).fetchone()
+        gone = row is not None and row["last_seen"] < now.timestamp() - BIN_GONE
+        return None if gone else pick
+    if pick.get("max") is not None and item.price > pick["max"]:
+        return None
+    return score.rerate(dict(pick, price=item.price, shipping=item.shipping,
+                             total=item.total, bids=item.bid_count))
+
+
 def deliver(con, new_picks: list[dict], dry_run: bool = False,
-            now: datetime | None = None) -> int:
-    """Bundle new picks plus anything held overnight into one notification."""
+            now: datetime | None = None, current: dict | None = None) -> int:
+    """Bundle new picks plus anything held overnight into one notification.
+
+    With `current` (this run's listings by item number), every candidate is
+    brought up to today's price first; see refresh().
+    """
     if not settings.load(con)["alerts_enabled"] or not (configured() or dry_run):
         return 0   # paused, or no phone set up; the picks still reach the dashboard
+    now = now or datetime.now(config.TZ)
     held = json.loads(db.kv_get(con, PENDING_KEY, "[]"))
     known = {p["item_id"] for p in new_picks}
-    candidates = [p for p in new_picks if worth_alerting(p)]
-    candidates += [p for p in held if p["item_id"] not in known]
+    candidates = new_picks + [p for p in held if p["item_id"] not in known]
+    if current is not None:
+        candidates = [p for p in (refresh(con, p, current, now) for p in candidates) if p]
+    candidates = [p for p in candidates if worth_alerting(p)]
     candidates = [p for p in candidates if db.may_alert(con, p["item_id"], p["total"])]
     send_now, hold = split_for_quiet_hours(candidates, now)
     messages, overflow = plan_messages(send_now, now)

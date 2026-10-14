@@ -48,6 +48,18 @@ def rate(pay: float, value: float | None) -> tuple[int | None, int | None]:
     pct = round(100 * (1 - pay / value))
     return next((stars for floor, stars in STARS if pct >= floor), 1), max(pct, 0)
 
+
+
+def rerate(pick: dict) -> dict:
+    """Work a pick's deal stars out again after its price or shipping changed."""
+    ship = pick["shipping"] if pick.get("shipping") is not None else UNKNOWN_SHIPPING
+    pay = (pick["max"] if pick.get("is_auction") else pick["price"]) + ship
+    pick["deal"], pick["deal_pct"] = rate(pay, pick.get("value"))
+    if pick.get("edge") and (pick["deal_pct"] or 0) < EDGE_MIN_PCT:
+        pick["edge"] = None   # the numbers no longer back the claim
+    return pick
+
+
 PROMPT = """You are {app}, a card-collecting assistant. {collector} collects \
 {player}. Review the eBay listings below and pick out the steals.
 

@@ -111,3 +111,42 @@ def test_a_card_that_slipped_through_says_so_and_leads_the_alert():
     assert "PRICE MISTAKE" not in notify.format_pick(plain)
     body = notify.format_bundle([plain, steal])[1]
     assert body.startswith("💎 PRICE MISTAKE")
+
+
+def _phone(monkeypatch):
+    """Alerts go to a list instead of a phone."""
+    sent = []
+    monkeypatch.setitem(config.load(), "NTFY_URL", "https://ntfy.example/topic")
+    monkeypatch.setattr(notify, "send", lambda title, body, *a, **kw: sent.append((title, body)))
+    return sent
+
+
+def _listing(item_id, price, auction=True, shipping=1.25, bids=3):
+    from snipehunt.ebay_search import Listing
+    return Listing(item_id, "t", price, "USD", shipping,
+                   ["AUCTION"] if auction else ["FIXED_PRICE"], bids, None, "s", "u", None)
+
+
+def test_a_held_pick_is_checked_against_todays_price_before_it_is_sent(monkeypatch):
+    import json
+    from snipehunt import db
+    con, sent = db.connect(), _phone(monkeypatch)
+    held = [pick(item_id="1"),                                   # bid past the 25.25 max
+            pick(item_id="2"),                                   # still under it
+            pick(item_id="3", is_auction=False, end_time=None, price=8.0, total=9.25,
+                 max=9.09, value=20.0),                          # Buy It Now, since sold
+            pick(item_id="4", is_auction=False, end_time=None, price=8.0, total=9.25,
+                 max=9.09, value=20.0)]                          # Buy It Now, since cut
+    db.kv_set(con, notify.PENDING_KEY, json.dumps(held))
+    for p in held:
+        db.touch(con, p["item_id"], "t")
+    con.execute("UPDATE seen SET last_seen=? WHERE item_id='3'",
+                (int(NOW_DAY.timestamp()) - 3 * 3600,))
+    current = {"1": _listing("1", 31.0), "2": _listing("2", 14.0, bids=6),
+               "4": _listing("4", 5.0, auction=False, shipping=0.0)}
+    assert notify.deliver(con, [], now=NOW_DAY, current=current) == 2
+    (title, body), = sent
+    assert {"2", "4"} <= set(body.split("\n")) and "$14.00 + $1.25 ship" in body
+    assert "$5.00 + free ship" in body and "75% under $20 value" in body    # rated again
+    assert "$12.50" not in body and "$8.00" not in body
+    assert json.loads(db.kv_get(con, notify.PENDING_KEY)) == []
