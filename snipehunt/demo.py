@@ -154,6 +154,7 @@ def _market(now: datetime) -> dict:
         sold.append({
             "item_id": item_id, "title": card, "price": price, "shipping": ship,
             "total": round(price + ship, 2), "estimated": False, "bids": bids,
+            "kind": "auction",
             "sold_at": (now - timedelta(hours=hours)).isoformat(timespec="minutes"),
             "image": _art(colour, "SOLD"), "url": f"https://www.ebay.com/itm/{item_id}",
             "call": call and {"tier": call[0], "max": call[1], "value": float(call[2]),

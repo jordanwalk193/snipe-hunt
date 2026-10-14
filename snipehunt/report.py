@@ -145,7 +145,9 @@ def _pick_line(p: dict) -> str:
 def sold_section(con, since: datetime, top: int = 5) -> list[str]:
     """What closed auctions went for this week, and how the bot's calls on them did."""
     rows = sales.with_calls(con, since.timestamp())
-    md = ["", f"## What sold this week ({len(rows)} auctions)"]
+    fixed = sum(r["kind"] == "bin" for r in rows)
+    md = ["", f"## What sold this week ({len(rows) - fixed} auctions"
+          + (f", {fixed} at a fixed price)" if fixed else ")")]
     if not rows:
         return md + ["- No watched auction closed with bids this week."]
     for r in sorted(rows, key=lambda r: -r["price"])[:top]:
@@ -155,7 +157,8 @@ def sold_section(con, since: datetime, top: int = 5) -> list[str]:
             + ("under it" if call["under_max"] else "went over"))
         md.append(f"- [{r['title']}](https://www.ebay.com/itm/{r['item_id']}) · "
                   f"**{_money(r['price'])}**"
-                  + (f" · {sales.bid_count(r['bids'])}" if r["bids"] else "") + note)
+                  + (f" · {sales.bid_count(r['bids'])}" if r["bids"] else "")
+                  + (" · Buy It Now" if r["kind"] == "bin" else "") + note)
     card = sales.scorecard(rows)
     if card["calls"]:
         line = (f"- The bot had picked {card['calls']} of these: {card['under_max']} closed "

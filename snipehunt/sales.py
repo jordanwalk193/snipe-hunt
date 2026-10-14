@@ -6,6 +6,11 @@ and whether it sold. Every auction the search has seen is looked up once after
 it closes and the result is kept here, so scoring can price a card from what
 the same card really went for.
 
+A Buy It Now that takes no offers can only sell at its listed price, so once
+one drops out of the search it is looked up too and, if it sold, kept as a
+fixed-price sale. A listing that takes offers is never recorded: the price it
+really went for isn't shown.
+
 Read-only, like the rest of the eBay code: this only ever reads one listing.
 """
 from __future__ import annotations
@@ -23,7 +28,9 @@ from .ebay_search import EbayClient, Listing, _money
 
 PER_RUN = 60            # look-ups per hourly run; the rest wait for the next one
 SETTLE = 10 * 60        # seconds after the end before asking, so eBay has the result
-GONE_AFTER = 3 * 3600   # a listing from before this feature, not seen for this long
+GONE_AFTER = 3 * 3600   # a Buy It Now, or a listing from before end times, not seen this long
+BIN_RECHECK = 24 * 3600  # a Buy It Now still for sale is asked about again after this
+BIN_GIVE_UP = 30 * 86400  # and no longer once it has been out of the search this long
 KEEP_DAYS = 180
 PER_LISTING = 3         # sold prices offered to Claude for one listing
 MAX_LINES = 60          # and for one scoring call, because every line is paid for
@@ -57,42 +64,61 @@ def words(title: str) -> frozenset[str]:
 
 
 def _due(con, now: float) -> list:
-    """Auctions that have closed, then listings from before end times were kept."""
+    """Closed auctions first, then listings from before end times were kept, then
+    Buy It Nows that have dropped out of the search."""
     return con.execute(
         "SELECT item_id, title, shipping FROM seen WHERE closed_at IS NULL AND ("
         " (is_auction=1 AND end_ts IS NOT NULL AND end_ts<?)"
-        " OR (is_auction IS NULL AND last_seen<?)) "
-        "ORDER BY end_ts IS NULL, end_ts LIMIT ?",
-        (now - SETTLE, now - GONE_AFTER, PER_RUN)).fetchall()
+        " OR (is_auction IS NULL AND last_seen<?)"
+        " OR (is_auction=0 AND last_seen<? AND last_seen>?"
+        "     AND (checked_at IS NULL OR checked_at<?))) "
+        "ORDER BY is_auction=0, end_ts IS NULL, end_ts, last_seen DESC LIMIT ?",
+        (now - SETTLE, now - GONE_AFTER, now - GONE_AFTER, now - BIN_GIVE_UP,
+         now - BIN_RECHECK, PER_RUN)).fetchall()
+
+
+def _shipping(raw: dict) -> float | None:
+    for opt in raw.get("shippingOptions") or []:
+        shipping, _ = _money(opt.get("shippingCost"))
+        if shipping is not None:
+            return shipping
+    return None
 
 
 def _outcome(raw: dict, now: float) -> tuple[str, dict]:
-    """What one eBay answer means: 'sold', 'unsold', 'running' or 'skip'."""
+    """What one eBay answer means: 'sold', 'unsold', 'running', 'live' or 'skip'."""
     end = raw.get("itemEndDate")
     end_ts = (datetime.fromisoformat(end.replace("Z", "+00:00")).timestamp()
               if end else None)
-    if "AUCTION" not in (raw.get("buyingOptions") or []):
-        return "skip", {}   # a fixed price can hide an accepted offer; not a clean price
-    if end_ts is None or end_ts > now:
-        return "running", {"end_ts": end_ts}
+    options = raw.get("buyingOptions") or []
     sold = sum(int(a.get("estimatedSoldQuantity") or 0)
                for a in raw.get("estimatedAvailabilities") or [])
+    if "AUCTION" not in options:
+        # An accepted offer hides the real price; a plain fixed price can't.
+        if "FIXED_PRICE" not in options or "BEST_OFFER" in options:
+            return "skip", {}
+        over = end_ts is not None and end_ts <= now
+        price, currency = _money(raw.get("price"))
+        if not sold:
+            return ("unsold" if over else "live"), {}
+        if price is None or currency != "USD":
+            return "skip", {}
+        return "sold", {"price": price, "shipping": _shipping(raw), "bids": None,
+                        "end_ts": end_ts if over else now, "kind": "bin",
+                        "image": (raw.get("image") or {}).get("imageUrl")}
+    if end_ts is None or end_ts > now:
+        return "running", {"end_ts": end_ts}
     price, currency = _money(raw.get("currentBidPrice") or raw.get("price"))
     # No bids but "sold" is an offer the seller took; its price isn't shown.
     if not sold or not raw.get("bidCount") or price is None or currency != "USD":
         return "unsold", {}
-    shipping = None
-    for opt in raw.get("shippingOptions") or []:
-        shipping, _ = _money(opt.get("shippingCost"))
-        if shipping is not None:
-            break
-    return "sold", {"price": price, "shipping": shipping, "end_ts": end_ts,
-                    "bids": raw.get("bidCount"),
+    return "sold", {"price": price, "shipping": _shipping(raw), "end_ts": end_ts,
+                    "bids": raw.get("bidCount"), "kind": "auction",
                     "image": (raw.get("image") or {}).get("imageUrl")}
 
 
 def collect(con, client: EbayClient | None = None, now: float | None = None) -> int:
-    """Look up closed auctions and keep what the sold ones went for. Returns sales added."""
+    """Look up closed listings and keep what the sold ones went for. Returns sales added."""
     now = now or time.time()
     rows = _due(con, now)
     if not rows:
@@ -111,13 +137,18 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
                         (info["end_ts"], row["item_id"]))
             con.commit()
             continue
+        if kind == "live":   # a Buy It Now still for sale: look again another day
+            con.execute("UPDATE seen SET is_auction=0, checked_at=? WHERE item_id=?",
+                        (int(now), row["item_id"]))
+            con.commit()
+            continue
         if kind == "sold":
             shipping = info["shipping"] if info["shipping"] is not None else row["shipping"]
             con.execute(
                 "INSERT OR REPLACE INTO sales (item_id, title, price, shipping, bids, sold_at,"
-                " image) VALUES (?,?,?,?,?,?,?)",
+                " image, kind) VALUES (?,?,?,?,?,?,?,?)",
                 (row["item_id"], raw.get("title") or row["title"], info["price"],
-                 shipping, info["bids"], int(info["end_ts"]), info["image"]))
+                 shipping, info["bids"], int(info["end_ts"]), info["image"], info["kind"]))
             added += 1
         con.execute("UPDATE seen SET closed_at=? WHERE item_id=?", (int(now), row["item_id"]))
         con.commit()   # one at a time, so a dashboard button never waits on this loop
@@ -184,7 +215,7 @@ def relevant(con, items: list[Listing]) -> list[dict]:
     back with "hint" set so the prompt marks it as a different card.
     """
     sales = [dict(r) for r in con.execute(
-        "SELECT item_id, title, price, shipping, bids, sold_at FROM sales "
+        "SELECT item_id, title, price, shipping, bids, sold_at, kind FROM sales "
         "ORDER BY sold_at DESC")]
     if not sales:
         return []
@@ -234,6 +265,8 @@ def lines(sales: list[dict]) -> str:
         day = datetime.fromtimestamp(s["sold_at"], timezone.utc).astimezone(config.TZ)
         ship = "ship ?" if s["shipping"] is None else f"+{s['shipping']:.2f} ship"
         bids = f", {bid_count(s['bids'])}" if s["bids"] else ""
+        if s.get("kind") == "bin":   # a fixed price, paid as listed
+            bids = ", BIN"
         out.append(f"{day:%Y-%m-%d} | ${s['price']:.2f} {ship}{bids} | {s['title']}"
                    + (HINT if s.get("hint") else ""))
     return "\n".join(out)
@@ -258,7 +291,8 @@ def with_calls(con, since: float = 0) -> list[dict]:
     """Sales with the pick the bot made on the same auction, if any. Newest first."""
     out = []
     for row in con.execute(
-            "SELECT s.item_id, s.title, s.price, s.shipping, s.bids, s.sold_at, s.image, p.data "
+            "SELECT s.item_id, s.title, s.price, s.shipping, s.bids, s.sold_at, s.image, "
+            "s.kind, p.data "
             "FROM sales s LEFT JOIN picks p USING (item_id) WHERE s.sold_at>=? "
             "ORDER BY s.sold_at DESC", (since,)):
         row = dict(row)
@@ -266,7 +300,8 @@ def with_calls(con, since: float = 0) -> list[dict]:
         row["total"] = delivered(row["price"], row["shipping"])
         row["estimated"] = row["shipping"] is None   # the total assumes UNKNOWN_SHIPPING
         row["call"] = None
-        if pick and pick.get("max") is not None:
+        # Only an auction tests a call: a Buy It Now pick was at or under its max by definition.
+        if pick and pick.get("max") is not None and row["kind"] != "bin":
             value = pick.get("value")
             win = win_bid(value, row["shipping"], pick["max"])
             row["call"] = {"tier": pick.get("tier"), "max": pick["max"], "value": value,
@@ -321,7 +356,7 @@ def market(con, now: datetime, limit: int = 40) -> dict:
     sold = [{
         "item_id": r["item_id"], "title": r["title"], "price": r["price"],
         "shipping": r["shipping"], "total": r["total"], "estimated": r["estimated"],
-        "bids": r["bids"],
+        "bids": r["bids"], "kind": r["kind"] or "auction",
         "sold_at": datetime.fromtimestamp(r["sold_at"], config.TZ).isoformat(
             timespec="minutes"),
         "image": r["image"], "url": f"https://www.ebay.com/itm/{r['item_id']}",

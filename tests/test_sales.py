@@ -308,3 +308,62 @@ def test_the_same_card_number_and_year_match_even_when_the_titles_share_few_word
     thin = listing("9", "2020 Bowman Draft #BD-57")
     assert [s["item_id"] for s in sales.relevant(con, [thin])] == ["1"]
     assert sales.relevant(con, [listing("9", "2020 Bowman Draft BD-58")]) == []
+
+
+def fixed(price, sold=0, offers=False, end=None):
+    raw = {"buyingOptions": ["FIXED_PRICE"] + (["BEST_OFFER"] if offers else []),
+           "price": {"value": str(price), "currency": "USD"},
+           "estimatedAvailabilities": [{"estimatedSoldQuantity": sold}],
+           "shippingOptions": [{"shippingCost": {"value": "0.99", "currency": "USD"}}]}
+    if end:
+        raw["itemEndDate"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(end))
+    return raw
+
+
+def test_a_buy_it_now_that_takes_no_offers_is_recorded_at_its_listed_price():
+    con = db.connect()
+    for item_id in "12345":
+        db.touch(con, item_id, f"2023 Topps Chrome Jordan Walker Refractor #4{item_id}", False,
+                 None, 0.99, 8.0)
+    con.execute("UPDATE seen SET last_seen=?", (NOW - 4 * 3600,))
+    db.touch(con, "6", "2023 Topps Chrome Jordan Walker Sepia #46", False, None, 0.99, 8.0)
+    con.execute("UPDATE seen SET last_seen=? WHERE item_id='6'", (NOW - 600,))   # in the search
+    ebay = FakeEbay({"1": fixed(8.0, sold=1, end=NOW - 7200),      # sold as listed
+                     "2": fixed(8.0, sold=1, offers=True),         # may hide an accepted offer
+                     "3": fixed(8.0, end=NOW - 7200),              # ended unsold
+                     "4": fixed(8.0),                              # still for sale
+                     "5": None})                                   # gone from eBay
+    assert sales.collect(con, ebay, now=NOW) == 1
+    assert sorted(ebay.asked) == ["1", "2", "3", "4", "5"]
+    sale_row = dict(con.execute("SELECT * FROM sales").fetchone())
+    assert (sale_row["item_id"], sale_row["price"], sale_row["shipping"], sale_row["kind"],
+            sale_row["sold_at"]) == ("1", 8.0, 0.99, "bin", int(NOW - 7200))
+    # the one still for sale is asked again a day later, the others never
+    assert sales.collect(con, ebay, now=NOW + 3600) == 0 and len(ebay.asked) == 5
+    ebay.answers["4"] = fixed(8.0, sold=1)
+    assert sales.collect(con, ebay, now=NOW + 25 * 3600) == 1
+    assert sorted(ebay.asked[5:]) == ["4", "6"]   # by then the sixth has dropped out of the search too
+    assert "$8.00 +0.99 ship, BIN | 2023 Topps Chrome" in sales.lines(
+        sales.relevant(con, [listing("9", "2023 Topps Chrome Jordan Walker Refractor #41")]))
+
+
+def test_a_fixed_price_sale_is_a_comp_but_never_a_call_on_the_scorecard():
+    con = db.connect()
+    con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at, kind) "
+                "VALUES ('1', 'card', 8.0, 1.0, NULL, ?, 'bin')", (NOW,))
+    db.save_pick(con, {"item_id": "1", "tier": "green", "max": 9.09, "value": 20.0})
+    (row,) = sales.with_calls(con)
+    assert (row["kind"], row["call"], row["total"]) == ("bin", None, 9.0)
+    assert sales.scorecard([row])["calls"] == 0
+
+
+def test_an_older_sales_table_gains_the_kind_column_with_auctions_as_the_default():
+    import sqlite3
+    config.ensure_state_dir()
+    old = sqlite3.connect(config.SEEN_DB)
+    old.execute("CREATE TABLE sales (item_id TEXT PRIMARY KEY, title TEXT, price REAL NOT NULL, "
+                "shipping REAL, bids INTEGER, sold_at INTEGER NOT NULL)")
+    old.execute("INSERT INTO sales VALUES ('1', 'card', 5.0, 1.0, 3, ?)", (NOW,))
+    old.commit()
+    old.close()
+    assert sales.with_calls(db.connect())[0]["kind"] == "auction"

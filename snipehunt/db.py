@@ -48,8 +48,12 @@ CREATE TABLE IF NOT EXISTS mail_events (
 PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
 # Added to `seen` after the first release, so sales.py can look up closed auctions.
 # `price` and `seller` came later still, for price drops and relists (watch.py).
+# `checked_at` is when sales.py last asked eBay about a Buy It Now that was still for sale.
 SEEN_ADDED = {"is_auction": "INTEGER", "end_ts": "INTEGER", "shipping": "REAL",
-              "closed_at": "INTEGER", "price": "REAL", "seller": "TEXT"}
+              "closed_at": "INTEGER", "price": "REAL", "seller": "TEXT",
+              "checked_at": "INTEGER"}
+# Added to `sales`: the photo, then whether it was an auction or a fixed-price sale.
+SALES_ADDED = {"image": "TEXT", "kind": "TEXT DEFAULT 'auction'"}
 
 
 def connect() -> sqlite3.Connection:
@@ -62,8 +66,10 @@ def connect() -> sqlite3.Connection:
     for name, kind in SEEN_ADDED.items():
         if name not in have:
             con.execute(f"ALTER TABLE seen ADD COLUMN {name} {kind}")
-    if "image" not in {row["name"] for row in con.execute("PRAGMA table_info(sales)")}:
-        con.execute("ALTER TABLE sales ADD COLUMN image TEXT")
+    have = {row["name"] for row in con.execute("PRAGMA table_info(sales)")}
+    for name, kind in SALES_ADDED.items():
+        if name not in have:
+            con.execute(f"ALTER TABLE sales ADD COLUMN {name} {kind}")
     return con
 
 
