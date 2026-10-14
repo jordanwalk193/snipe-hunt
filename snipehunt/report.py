@@ -171,6 +171,20 @@ def sold_section(con, since: datetime, top: int = 5) -> list[str]:
     return md
 
 
+def missed_section(con, now: datetime, top: int = 10) -> list[str]:
+    """This week's sales the bot made no pick for that went well under the card's usual price."""
+    found = sales.find_missed(con, now.timestamp(), days=7)[:top]
+    md = ["", f"## Missed steals ({len(found)})"]
+    if not found:
+        return md + ["- None: nothing the bot passed on sold well under its usual price."]
+    for m in found:
+        md.append(f"- [{m['title']}]({m['url']}) · **{_money(m['total'])}** delivered"
+                  + (" · Buy It Now" if m["kind"] == "bin" else "")
+                  + f" · typically {_money(m['typical'])} ({m['pct']}% under, "
+                  f"{m['n']} earlier sales)")
+    return md
+
+
 def monthly_section() -> str:
     today = datetime.now(config.TZ).strftime("%Y-%m-%d")
     who = profile.get()
@@ -227,6 +241,7 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
     md += ["", "## Best upcoming snipes"]
     md += [_pick_line(p) for p in snipes] or ["- None on the board right now."]
     md += sold_section(con, since)
+    md += missed_section(con, now)
 
     if releases is not None:
         md += ["", "## New releases to watch"]

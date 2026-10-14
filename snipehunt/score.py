@@ -122,7 +122,7 @@ phone-friendly line; for an edge, say what the seller got wrong"}}], "not_player
 === inventory.csv ===
 {inventory}
 
-{sold}=== listings (JSON lines) ===
+{learned}{sold}=== listings (JSON lines) ===
 {listings}
 """
 
@@ -137,6 +137,25 @@ SOLD = """=== sold prices seen (date | final bid or fixed price, shipping | titl
 {lines}
 
 """
+
+
+MISSED_SHOWN = 5          # missed steals in the prompt; every line is paid for on every batch
+MISSED = """=== cards you passed on that sold cheap. Watch for these kinds of listings. ===
+{lines}
+
+"""
+
+
+def learned(con) -> str:
+    """What the bot has learned since it started, as extra sections for the prompt.
+
+    Each section appears only when there is something to put in it.
+    """
+    out = ""
+    missed = sales.missed(con)[:MISSED_SHOWN]
+    if missed:
+        out += MISSED.format(lines=sales.missed_lines(missed))
+    return out
 
 
 def _compact(item: Listing) -> str:
@@ -178,9 +197,10 @@ def inventory_for_scoring() -> str:
 
 
 def build_prompt(items: list[Listing], lookups: int = 8,
-                 sold: list[dict] | None = None, track: str = "") -> str:
+                 sold: list[dict] | None = None, track: str = "", learned: str = "") -> str:
     who = profile.get()
     return PROMPT.format(
+        learned=learned,
         sold_rule=(SOLD_RULE if sold else "") + track,
         sold=SOLD.format(lines=sales.lines(sold)) if sold else "",
         app=who.app_name, collector=who.collector, player=who.described,
@@ -297,7 +317,8 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
             sold = sales.relevant(con, batch) if con is not None else []
             track = sales.track_record(con) if con is not None else ""
             reply = extract_json(ask_claude(
-                build_prompt(batch, lookups, sold, track),
+                build_prompt(batch, lookups, sold, track,
+                             learned(con) if con is not None else ""),
                 tools=WEB_TOOLS if lookups else ""))
         except Exception as exc:
             if not scored:

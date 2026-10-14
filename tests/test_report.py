@@ -168,3 +168,16 @@ def test_the_report_says_what_sold_and_how_the_calls_did(con):
     assert ("- [Gold Refractor 1](https://www.ebay.com/itm/1) · **$40.00** · 6 bids · "
             "bot's max 25.25: went over") in text
     assert "The bot had picked 1 of these: 0 closed at or under its max, 1 went over." in text
+
+
+def test_the_report_lists_the_steals_the_bot_missed_this_week(con):
+    assert "## Missed steals (0)" in report.build(con, NOW)[0]
+    title = "2023 Topps Chrome Jordan Walker Gold Refractor /50 #45"
+    for item_id, price, days in (("1", 40.0, 20), ("2", 44.0, 12), ("3", 21.0, 2)):
+        con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (item_id, title, price, 1.0, 6, NOW.timestamp() - days * 86400))
+    text, _ = report.build(con, NOW)
+    assert "## Missed steals (1)" in text
+    assert (f"- [{title}](https://www.ebay.com/itm/3) · **$22.00** delivered · typically "
+            "$43.00 (49% under, 2 earlier sales)") in text

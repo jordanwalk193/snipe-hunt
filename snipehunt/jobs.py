@@ -48,8 +48,10 @@ def hourly(dry_run: bool = False) -> str:
             print(f"gixen: {exc}", file=sys.stderr)
         try:   # what closed auctions went for; scoring prices from these
             sold = sales.collect(con)
-            print(f"sales: {sold} new sold prices, {sales.count(con)} on record",
-                  file=sys.stderr)
+            missed = sales.save_missed(con)   # cheap sales nobody picked, to learn from
+            con.commit()
+            print(f"sales: {sold} new sold prices, {sales.count(con)} on record, "
+                  f"{missed} missed steals", file=sys.stderr)
         except Exception as exc:   # bookkeeping must not stop the hunt
             con.rollback()
             print(f"sales: {exc}", file=sys.stderr)

@@ -41,6 +41,11 @@ UNKNOWN_SHIPPING = 5.00
 TRACK_CALLS = 30        # the latest calls per price band the track record looks at
 TRACK_MIN = 8           # fewer than this in a band says nothing yet
 TRACK_OFF = 10          # percent the going rate has to be off before it is mentioned
+MISSED_KEY = "missed_steals"
+MISSED_UNDER = 35       # percent under the card's typical price that makes a sale a steal
+MISSED_PRIOR = 2        # earlier sales of the same card needed to call a price typical
+MISSED_DAYS = 30        # how far back sales are checked for steals the bot passed on
+MISSED_KEEP = 40
 # Cheap cards and dear ones miss in different directions, so the going rate is
 # checked per band of the pick's value: (from, up to, how the prompt names it).
 BANDS = ((0, 10, "under $10"), (10, 50, "$10 to $50"), (50, None, "over $50"))
@@ -303,6 +308,7 @@ def with_calls(con, since: float = 0) -> list[dict]:
         row["total"] = delivered(row["price"], row["shipping"])
         row["estimated"] = row["shipping"] is None   # the total assumes UNKNOWN_SHIPPING
         row["call"] = None
+        row["picked"] = pick is not None
         # Only an auction tests a call: a Buy It Now pick was at or under its max by definition.
         if pick and pick.get("max") is not None and row["kind"] != "bin":
             value = pick.get("value")
@@ -391,7 +397,9 @@ def market(con, now: datetime, limit: int = 40) -> dict:
         "image": r["image"], "url": f"https://www.ebay.com/itm/{r['item_id']}",
         "call": r["call"]} for r in rows[:limit]]
     return {"count": len(rows), "count_7d": sum(r["sold_at"] >= week for r in rows),
-            **scorecard(rows), "sold": sold, "history": history(con)}
+            **scorecard(rows), "sold": sold, "history": history(con),
+            # cheap sales the bot never picked; worked out by the hourly run
+            "missed_steals": len(missed(con)), "missed": missed(con)[:10]}
 
 
 SAME_CARD = 0.75        # title overlap that makes two listings the same card
@@ -450,6 +458,62 @@ def history(con, limit: int = 12) -> list[dict]:
     out.sort(key=lambda g: g["last_at"], reverse=True)
     out.sort(key=lambda g: -g["n"])
     return out[:limit]
+
+
+def find_missed(con, now: float | None = None, days: int = MISSED_DAYS) -> list[dict]:
+    """Steals the bot passed on: sales it made no pick for that went cheap.
+
+    Cheap means MISSED_UNDER percent or more below the typical price of the
+    same card's earlier sales, shipping counted, with at least MISSED_PRIOR of
+    those to go by. Biggest discount first.
+    """
+    now = now or time.time()
+    rows = with_calls(con)                       # newest first
+    by_traits: dict[tuple, list] = {}            # only the same grade and print run can match
+    for row in rows:
+        row["key"], row["number"] = card_key(row["title"]), card_number(row["title"])
+        by_traits.setdefault(traits(row["title"]), []).append(row)
+    out = []
+    for row in rows:
+        if row["picked"] or row["sold_at"] < now - days * 86400 or not row["key"]:
+            continue
+        earlier = [r["total"] for r in by_traits[traits(row["title"])]
+                   if r["sold_at"] < row["sold_at"] and r["key"]
+                   and len(row["key"] & r["key"]) / len(row["key"] | r["key"]) >= SAME_CARD
+                   and not (row["number"] and r["number"]
+                            and _number_match(row["title"], r["title"]) is False)]
+        if len(earlier) < MISSED_PRIOR:
+            continue
+        typical = statistics.median(earlier)
+        pct = round(100 * (1 - row["total"] / typical))
+        if pct >= MISSED_UNDER:
+            out.append({"item_id": row["item_id"], "title": row["title"], "total": row["total"],
+                        "typical": round(typical, 2), "pct": pct, "n": len(earlier),
+                        "kind": row["kind"] or "auction", "sold_at": row["sold_at"],
+                        "url": f"https://www.ebay.com/itm/{row['item_id']}"})
+    return sorted(out, key=lambda m: (-m["pct"], -m["sold_at"]))
+
+
+def save_missed(con, now: float | None = None) -> int:
+    """Work the missed steals out once an hour and keep them, newest first.
+
+    Comparing every sale with every other is too slow to do each time the
+    dashboard asks, so the prompt and the dashboard read this copy.
+    """
+    found = sorted(find_missed(con, now), key=lambda m: -m["sold_at"])[:MISSED_KEEP]
+    db.kv_set(con, MISSED_KEY, json.dumps(found, ensure_ascii=False))
+    return len(found)
+
+
+def missed(con) -> list[dict]:
+    """The missed steals the last hourly run found, newest first."""
+    return json.loads(db.kv_get(con, MISSED_KEY, "[]"))
+
+
+def missed_lines(rows: list[dict]) -> str:
+    """Missed steals as the scoring prompt shows them, one per line."""
+    return "\n".join(f"${m['total']:.2f} delivered, typically ${m['typical']:.2f} | {m['title']}"
+                     for m in rows)
 
 
 def last_sold(rows: list[dict], title: str, item_id: str = "") -> dict | None:

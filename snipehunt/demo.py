@@ -165,7 +165,7 @@ def _market(now: datetime) -> dict:
                 {"band": "under $10", "calls": 12, "value_gap_pct": 22, "value_bias_pct": -18},
                 {"band": "$10 to $50", "calls": 13, "value_gap_pct": 11, "value_bias_pct": 6},
                 {"band": "over $50", "calls": 3, "value_gap_pct": 9, "value_bias_pct": 8}],
-            "sold": sold, "history": _history(now)}
+            "sold": sold, "history": _history(now), "missed_steals": 0, "missed": []}
 
 
 def _checked(gixen: dict, picks: list[dict]) -> dict:

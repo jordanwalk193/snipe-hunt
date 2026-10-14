@@ -387,3 +387,29 @@ def test_the_track_record_is_kept_per_price_band():
     assert "over $50, final prices ran 50% more" in sales.track_record(con)
     assert sales.scorecard([])["bands"][0] == {
         "band": "under $10", "calls": 0, "value_gap_pct": None, "value_bias_pct": None}
+
+
+def test_a_cheap_sale_nobody_picked_is_a_missed_steal():
+    from datetime import datetime
+    con = db.connect()
+    blue = "2023 Topps Chrome Jordan Walker Blue Refractor /150 #45"
+    sale(con, "1", blue, 20.0, ago=5 * 86400)
+    sale(con, "2", blue + " RC", 24.0, ago=4 * 86400)
+    sale(con, "3", blue, 22.0, ago=3 * 86400)
+    sale(con, "4", "Jordan Walker 2023 Topps Chrome Blue Refractor 88/150 #45", 12.0, ago=3600)
+    sale(con, "5", blue, 11.0, value=22.0, max_bid=12.12, ago=1800)   # cheap, but picked
+    sale(con, "6", blue + " PSA 10", 9.0, ago=900)                     # no earlier graded sales
+    sale(con, "7", "2023 Topps Chrome Jordan Walker Blue Refractor /150 #212", 5.0, ago=600)
+    sale(con, "8", blue, 20.0, ago=300)                                # about the usual price
+    (miss,) = sales.find_missed(con, NOW)
+    assert (miss["item_id"], miss["total"], miss["typical"], miss["pct"], miss["n"]) == (
+        "4", 12.0, 22.0, 45, 3)
+    assert sales.find_missed(con, NOW + 40 * 86400) == []              # long ago by then
+    assert sales.missed(con) == [] and "passed on that sold cheap" not in score.learned(con)
+    assert sales.save_missed(con, NOW) == 1
+    text = score.learned(con)
+    assert "$12.00 delivered, typically $22.00 | Jordan Walker 2023 Topps Chrome Blue" in text
+    prompt = score.build_prompt([listing("9", blue)], learned=text)
+    assert prompt.index("passed on that sold cheap") < prompt.index("=== listings")
+    view = sales.market(con, datetime.fromtimestamp(NOW, config.TZ))
+    assert view["missed_steals"] == 1 and view["missed"][0]["item_id"] == "4"
