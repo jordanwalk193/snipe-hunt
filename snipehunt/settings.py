@@ -39,13 +39,45 @@ DEFAULTS: dict = {
     "extra_searches": [],
     # sellers who combine shipping: with an order already open, another card ships for $0
     "combined_ship_sellers": ["dcsports87"],
+    # The four below are tuning knobs more than preferences; see TUNABLES.
+    "edge_min_pct": 25,              # an edge has to be this far under the going rate
+    "min_overlap": 0.5,              # share of title words a sold price must have in common
+    "track_off": 10,                 # percent the going rates must be off before scoring is told
+    "fast_min_price": 15.0,          # under this, a plain Buy It Now waits for the hourly run
+    "self_tuning": True,             # the weekly self-review may adjust one tunable a week
 }
+
+# What the weekly self-review may adjust on its own, and how far (tune.py).
+# Each has hard bounds, the most it may move in one week, and the metric from
+# reflect.py the change is judged by two weeks later ("better" says which way
+# is good). The value itself is an ordinary setting, so nothing here ever
+# touches code. Never tunable: anything about the read-only rules, quiet
+# hours, which alerts are on, credentials or how the bot signs in to Gixen.
+TUNABLES: dict = {
+    "edge_min_pct": {"min": 15, "max": 40, "step": 5,
+                     "metric": "sniped_pct", "better": "higher"},
+    "min_overlap": {"min": 0.4, "max": 0.7, "step": 0.05,
+                    "metric": "value_gap_pct", "better": "lower"},
+    "track_off": {"min": 5, "max": 20, "step": 5,
+                  "metric": "value_gap_pct", "better": "lower"},
+    "price_lookups": {"min": 0, "max": 12, "step": 2,
+                      "metric": "value_gap_pct", "better": "lower"},
+    "fast_min_price": {"min": 5, "max": 30, "step": 5,
+                       "metric": "cost_per_pick", "better": "lower"},
+    "yellow_max_total": {"min": 1, "max": 4, "step": 0.5,
+                         "metric": "skipped_pct", "better": "lower"},
+}
+NEVER_TUNABLE = ("quiet", "alert", "gixen", "urgent", "bedtime", "self_tuning")
 
 RANGES = {
     "yellow_max_total": (0, 25),
     "urgent_hours": (0, 24),
     "alert_min_stars": (1, 5),
-    "price_lookups": (0, 8),
+    "price_lookups": (0, 12),
+    "edge_min_pct": (15, 40),
+    "min_overlap": (0.4, 0.7),
+    "track_off": (5, 20),
+    "fast_min_price": (5, 30),
     "need_snipe_hours": (1, 168),
     "monthly_budget": (0, 5000),
     "gixen_relogin_minutes": (0, 1440),
@@ -124,6 +156,13 @@ def load(con=None) -> dict:
         except SettingsError:
             pass
     return values
+
+
+def set_value(con, key: str, value) -> None:
+    """Store one setting, validated like any other. The caller commits."""
+    stored = json.loads(db.kv_get(con, KEY, "{}"))
+    stored[key] = _clean(key, value)
+    db.kv_set(con, KEY, json.dumps(stored))
 
 
 def update(con, changes: dict) -> dict:

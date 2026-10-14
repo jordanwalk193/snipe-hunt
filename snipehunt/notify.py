@@ -329,8 +329,10 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
     held = json.loads(db.kv_get(con, PENDING_KEY, "[]"))
     known = {p["item_id"] for p in new_picks}
     candidates = new_picks + [p for p in held if p["item_id"] not in known]
+    stale = len(candidates)
     if current is not None:
         candidates = [p for p in (refresh(con, p, current, now) for p in candidates) if p]
+    stale -= len(candidates)   # dropped because the price moved on or the listing is gone
     candidates = [p for p in candidates if worth_alerting(p)]
     candidates = [p for p in candidates if db.may_alert(con, p["item_id"], p["total"])]
     send_now, hold = split_for_quiet_hours(candidates, now)
@@ -365,6 +367,13 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
             db.kv_set(con, PENDING_KEY, json.dumps(hold))
             if bedtime_night and (done or not bedtime):   # tonight's bundle is dealt with
                 db.kv_set(con, BEDTIME_KEY, bedtime_night)
+            if bedtime and done:
+                db.bump(con, "bedtime_bundles")
+                db.bump(con, "bedtime_picks", len(flat(bedtime)))
+            # counts for the weekly self-review
+            db.bump(con, "alerts_sent", sent)
+            db.bump(con, "alerts_held", len(hold))
+            db.bump(con, "alerts_stale", stale)
             con.commit()
     return sent
 

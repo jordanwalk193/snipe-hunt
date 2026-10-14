@@ -8,7 +8,7 @@ from typing import Callable
 
 import requests
 
-from . import config, db, notify, profile
+from . import config, db, ebay_search, notify, profile
 
 
 def heartbeat(job: str, ok: bool = True, msg: str = "") -> None:
@@ -41,6 +41,7 @@ def guarded(job: str, fn: Callable[[], str | None], dry_run: bool = False) -> in
         traceback.clear_frames(sys.exc_info()[2])
         if dry_run:
             return 1
+        _count(con, job, type(exc).__name__)
         if db.kv_get(con, key) != "1" and notify.configured():
             try:
                 notify.send(f"{profile.get().app_name}: {job} run failed", reason)
@@ -52,7 +53,17 @@ def guarded(job: str, fn: Callable[[], str | None], dry_run: bool = False) -> in
         return 1
     print(f"{job}: {summary}", file=sys.stderr)
     if not dry_run:
+        _count(con, job)
         db.kv_set(con, key, "0")
         con.commit()
         heartbeat(job, msg=summary)
     return 0
+
+
+def _count(con, job: str, error: str | None = None) -> None:
+    """Note one run for the weekly self-review: that it ran, what it cost eBay, how it failed."""
+    db.bump(con, f"runs:{job}")
+    db.bump(con, f"ebay_calls:{job}", ebay_search.API_CALLS)
+    if error:
+        db.bump(con, f"failures:{job}")
+        db.bump(con, f"error:{job}:{error[:40]}")

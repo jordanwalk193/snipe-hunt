@@ -17,7 +17,9 @@ from . import config, db
 HOURLY_MINUTE = 0
 DAILY_AT = (9, 0)
 WEEKLY_AT = (6, 18, 45)    # weekday (Monday is 0), hour, minute: Sunday 6:45pm
-LATE = {"hourly": 50 * 60, "daily": 6 * 3600, "weekly": 6 * 3600}   # still worth running
+REFLECT_AT = (6, 19, 30)   # the self-review, once the weekly report is out: Sunday 7:30pm
+LATE = {"hourly": 50 * 60, "daily": 6 * 3600, "weekly": 6 * 3600,
+        "reflect": 6 * 3600}   # still worth running
 TICK = 20
 
 _lock = threading.Lock()
@@ -61,7 +63,7 @@ def last_due(job: str, now: datetime) -> datetime:
     if job == "daily":
         due = now.replace(hour=DAILY_AT[0], minute=DAILY_AT[1], second=0, microsecond=0)
         return due if due <= now else due - timedelta(days=1)
-    weekday, hour, minute = WEEKLY_AT
+    weekday, hour, minute = REFLECT_AT if job == "reflect" else WEEKLY_AT
     due = (now - timedelta(days=(now.weekday() - weekday) % 7)).replace(
         hour=hour, minute=minute, second=0, microsecond=0)
     return due if due <= now else due - timedelta(days=7)
@@ -70,7 +72,8 @@ def last_due(job: str, now: datetime) -> datetime:
 def due_jobs(con, now: datetime) -> list[str]:
     """Jobs whose scheduled time has passed since they last started."""
     out = []
-    for job in ("hourly", "daily", "weekly") + (("fast",) if fast_minutes() else ()):
+    for job in ("hourly", "daily", "weekly", "reflect") + (
+            ("fast",) if fast_minutes() else ()):
         due = last_due(job, now)
         started = float(db.kv_get(con, f"started:{job}", "0") or 0)
         late = LATE.get(job, fast_minutes() * 60)
@@ -106,7 +109,7 @@ def tick(con, now: datetime) -> str | None:
 def run_forever() -> None:
     con = db.connect()
     # A fresh install shouldn't fire every job the moment it starts.
-    for job in ("daily", "weekly"):
+    for job in ("daily", "weekly", "reflect"):
         if db.kv_get(con, f"started:{job}") is None:
             db.kv_set(con, f"started:{job}", str(time.time()))
     con.commit()

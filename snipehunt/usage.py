@@ -7,6 +7,7 @@ have cost through the API. One running total is kept per day.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime
 
@@ -14,6 +15,7 @@ from . import config, db
 
 KEY = "claude_cost"
 KEEP_DAYS = 62
+JOB_ENV = "SNIPEHUNT_JOB"   # set by jobs.main to the name of the job that is running
 
 
 def record(usd) -> None:
@@ -27,6 +29,9 @@ def record(usd) -> None:
         entry["usd"] = round(entry["usd"] + usd, 4)
         entry["calls"] += 1
         db.kv_set(con, KEY, json.dumps(dict(sorted(days.items())[-KEEP_DAYS:])))
+        job = os.environ.get(JOB_ENV) or "other"   # which job spent it, for the self-review
+        db.bump(con, f"cost:{job}", usd, today)
+        db.bump(con, f"claude_calls:{job}", 1, today)
         con.commit()
         con.close()
     except Exception as exc:

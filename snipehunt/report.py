@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
-from . import config, db, inventory, profile, sales, settings
+from . import config, db, inventory, profile, sales, settings, tune
 from .notify import TIER_ICON, TIER_ORDER
 from .score import ask_claude
 
@@ -242,6 +242,11 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
     md += [_pick_line(p) for p in snipes] or ["- None on the board right now."]
     md += sold_section(con, since)
     md += missed_section(con, now)
+
+    md += ["", "## Self-tuning"]
+    md += tune.lines(tune.view(con, 6)) or [
+        "- No settings have been tuned yet." if settings.load(con)["self_tuning"]
+        else "- Switched off."]
 
     if releases is not None:
         md += ["", "## New releases to watch"]

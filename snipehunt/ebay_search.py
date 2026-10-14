@@ -24,6 +24,14 @@ ITEM_URL = "https://api.ebay.com/buy/browse/v1/item/get_item_by_legacy_id"
 SCOPE = "https://api.ebay.com/oauth/api_scope"
 ALL_FORMATS = "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}"
 
+API_CALLS = 0   # eBay calls this process has made, for the weekly self-review
+
+
+def _count_call() -> None:
+    global API_CALLS
+    API_CALLS += 1
+
+
 def queries() -> list[tuple[str, str, str, str | None]]:
     """Every search to run, as (label, q, filter, sort).
 
@@ -163,12 +171,14 @@ class EbayClient:
         if sort:
             params["sort"] = sort
         self.calls += 1
+        _count_call()
         resp = self._request("GET", SEARCH_URL, params=params, headers=self._headers())
         return resp.json().get("itemSummaries", []) or []
 
     def item(self, item_id: str) -> dict | None:
         """One listing by its item number, ended or not. None once eBay has dropped it."""
         self.calls += 1
+        _count_call()
         resp = self._request("GET", ITEM_URL, params={"legacy_item_id": item_id},
                              headers=self._headers(), missing_ok=True)
         return resp.json() if resp.status_code == 200 else None

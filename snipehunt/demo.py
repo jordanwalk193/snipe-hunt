@@ -247,6 +247,7 @@ def build(now: datetime | None = None) -> dict:
             "fire": 3, "green": 3, "yellow": 3, "sales_based": 3, "held_overnight": 0,
             "sold_prices": 212, "sold_prices_7d": 41,
             "searching": False, "skipped": 0, "last_report": None,
+            "last_self_review": None,
             "cost_today": 0.84, "calls_today": 19, "cost_month": 11.37,
             "need_snipe": [p["item_id"] for p in picks if p["is_auction"] and p["snipe"] is None
                            and p["tier"] in ("fire", "green")
@@ -286,6 +287,7 @@ def build(now: datetime | None = None) -> dict:
                                       "date": (now - timedelta(days=1)).date().isoformat(),
                                       "seller": SELLERS[1]}]},
         "market": _market(now),
+        "tuning": {"on": True, "log": [], "tunables": {}},
         "rarest": _rarest(now),
         "rarest_census": {"one_of_one": 4, "to_10": 11, "to_50": 37},
         "moves": _moves(now),

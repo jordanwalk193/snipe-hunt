@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import (config, db, gixen, inventory, profile, rarity, report, sales, scheduler,
-               settings, snipecheck, watch)
+               settings, snipecheck, tune, watch)
 from . import usage
 from .notify import TIER_ORDER
 
@@ -265,8 +265,10 @@ def status(con, picks: list[dict], now: datetime) -> dict:
         "held_overnight": len(json.loads(db.kv_get(con, "pending_picks", "[]"))),
         "searching": scheduler.running("hourly"),
         "skipped": len(skipped_ids(con)),
-        "last_report": max((p.name for p in config.REPORTS_DIR.glob("*.md")),
-                           default=None),
+        "last_report": max((p.name for p in config.REPORTS_DIR.glob("*.md")
+                            if not p.name.startswith("reflect-")), default=None),
+        "last_self_review": max((p.name for p in config.REPORTS_DIR.glob("reflect-*.md")),
+                                default=None),
     }
 
 
@@ -309,6 +311,9 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "rarest_census": rarity.census(con),
         "moves": watch.load(con, now.isoformat(timespec="minutes")),
         "wantlist": wantlist(),
+        # what the weekly self-review changed on its own, and how each change turned out
+        "tuning": {"on": cfg["self_tuning"], "log": tune.view(con),
+                   "tunables": tune.current(con)},
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),
     }

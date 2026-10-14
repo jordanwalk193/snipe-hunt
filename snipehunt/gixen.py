@@ -117,6 +117,7 @@ def fetch(con, allow_login: bool = True) -> list[dict]:
         now = time.time()
         signed_out_at = float(db.kv_get(con, SIGNED_OUT_KEY, "0") or 0)
         if session.cookies and not signed_out_at:
+            db.bump(con, "gixen_signed_out")
             db.kv_set(con, SIGNED_OUT_KEY, str(now))
             con.commit()
             signed_out_at = now

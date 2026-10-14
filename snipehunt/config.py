@@ -36,10 +36,11 @@ DEFAULTS = {
     "API_BIND": "0.0.0.0",
     "SNIPEHUNT_TZ": "America/New_York",
     "FAST_LANE_MINUTES": "0",    # check brand-new Buy It Nows this often; 0 = off
+    "GITHUB_REPO": "",           # owner/name: where the weekly self-review opens its issue
 }
 SECRETS = ("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET", "GMAIL_USER", "GMAIL_APP_PASSWORD",
            "HA_URL", "HA_TOKEN", "HA_NOTIFY_SERVICE", "NTFY_URL", "GIXEN_USER",
-           "GIXEN_PASS", "API_TOKEN", "KUMA_PUSH_URL", "ANTHROPIC_API_KEY")
+           "GIXEN_PASS", "API_TOKEN", "KUMA_PUSH_URL", "ANTHROPIC_API_KEY", "GITHUB_TOKEN")
 
 
 class ConfigError(RuntimeError):

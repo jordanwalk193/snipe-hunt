@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from datetime import datetime
 
 from . import config
 
@@ -42,6 +43,32 @@ CREATE TABLE IF NOT EXISTS mail_events (
     data       TEXT NOT NULL,
     logged_at  INTEGER NOT NULL,
     UNIQUE (date, type, item_id, title)
+);
+CREATE TABLE IF NOT EXISTS stats (
+    day  TEXT NOT NULL,
+    key  TEXT NOT NULL,
+    n    REAL NOT NULL,
+    PRIMARY KEY (day, key)
+);
+CREATE TABLE IF NOT EXISTS tuning_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    old         REAL NOT NULL,
+    new         REAL NOT NULL,
+    reason      TEXT,
+    metric      TEXT NOT NULL,
+    baseline    REAL,
+    sample      INTEGER,
+    applied_at  INTEGER NOT NULL,
+    status      TEXT NOT NULL,
+    checked_at  INTEGER,
+    result      REAL,
+    note        TEXT
+);
+CREATE TABLE IF NOT EXISTS reflections (
+    week        TEXT PRIMARY KEY,
+    data        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS snipe_log (
     item_id    TEXT PRIMARY KEY,
@@ -227,6 +254,25 @@ def recent_snipes(con, limit: int) -> list[dict]:
     """The latest snipes logged, newest first."""
     return [dict(r) for r in con.execute(
         "SELECT * FROM snipe_log ORDER BY logged_at DESC, rowid DESC LIMIT ?", (limit,))]
+
+
+def bump(con, key: str, n: float = 1, day: str | None = None) -> None:
+    """Add to one of today's running counts (alerts sent, eBay calls, Claude cost…).
+
+    These are the numbers the weekly self-review reads. The caller commits.
+    """
+    if not n:
+        return
+    day = day or datetime.now(config.TZ).date().isoformat()
+    con.execute("INSERT INTO stats (day, key, n) VALUES (?,?,?) "
+                "ON CONFLICT(day, key) DO UPDATE SET n=n+excluded.n", (day, key, n))
+
+
+def stat_totals(con, first_day: str, last_day: str) -> dict[str, float]:
+    """Every count added up over the days from first_day to last_day, both included."""
+    return {r["key"]: r["total"] for r in con.execute(
+        "SELECT key, sum(n) AS total FROM stats WHERE day>=? AND day<=? GROUP BY key",
+        (first_day, last_day))}
 
 
 def kv_get(con, key: str, default: str | None = None) -> str | None:

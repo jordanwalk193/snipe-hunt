@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime
 
 from . import (config, db, ebay_search, gitsync, gixen, hidden, inventory, inventory_sync,
-               limited_drops, notify, ops, profile, rarity, report, sales, score, settings,
-               snipecheck, watch)
+               limited_drops, notify, ops, profile, rarity, reflect, report, sales, score,
+               settings, snipecheck, usage, watch)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -185,7 +186,7 @@ def fast(dry_run: bool = False) -> str:
 FAST_MAX = 12              # listings in one fast-lane scoring call
 FAST_CALLS_PER_DAY = 30    # Claude calls the fast lane may make in a day
 FAST_KEY = "fast_calls"
-FAST_MIN_PRICE = 15.0      # under this, a plain card waits for the hourly run
+# Under the setting fast_min_price, a plain card waits for the hourly run.
 
 
 def fast_worth(con, item) -> bool:
@@ -199,7 +200,7 @@ def fast_worth(con, item) -> bool:
     # the same card has sold for clearly more than this one is asking
     return any(sales.delivered(s["price"], s["shipping"]) > item.total * 1.3
                for s in sales.relevant(con, [item]) if not s["hint"]
-               ) or item.price >= FAST_MIN_PRICE
+               ) or item.price >= settings.load(con)["fast_min_price"]
 
 
 def _fast_calls_today(con) -> int:
@@ -288,7 +289,19 @@ def weekly(dry_run: bool = False, now: datetime | None = None) -> str:
     return summary.replace("\n", " · ")
 
 
-JOBS = {"hourly": hourly, "daily": daily, "weekly": weekly, "fast": fast}
+def self_review(dry_run: bool = False) -> str:
+    """The weekly self-review: the bot's own numbers, proposals, and one bounded tuning step.
+
+    It changes settings only, never code; see reflect.py and tune.py.
+    """
+    con = db.connect()
+    if not dry_run:
+        gitsync.pull()
+    return reflect.run(con, dry_run=dry_run)
+
+
+JOBS = {"hourly": hourly, "daily": daily, "weekly": weekly, "fast": fast,
+        "reflect": self_review}
 
 
 def main() -> None:
@@ -297,6 +310,7 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true",
                     help="print what would happen; send, write and push nothing")
     args = ap.parse_args()
+    os.environ[usage.JOB_ENV] = args.job   # so each Claude call's cost is filed under its job
     sys.exit(ops.guarded(args.job, lambda: JOBS[args.job](args.dry_run), args.dry_run))
 
 

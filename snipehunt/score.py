@@ -26,7 +26,7 @@ TIERS = {"fire", "green", "yellow"}
 # Why a pick is more than a fair price: a seller's pricing mistake, a listing
 # buyers won't find, or an auction nobody is watching.
 EDGES = {"mispriced", "hidden", "sleeper"}
-EDGE_MIN_PCT = 25         # an edge has to be this far under the going rate
+# How far under the going rate an edge has to be is the setting edge_min_pct.
 UNKNOWN_SHIPPING = sales.UNKNOWN_SHIPPING   # what the prompt tells Claude to assume for "ship ?"
 # The inventory columns that say which card a row is. Scoring only needs these
 # to tell what is already owned; order dates, sellers and notes are left out
@@ -57,7 +57,7 @@ def rerate(pick: dict) -> dict:
         ship = 0   # rides along with an order already open with this seller
     pay = (pick["max"] if pick.get("is_auction") else pick["price"]) + ship
     pick["deal"], pick["deal_pct"] = rate(pay, pick.get("value"))
-    if pick.get("edge") and (pick["deal_pct"] or 0) < EDGE_MIN_PCT:
+    if pick.get("edge") and (pick["deal_pct"] or 0) < settings.load()["edge_min_pct"]:
         pick["edge"] = None   # the numbers no longer back the claim
     return pick
 
@@ -98,7 +98,7 @@ print, grade) left out of the title, a poor photo of a good card, or a good \
 card buried in a lot; "sleeper" = an auction ending within about a day with \
 few or no bids and still far under its going rate. Use "" for a card that is \
 only a fair price. Claim an edge only when you are fairly sure of the going \
-rate and paying your max plus shipping would still be at least 25% under it.
+rate and paying your max plus shipping would still be at least {edge_min}% under it.
 - A listing marked "found": "by card number…" came from a search for one of \
 {name}'s card numbers and does not name the player. If the year, set and card \
 number make it {name}'s card, it is "hidden" by definition and worth a close \
@@ -255,7 +255,7 @@ def build_prompt(items: list[Listing], lookups: int = 8,
                  learned: tuple[str, str] = ("", "")) -> str:
     who = profile.get()
     return PROMPT.format(
-        learned=learned[1],
+        learned=learned[1], edge_min=settings.load()["edge_min_pct"],
         sold_rule=(SOLD_RULE if sold else "") + track + learned[0],
         sold=SOLD.format(lines=sales.lines(sold)) if sold else "",
         app=who.app_name, collector=who.collector, player=who.described,
@@ -341,7 +341,7 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
         ship = 0
     deal, deal_pct = rate((max_bid if item.is_auction else item.price) + ship, value)
     edge = str(raw.get("edge") or "").lower()
-    if edge not in EDGES or (deal_pct or 0) < EDGE_MIN_PCT or (
+    if edge not in EDGES or (deal_pct or 0) < settings.load()["edge_min_pct"] or (
             edge == "mispriced" and item.is_auction):
         edge = None   # the numbers have to back the claim
     return {

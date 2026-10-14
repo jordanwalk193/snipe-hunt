@@ -22,7 +22,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from . import config, db, profile
+from . import config, db, profile, settings
 from .hidden import CODE, YEAR
 from .ebay_search import EbayClient, Listing, _money
 
@@ -35,12 +35,12 @@ KEEP_DAYS = 180
 PER_LISTING = 3         # sold prices offered to Claude for one listing
 MAX_LINES = 60          # and for one scoring call, because every line is paid for
 HINTS_PER_LISTING = 1   # of those, sales of another grade or print run of the card
-MIN_OVERLAP = 0.5
+# The share of words two titles must have in common is the setting min_overlap.
 HINT = " (different grade/parallel)"
 UNKNOWN_SHIPPING = 5.00
 TRACK_CALLS = 30        # the latest calls per price band the track record looks at
 TRACK_MIN = 8           # fewer than this in a band says nothing yet
-TRACK_OFF = 10          # percent the going rate has to be off before it is mentioned
+# How far off a band's going rates must be to get a mention is the setting track_off.
 MISSED_KEY = "missed_steals"
 MISSED_UNDER = 35       # percent under the card's typical price that makes a sale a steal
 MISSED_PRIOR = 2        # earlier sales of the same card needed to call a price typical
@@ -198,7 +198,8 @@ def _year(title: str) -> str | None:
     return found.group(1) if found else None
 
 
-def _closeness(title: str, mine: frozenset[str], sale: dict) -> float | None:
+def _closeness(title: str, mine: frozenset[str], sale: dict, min_overlap: float
+               ) -> float | None:
     """How well a sale's title fits a listing's, or None when it isn't the same card.
 
     A different card number rules a sale out however alike the words are. The
@@ -211,7 +212,7 @@ def _closeness(title: str, mine: frozenset[str], sale: dict) -> float | None:
     overlap = len(mine & sale["words"]) / len(mine | sale["words"])
     if numbers and _year(title) and _year(title) == _year(sale["title"]):
         return 1 + overlap
-    return overlap if overlap >= MIN_OVERLAP else None
+    return overlap if overlap >= min_overlap else None
 
 
 def relevant(con, items: list[Listing]) -> list[dict]:
@@ -232,6 +233,7 @@ def relevant(con, items: list[Listing]) -> list[dict]:
         sale["traits"] = traits(sale["title"])
     chosen: dict[str, dict] = {}
     exact: set[str] = set()
+    min_overlap = settings.load(con)["min_overlap"]
     for item in items:
         mine = words(item.title)
         if not mine:
@@ -241,7 +243,7 @@ def relevant(con, items: list[Listing]) -> list[dict]:
         for sale in sales:
             if sale["item_id"] == item.item_id or not sale["words"]:
                 continue
-            close = _closeness(item.title, mine, sale)
+            close = _closeness(item.title, mine, sale, min_overlap)
             if close is None or sale["traits"][1] != auto:
                 continue   # an autograph against an unsigned copy tells nothing
             (same if sale["traits"] == (grade, auto, run) else hints).append((close, sale))
@@ -371,13 +373,14 @@ def track_record(con) -> str:
     """One line for the scoring prompt when the going rates have been running off.
 
     Each price band is judged on its own: a band is mentioned once it has
-    TRACK_MIN calls and its going rates are TRACK_OFF percent out or more.
+    TRACK_MIN calls and its going rates are track_off percent out or more.
     """
     off = [f"for cards valued {b['band']}, final prices ran {abs(b['value_bias_pct'])}% "
            f"{'more' if b['value_bias_pct'] > 0 else 'less'} than your \"value\" "
            f"(last {b['calls']} picks)"
            for b in by_band(with_calls(con), TRACK_CALLS)
-           if b["calls"] >= TRACK_MIN and abs(b["value_bias_pct"]) >= TRACK_OFF]
+           if b["calls"] >= TRACK_MIN
+           and abs(b["value_bias_pct"]) >= settings.load(con)["track_off"]]
     if not off:
         return ""
     return ("- Your track record on picks whose auctions then sold, real final price with "
