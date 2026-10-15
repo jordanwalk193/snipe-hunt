@@ -40,6 +40,7 @@ SYSTEM = ("You are a careful sports card collecting assistant. You read and "
           "recommend; you never bid, buy or contact anyone. Today is {today}.")
 # A deal's stars: how far under its going rate you would pay, shipping included.
 STARS = ((50, 5), (35, 4), (20, 3), (10, 2))
+GUESS_STARS = 3          # the most stars a pick priced from a guess may have
 
 
 def rate(pay: float, value: float | None) -> tuple[int | None, int | None]:
@@ -51,6 +52,27 @@ def rate(pay: float, value: float | None) -> tuple[int | None, int | None]:
 
 
 
+def apply_caps(pick: dict, cfg: dict | None = None) -> dict:
+    """Hold a pick back when its numbers can't be backed up.
+
+    A value that is only Claude's guess (max_basis "estimate") on a card that
+    isn't on the want list can't be a "fire" pick or have more than three deal
+    stars. A Buy It Now or best-offer listing over `estimate_bin_cap` priced
+    from a guess is marked "unverified": it is shown, but never alerted.
+    """
+    cfg = cfg or settings.load()
+    guess = pick.get("max_basis") != "sales"
+    if guess and not pick.get("want"):
+        if pick.get("tier") == "fire":
+            pick["tier"] = "green"
+        if pick.get("deal"):
+            pick["deal"] = min(pick["deal"], GUESS_STARS)
+    ship = pick["shipping"] if pick.get("shipping") is not None else UNKNOWN_SHIPPING
+    pick["unverified"] = bool(guess and not pick.get("is_auction")
+                              and pick["price"] + ship > cfg["estimate_bin_cap"])
+    return pick
+
+
 def rerate(pick: dict) -> dict:
     """Work a pick's deal stars out again after its price or shipping changed."""
     ship = pick["shipping"] if pick.get("shipping") is not None else UNKNOWN_SHIPPING
@@ -60,7 +82,7 @@ def rerate(pick: dict) -> dict:
     pick["deal"], pick["deal_pct"] = rate(pay, pick.get("value"))
     if pick.get("edge") and (pick["deal_pct"] or 0) < settings.load()["edge_min_pct"]:
         pick["edge"] = None   # the numbers no longer back the claim
-    return pick
+    return apply_caps(pick)
 
 
 PROMPT = """You are {app}, a card-collecting assistant. {collector} collects \
@@ -107,14 +129,19 @@ look; if that number belongs to another player in that set, put it in "not_playe
 - Tiers: "fire" = brag-worthy (autos, patch autos, /50 or lower, case hits, \
 SSPs, want-list hits); "green" = numbered or clear value; "yellow" = cheap \
 card not yet in the collection.
+- A value with no sales behind it is a guess. Say so with max_basis \
+"estimate", and don't call a guessed card "fire" unless it is on the want list: \
+the bot caps such picks at "green" and three deal stars, and won't alert a Buy \
+It Now over ${bin_cap:.0f} priced from a guess.
 - Be picky. Most listings are not steals. It is fine to return no picks.
 
 Reply with ONLY one JSON object, no prose, no code fence:
 {{"picks": [{{"item_id": "…", "card": "short card name, e.g. 2023 Bowman's \
 Best Refractor PSA 10", "tier": "fire|green|yellow", "max": 12.12, "max_basis": \
 "sales|estimate", "comps": "what recent sales show, or why it is an estimate", \
-"value": 25.00, "edge": "mispriced|hidden|sleeper or empty", "why": "one short \
-phone-friendly line; for an edge, say what the seller got wrong"}}], "not_player": ["item_id", …]}}
+"value": 25.00, "edge": "mispriced|hidden|sleeper or empty", "want": true if \
+it is on wantlist.md else false, "why": "one short phone-friendly line; for an \
+edge, say what the seller got wrong"}}], "not_player": ["item_id", …]}}
 
 === preferences.md ===
 {preferences}
@@ -321,6 +348,7 @@ def build_prompt(items: list[Listing], lookups: int = 8,
     who = profile.get()
     return PROMPT.format(
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],
+        bin_cap=settings.load()["estimate_bin_cap"],
         sold_rule=(SOLD_RULE if sold else "") + track + learned[0],
         sold=SOLD.format(lines=sales.lines(sold)) if sold else "",
         app=who.app_name, collector=who.collector, player=who.described,
@@ -409,7 +437,7 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
     if edge not in EDGES or (deal_pct or 0) < settings.load()["edge_min_pct"] or (
             edge == "mispriced" and item.is_auction):
         edge = None   # the numbers have to back the claim
-    return {
+    return apply_caps({
         "item_id": item.item_id, "card": str(raw.get("card") or item.title)[:90],
         "tier": tier, "max": max_bid, "value": value, "deal": deal, "deal_pct": deal_pct,
         "edge": edge, "combined_ship": combined_ship,
@@ -421,8 +449,8 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
         "total": item.total, "is_auction": item.is_auction,
         "best_offer": "BEST_OFFER" in item.buying_options,
         "end_time": item.end_time, "seller": item.seller,
-        "url": item.url, "image": item.image,
-    }
+        "url": item.url, "image": item.image, "want": raw.get("want") is True,
+    })
 
 
 def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None

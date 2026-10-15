@@ -47,6 +47,7 @@ def _slim(pick: dict) -> dict:
         "deal": pick.get("deal"), "deal_pct": pick.get("deal_pct"),
         "edge": pick.get("edge"), "fast": bool(pick.get("fast")),
         "feedback": pick.get("feedback"),
+        "unverified": bool(pick.get("unverified")), "want": bool(pick.get("want")),
         # older picks were saved before the win bid existed; work it out for them too
         "win": sales.win_bid(pick.get("value"), pick.get("shipping"), pick.get("max"))
         if pick.get("is_auction") else None,

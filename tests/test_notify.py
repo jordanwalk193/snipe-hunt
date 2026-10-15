@@ -72,10 +72,12 @@ def test_deal_rating_counts_shipping_and_uses_the_max_for_auctions():
     assert score.rate(5, 10) == (5, 50) and score.rate(8.5, 10) == (2, 15)
     assert score.rate(12, 10) == (1, 0) and score.rate(5, None) == (None, None)
     auction = Listing("1", "t", 0.99, "USD", 1.0, ["AUCTION"], 0, None, "s", "u", None)
-    p = score._pick_dict(auction, {"tier": "green", "max": 12.12, "value": 25})
+    p = score._pick_dict(auction, {"tier": "green", "max": 12.12, "value": 25,
+                                   "max_basis": "sales"})
     assert (p["deal"], p["deal_pct"], p["value"]) == (4, 48, 25.0)   # 13.12 against 25
     buy_now = Listing("2", "t", 8.0, "USD", None, ["FIXED_PRICE"], None, None, "s", "u", None)
-    p = score._pick_dict(buy_now, {"tier": "yellow", "max": 9.09, "value": "20"})
+    p = score._pick_dict(buy_now, {"tier": "yellow", "max": 9.09, "value": "20",
+                                   "max_basis": "sales"})
     assert (p["deal"], p["deal_pct"]) == (4, 35)                     # 8 + assumed 5 shipping
     assert score._pick_dict(buy_now, {"tier": "yellow", "max": 9.09})["deal"] is None
 

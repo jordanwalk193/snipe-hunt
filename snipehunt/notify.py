@@ -144,6 +144,8 @@ def worth_alerting(pick: dict) -> bool:
     tier = pick.get("tier")
     if tier == "drop":
         return True
+    if pick.get("unverified"):
+        return False   # a dear Buy It Now priced from a guess: the dashboard shows it
     if pick.get("deal") is not None and pick["deal"] < cfg["alert_min_stars"]:
         return False   # not a good enough price; picks with no rating still pass
     if tier in ("fire", "green"):
@@ -171,14 +173,21 @@ EDGE_LABEL = {"mispriced": "💎 PRICE MISTAKE", "hidden": "🕵️ SLIPPED THRO
               "sleeper": "😴 SLEEPER AUCTION"}
 
 
+GUESS = " (guess, no sales found)"
+
+
+def _guess(pick: dict) -> str:
+    return GUESS if pick.get("max_basis", "estimate") == "estimate" else ""
+
+
 def deal_line(pick: dict) -> str:
     """★★★★☆ 42% under $25 value. For an auction that is at the max, not today's bid."""
     stars = "★" * pick["deal"] + "☆" * (5 - pick["deal"])
     worth = f"${pick['value']:.0f}" if pick["value"] >= 10 else f"${pick['value']:.2f}"
     if not pick.get("deal_pct"):
-        return f"Deal: {stars} about its {worth} value"
+        return f"Deal: {stars} about its {worth} value" + _guess(pick)
     return (f"Deal: {stars} {pick['deal_pct']}% under {worth} value"
-            + (" at max" if pick.get("is_auction") else ""))
+            + (" at max" if pick.get("is_auction") else "") + _guess(pick))
 
 
 def _price_line(pick: dict) -> str:
@@ -252,7 +261,8 @@ def format_pick(pick: dict) -> str:
     if pick.get("edge") in EDGE_LABEL:
         lines.insert(0, EDGE_LABEL[pick["edge"]])
     if pick.get("max") is not None:
-        lines.append(f"Max: {pick['max']:.2f} ({pick.get('max_basis', 'estimate')})")
+        basis = pick.get("max_basis", "estimate")
+        lines.append(f"Max: {pick['max']:.2f}" + (_guess(pick) or f" ({basis})"))
     if pick.get("deal"):
         lines.append(deal_line(pick))
     if pick.get("why"):

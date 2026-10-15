@@ -207,7 +207,7 @@ def build(now: datetime | None = None) -> dict:
             "url": f"https://www.ebay.com/itm/{item_id}", "image": _art(colour, "/" + label if "/" in card else label),
             "snipe": snipe, "bid_now": price if snipe else None, "value": float(value),
             "deal": stars, "deal_pct": max(pct, 0), "edge": EDGES.get(n), "fast": n == 4,
-            "feedback": None,
+            "feedback": None, "unverified": False, "want": False,
             "win": sales.win_bid(float(value), ship, max_bid) if hours else None,
             "last_sold": {"total": round(value * 0.96, 2), "price": round(value * 0.96 - ship, 2),
                           "n": 2 + n % 3, "at": (now - timedelta(days=3 + n)).date().isoformat()}
