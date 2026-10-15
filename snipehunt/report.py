@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import datetime, timedelta
 
 from . import config, db, inventory, profile, sales, settings, tune
@@ -185,6 +186,36 @@ def missed_section(con, now: datetime, top: int = 10) -> list[str]:
     return md
 
 
+REASON_LABEL = {"overvalued": "overvalued", "wrong_card": "wrong card",
+                "bad_seller": "bad seller", "dont_want_this_type": "don't want this type",
+                "already_have": "already have it", "other": "other", "good_pick": "good call"}
+
+
+def feedback_section(con, since: datetime, top: int = 10) -> list[str]:
+    """What you told the bot about its picks this week, and the ones it overvalued."""
+    rows = db.feedback(con, since=int(since.timestamp()))
+    yours = [r for r in rows if r["source"] == "you"]
+    sniped = len(rows) - len(yours)
+    md = ["", f"## Feedback this week ({len(yours)})"]
+    if not rows:
+        return md + ["- None. Use 👎 Bad pick or 👍 Good call on the dashboard."]
+    counts = Counter(r["reason"] for r in yours)
+    if counts:
+        md.append("- " + ", ".join(f"{REASON_LABEL.get(k, k)}: {n}"
+                                   for k, n in counts.most_common()))
+    if sniped:
+        md.append(f"- {sniped} pick{'s' if sniped != 1 else ''} sniped in Gixen "
+                  "(counted as a quiet good call)")
+    over = [r for r in yours if r["reason"] == "overvalued"][:top]
+    if over:
+        md += ["", "Marked overvalued (the bot's value, then what you said):"]
+    for r in over:
+        md.append(f"- {r['card'] or 'item ' + r['item_id']} · {_money(r['total'])} · "
+                  f"bot's value **{_money(r['value'])}** ({r['max_basis'] or '?'})"
+                  f" · you: {r['note'] or 'worth less'}")
+    return md
+
+
 def monthly_section() -> str:
     today = datetime.now(config.TZ).strftime("%Y-%m-%d")
     who = profile.get()
@@ -241,6 +272,7 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
     md += ["", "## Best upcoming snipes"]
     md += [_pick_line(p) for p in snipes] or ["- None on the board right now."]
     md += sold_section(con, since)
+    md += feedback_section(con, since)
     md += missed_section(con, now)
 
     md += ["", "## Self-tuning"]

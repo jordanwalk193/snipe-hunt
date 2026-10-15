@@ -29,6 +29,10 @@ def seed(con):
                                               "card": TITLE, "at": int(TS)}]))
     con.execute("INSERT INTO snipe_log VALUES ('501', ?, 40.4, 35.35, 40.0, ?)",
                 (TITLE, TS - DAY))
+    db.add_feedback(con, "502", "overvalued", note=TITLE)               # notes are text too
+    db.add_feedback(con, "503", "good_pick")
+    db.add_feedback(con, "501", "good_pick", source="gixen", my_max=40.4)
+    con.execute("UPDATE feedback SET created_at=?", (int(TS - DAY),))
     day = reflect._day(TS - DAY)
     for key, n in (("alerts_sent", 9), ("alerts_held", 4), ("alerts_stale", 2),
                    ("bedtime_bundles", 2), ("bedtime_picks", 5), ("cost:hourly", 3.5),
@@ -77,6 +81,11 @@ def test_the_metrics_bundle_holds_numbers_and_short_labels_and_no_listing_text()
     assert week["ebay_calls_per_run"] == {"hourly": 20.0}
     assert week["reliability"]["error_types"] == {"RuntimeError": 2, "Other": 1}
     assert week["picks"]["skipped_pct"] == 20.0                                 # 1 of 5
+    assert week["feedback"] == {
+        "given": 2, "by_reason": {"overvalued": 1, "good_pick": 1},
+        "by_reason_and_tier": {"overvalued": {"green": 1}, "good_pick": {"green": 1}},
+        "sniped_picks": 1, "on_estimates": 1}
+    assert numbers["previous_4_weeks"]["feedback"]["given"] == 0
     assert numbers["previous_4_weeks"]["picks"]["count"] == 7
     assert set(numbers["tunables"]) == set(settings.TUNABLES)
 

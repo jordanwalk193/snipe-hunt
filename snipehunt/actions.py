@@ -17,10 +17,7 @@ from datetime import datetime
 from . import config, db, gitsync, gixen, inventory, notify, report, scheduler, snapshot
 
 MAX_SKIPPED = 2000
-# What "Bad pick" can say was wrong, plus "good call" for one worth more like it.
-BAD_REASONS = ("overvalued", "wrong_card", "bad_seller", "dont_want_this_type",
-               "already_have", "other")
-REASONS = BAD_REASONS + ("good_pick",)
+REASONS = db.REASONS    # "bad pick" reasons, then "good_pick"
 MAX_NOTE = 200
 
 

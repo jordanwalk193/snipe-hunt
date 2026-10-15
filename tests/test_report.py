@@ -181,3 +181,25 @@ def test_the_report_lists_the_steals_the_bot_missed_this_week(con):
     assert "## Missed steals (1)" in text
     assert (f"- [{title}](https://www.ebay.com/itm/3) · **$22.00** delivered · typically "
             "$43.00 (49% under, 2 earlier sales)") in text
+
+
+def test_the_weekly_report_has_this_weeks_feedback(con):
+    from snipehunt import actions, report
+    now = datetime.now(config.TZ)
+    assert "None. Use 👎 Bad pick" in "\n".join(report.feedback_section(con, now - timedelta(7)))
+    db.save_pick(con, {"item_id": "111111111111", "card": "2023 Topps Signed Base BAS Auto 10",
+                       "tier": "fire", "total": 60.0, "value": 90.0, "max_basis": "estimate",
+                       "max": 60.6, "price": 55.0})
+    actions.feedback(con, {"item_id": "111111111111", "reason": "overvalued",
+                           "note": "signed base, worth $25"})
+    actions.feedback(con, {"item_id": "222222222222", "reason": "good_pick"})
+    actions.feedback(con, {"item_id": "333333333333", "reason": "good_pick"})
+    db.add_feedback(con, "444444444444", "good_pick", source="gixen", my_max=5.05)
+    md, _ = report.build(con, now)
+    section = md.split("## Feedback this week (3)")[1].split("\n## ")[0]
+    assert "- good call: 2, overvalued: 1" in section
+    assert "1 pick sniped in Gixen" in section
+    assert ("- 2023 Topps Signed Base BAS Auto 10 · $60.00 · bot's value **$90.00** (estimate)"
+            " · you: signed base, worth $25") in section
+    old = report.feedback_section(con, now + timedelta(days=1))     # nothing since tomorrow
+    assert old[-1].startswith("- None")

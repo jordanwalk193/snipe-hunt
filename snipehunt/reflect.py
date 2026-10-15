@@ -143,6 +143,7 @@ def window(con, start: float, end: float) -> dict:
     gaps = [s["my_max"] - s["bot_max"] for s in snipes
             if start <= s["logged_at"] < end and s["bot_max"] is not None
             and s["my_max"] is not None]
+    said = [f for f in db.feedback(con, since=int(start)) if f["created_at"] < end]
     stats = db.stat_totals(con, _day(start), _day(end - 1))
     per_job = lambda prefix: {job: round(stats[f"{prefix}:{job}"], 2)   # noqa: E731
                               for job in JOBS if stats.get(f"{prefix}:{job}")}
@@ -168,6 +169,7 @@ def window(con, start: float, end: float) -> dict:
             "sniped_pct": _pct(len(sniped), len(auctions)),
             "snipes_on_picks": len(gaps),
             "avg_my_max_minus_bot_max": round(statistics.mean(gaps), 2) if gaps else None},
+        "feedback": feedback_counts(said),
         "alerts": {
             "sent": int(stats.get("alerts_sent", 0)), "held": int(stats.get("alerts_held", 0)),
             "dropped_as_stale": int(stats.get("alerts_stale", 0)),
@@ -185,6 +187,29 @@ def window(con, start: float, end: float) -> dict:
             "failures": {job: int(n) for job, n in per_job("failures").items()},
             "error_types": dict(errors),
             "gixen_sign_outs": int(stats.get("gixen_signed_out", 0))},
+    }
+
+
+def feedback_counts(rows: list[dict]) -> dict:
+    """What was said about the picks, as counts by reason and tier. The reasons
+    and tiers are the bot's own fixed labels; titles and notes are left out."""
+    def reason(r):
+        return r["reason"] if r["reason"] in db.REASONS else "other"
+
+    def tier(r):
+        return r["tier"] if r["tier"] in TIERS else "unknown"
+
+    yours = [r for r in rows if r["source"] == "you"]
+    by_both: dict = {}
+    for r in yours:
+        by_both.setdefault(reason(r), Counter())[tier(r)] += 1
+    return {
+        "given": len(yours),
+        "by_reason": dict(Counter(reason(r) for r in yours)),
+        "by_reason_and_tier": {k: dict(v) for k, v in by_both.items()},
+        "sniped_picks": sum(r["source"] == "gixen" for r in rows),
+        "on_estimates": sum(r["reason"] != "good_pick" and r["max_basis"] != "sales"
+                            for r in yours),
     }
 
 
@@ -375,6 +400,7 @@ ROWS = (   # label, then where the number is in a window
     ("Missed steals", ("missed_steals", "count")),
     ("Picks", ("picks", "count")),
     ("Picks hidden (%)", ("picks", "skipped_pct")),
+    ("Feedback given on picks", ("feedback", "given")),
     ("Auction picks sniped (%)", ("picks", "sniped_pct")),
     ("Your max minus the bot's, average ($)", ("picks", "avg_my_max_minus_bot_max")),
     ("Alerts sent", ("alerts", "sent")),

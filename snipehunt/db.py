@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS feedback (
 """
 
 MAX_FEEDBACK = 300    # "bad pick" / "good call" rows kept, newest first
+# What "Bad pick" can say was wrong, plus "good call" for one worth more like it.
+BAD_REASONS = ("overvalued", "wrong_card", "bad_seller", "dont_want_this_type",
+               "already_have", "other")
+REASONS = BAD_REASONS + ("good_pick",)
 PASSED_KEY = "passed_picks"   # what was hidden with the Skip button, to learn taste from
 MAX_PASSED = 300
 PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
