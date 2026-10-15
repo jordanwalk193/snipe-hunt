@@ -153,3 +153,14 @@ def test_a_seller_with_an_open_order_who_combines_shipping_costs_nothing_to_add_
     assert line.startswith("$0.99 + $4.00 ship (combined ship w/ open order)")
     settings.update(con, {"combined_ship_sellers": "slowpay, dcsports87"})
     assert score.combined_sellers(con) == {"dcsports87", "slowpay"}
+
+
+def test_the_prompt_knows_a_slabbed_signature_is_not_a_pack_auto():
+    text = " ".join(score.PROMPT.split())
+    assert ('A signed paper base card in a BAS/JSA/PSA-DNA "Authentic Autograph" slab is an '
+            "in-person signature, not a pack-pulled Chrome/Bowman auto, and sells for much "
+            "less.") in text
+    assert '"Auto 10" or "Beckett 10" on such a label grades the signature only' in text
+    assert "don't let a listing's condition field override what the title says" in text
+    # it is a judging rule: it comes before the tiers and the reply format
+    assert text.index("Authentic Autograph") < text.index("Tiers:") < text.index("Reply with")

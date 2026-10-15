@@ -138,6 +138,11 @@ rate and paying your max plus shipping would still be at least {edge_min}% under
 {name}'s card numbers and does not name the player. If the year, set and card \
 number make it {name}'s card, it is "hidden" by definition and worth a close \
 look; if that number belongs to another player in that set, put it in "not_player".
+- A signed paper base card in a BAS/JSA/PSA-DNA "Authentic Autograph" slab \
+is an in-person signature, not a pack-pulled Chrome/Bowman auto, and sells for \
+much less. "Auto 10" or "Beckett 10" on such a label grades the signature only, \
+not the card. Don't price it like a Chrome auto, and don't let a listing's \
+condition field override what the title says.
 - Tiers: "fire" = brag-worthy (autos, patch autos, /50 or lower, case hits, \
 SSPs, want-list hits); "green" = numbered or clear value; "yellow" = cheap \
 card not yet in the collection.
