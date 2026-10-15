@@ -207,6 +207,7 @@ def build(now: datetime | None = None) -> dict:
             "url": f"https://www.ebay.com/itm/{item_id}", "image": _art(colour, "/" + label if "/" in card else label),
             "snipe": snipe, "bid_now": price if snipe else None, "value": float(value),
             "deal": stars, "deal_pct": max(pct, 0), "edge": EDGES.get(n), "fast": n == 4,
+            "feedback": None,
             "win": sales.win_bid(float(value), ship, max_bid) if hours else None,
             "last_sold": {"total": round(value * 0.96, 2), "price": round(value * 0.96 - ship, 2),
                           "n": 2 + n % 3, "at": (now - timedelta(days=3 + n)).date().isoformat()}
@@ -246,7 +247,7 @@ def build(now: datetime | None = None) -> dict:
             "buy_now": sum(not p["is_auction"] for p in picks),
             "fire": 3, "green": 3, "yellow": 3, "sales_based": 3, "held_overnight": 0,
             "sold_prices": 212, "sold_prices_7d": 41,
-            "searching": False, "skipped": 0, "last_report": None,
+            "searching": False, "skipped": 0, "feedback": 0, "last_report": None,
             "last_self_review": None,
             "cost_today": 0.84, "calls_today": 19, "cost_month": 11.37,
             "need_snipe": [p["item_id"] for p in picks if p["is_auction"] and p["snipe"] is None

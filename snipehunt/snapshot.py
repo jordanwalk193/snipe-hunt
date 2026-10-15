@@ -46,6 +46,7 @@ def _slim(pick: dict) -> dict:
         "bid_now": pick.get("bid_now"), "value": pick.get("value"),
         "deal": pick.get("deal"), "deal_pct": pick.get("deal_pct"),
         "edge": pick.get("edge"), "fast": bool(pick.get("fast")),
+        "feedback": pick.get("feedback"),
         # older picks were saved before the win bid existed; work it out for them too
         "win": sales.win_bid(pick.get("value"), pick.get("shipping"), pick.get("max"))
         if pick.get("is_auction") else None,
@@ -265,6 +266,7 @@ def status(con, picks: list[dict], now: datetime) -> dict:
         "held_overnight": len(json.loads(db.kv_get(con, "pending_picks", "[]"))),
         "searching": scheduler.running("hourly"),
         "skipped": len(skipped_ids(con)),
+        "feedback": one("SELECT count(*) FROM feedback WHERE source='you'"),
         "last_report": max((p.name for p in config.REPORTS_DIR.glob("*.md")
                             if not p.name.startswith("reflect-")), default=None),
         "last_self_review": max((p.name for p in config.REPORTS_DIR.glob("reflect-*.md")),
@@ -290,6 +292,9 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         checks, gix["analysis"] = snipecheck.check(con, gix["snipes"])
         for row, verdict in zip(gix["snipes"], checks):
             row["check"] = verdict
+    given = {f["item_id"]: f["reason"] for f in db.feedback(con)[::-1] if f["source"] == "you"}
+    for p in picks:   # a "good call" stays on the board; the dashboard marks it
+        p["feedback"] = given.get(p["item_id"])
     picks = ranked(picks)
     state = status(con, picks, now)
     state.update(usage.summary(con, now))

@@ -11,22 +11,54 @@ import re
 import sys
 import threading
 import time
+import unicodedata
 from datetime import datetime
 
 from . import config, db, gitsync, gixen, inventory, notify, report, scheduler, snapshot
 
 MAX_SKIPPED = 2000
+# What "Bad pick" can say was wrong, plus "good call" for one worth more like it.
+BAD_REASONS = ("overvalued", "wrong_card", "bad_seller", "dont_want_this_type",
+               "already_have", "other")
+REASONS = BAD_REASONS + ("good_pick",)
+MAX_NOTE = 200
 
 
-def skip(con, data: dict) -> str:
+def _item_id(data: dict) -> str:
     item = str(data.get("item_id", ""))
     if not re.fullmatch(r"\d{9,14}", item):
         raise ValueError("not an eBay item number")
+    return item
+
+
+def clean_note(text) -> str:
+    """A feedback note as it may be shown to Claude: one line, no control or
+    invisible formatting characters, at most MAX_NOTE characters."""
+    text = "".join(c if unicodedata.category(c)[0] != "C" else " " for c in str(text or ""))
+    return " ".join(text.split())[:MAX_NOTE].strip()
+
+
+def skip(con, data: dict) -> str:
+    item = _item_id(data)
     ids = [i for i in snapshot.skipped_ids(con) if i != item] + [item]
     db.kv_set(con, snapshot.SKIPPED_KEY, json.dumps(ids[-MAX_SKIPPED:]))
     db.note_passed(con, item)   # which card it was, so scoring picks fewer like it
     con.commit()
     return "Hidden. It won't come back unless you restore skipped picks."
+
+
+def feedback(con, data: dict) -> str:
+    """"Bad pick" with a reason, which also hides it, or "good call", which doesn't."""
+    item = _item_id(data)
+    reason = str(data.get("reason", ""))
+    if reason not in REASONS:
+        raise ValueError(f"reason must be one of {', '.join(REASONS)}")
+    db.add_feedback(con, item, reason, clean_note(data.get("note")))
+    con.commit()
+    if reason == "good_pick":
+        return "Thanks: it will look for more like this one."
+    skip(con, {"item_id": item})
+    return "Got it: hidden, and scoring will learn from it."
 
 
 def unskip_all(con, data: dict) -> str:
@@ -92,7 +124,7 @@ def test_alert(con, data: dict) -> str:
     return "Test alert sent to your phone."
 
 
-ACTIONS = {"skip": skip, "unskip_all": unskip_all, "filed": filed, "refresh": refresh,
+ACTIONS = {"skip": skip, "feedback": feedback, "unskip_all": unskip_all, "filed": filed, "refresh": refresh,
            "search": search, "gixen_refresh": gixen_refresh, "test_alert": test_alert}
 
 

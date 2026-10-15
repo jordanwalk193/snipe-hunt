@@ -153,6 +153,7 @@ Nothing here needs setting up. The longer the bot runs, the more it has to go on
 - **Buy It Now sales that are clean.** A fixed-price listing that takes no offers can only sell at its listed price. Once one drops out of the search the bot asks eBay whether it sold, and keeps it as a fixed-price sale (marked BIN). Anything with Best Offer is never recorded, because the price it really went for isn't shown.
 - **Comps that are the same card.** A sold price counts for a listing only when the grade, autograph and print run match. The same card number and year match even when the titles share few words, and a different card number never matches. A sale of another grade or print run is shown to Claude as a hint, one per listing, marked "(different grade/parallel)".
 - **Your taste.** When you hide a pick, the bot keeps what it was. When you set a snipe, it keeps your amount next to its own max. Scoring is shown the latest fifteen of each, picks fewer cards like the hidden ones and more like the sniped ones, and leans toward your maxes where they keep running above or below its own.
+- **"Bad pick" and "good call".** Each pick on the dashboard has a 👎 button that asks what was wrong (overvalued, wrong card, bad seller, don't want this type, already have it, or something else, with an optional note of up to 200 characters) and hides the pick, and a 👍 "good call" button that leaves it on the board. The bot keeps the pick as it saw it (tier, price, its value and max, whether that was from sales or a guess, the seller), the newest 300 at most. A snipe you set in Gixen on one of its picks counts as a quieter "good call", with your amount next to its max. Also available as the `feedback` API action and the `snipe_hunt.pick_feedback` service.
 - **Missed steals.** A sale it made no pick for that closed 35% or more under the usual price of the same card (at least two earlier sales) is a missed steal. The weekly report lists the week's ten biggest, the dashboard counts them, and scoring is shown the latest five as the kind of listing to watch for.
 - **Corrections per price band.** Once enough of its picks have sold, the bot tells Claude how far off its going rates have been running, separately for cards valued under $10, $10 to $50 and over $50, since cheap and dear cards tend to miss in different directions.
 
@@ -224,7 +225,7 @@ eBay disables a Production keyset until your app answers its Marketplace Account
 
 ## Safety
 
-- The API needs a bearer token on every request and can only do seven things: hide a pick, restore hidden picks, mark cards filed, refresh, start a search, re-read Gixen, send a test alert.
+- The API needs a bearer token on every request and can only do eight things: hide a pick, give feedback on a pick, restore hidden picks, mark cards filed, refresh, start a search, re-read Gixen, send a test alert.
 - Claude reads listing titles and emails written by strangers, so it runs with web search and web fetch only: no shell, no file access.
 - Gmail and Gixen are read-only. Gixen allows one login at a time, so the bot and your browser sign each other out; after losing its session the bot waits two hours before signing back in.
 

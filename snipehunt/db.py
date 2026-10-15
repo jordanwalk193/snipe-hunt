@@ -78,8 +78,28 @@ CREATE TABLE IF NOT EXISTS snipe_log (
     bot_value  REAL,
     logged_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS feedback (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id     TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    note        TEXT,
+    title       TEXT,
+    card        TEXT,
+    tier        TEXT,
+    price       REAL,
+    total       REAL,
+    value       REAL,
+    max         REAL,
+    max_basis   TEXT,
+    seller      TEXT,
+    edge        TEXT,
+    source      TEXT NOT NULL DEFAULT 'you',
+    my_max      REAL,
+    created_at  INTEGER NOT NULL
+);
 """
 
+MAX_FEEDBACK = 300    # "bad pick" / "good call" rows kept, newest first
 PASSED_KEY = "passed_picks"   # what was hidden with the Skip button, to learn taste from
 MAX_PASSED = 300
 PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
@@ -254,6 +274,43 @@ def recent_snipes(con, limit: int) -> list[dict]:
     """The latest snipes logged, newest first."""
     return [dict(r) for r in con.execute(
         "SELECT * FROM snipe_log ORDER BY logged_at DESC, rowid DESC LIMIT ?", (limit,))]
+
+
+def add_feedback(con, item_id: str, reason: str, note: str = "", source: str = "you",
+                 my_max: float | None = None) -> None:
+    """Keep what was said about a pick, with the pick as the bot saw it.
+
+    `source` is "you" for the dashboard buttons and "gixen" for a snipe set on a
+    pick (a weaker "good_pick"). One row per pick and source: a second tap
+    replaces the first, and a Gixen row only follows the snipe amount, so the
+    hourly re-read doesn't make it look new. The caller commits.
+    """
+    row = con.execute("SELECT data FROM picks WHERE item_id=?", (item_id,)).fetchone()
+    pick = json.loads(row["data"]) if row else {}
+    if source == "gixen":
+        if con.execute("UPDATE feedback SET my_max=? WHERE item_id=? AND source='gixen'",
+                       (my_max, item_id)).rowcount:
+            return
+    else:
+        con.execute("DELETE FROM feedback WHERE item_id=? AND source=?", (item_id, source))
+    con.execute(
+        "INSERT INTO feedback (item_id, reason, note, title, card, tier, price, total, value,"
+        " max, max_basis, seller, edge, source, my_max, created_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (item_id, reason, note or None, pick.get("title"), pick.get("card"), pick.get("tier"),
+         pick.get("price"), pick.get("total"), pick.get("value"), pick.get("max"),
+         pick.get("max_basis"), pick.get("seller"), pick.get("edge"), source, my_max,
+         int(time.time())))
+    con.execute("DELETE FROM feedback WHERE id NOT IN "
+                "(SELECT id FROM feedback ORDER BY created_at DESC, id DESC LIMIT ?)",
+                (MAX_FEEDBACK,))
+
+
+def feedback(con, limit: int = MAX_FEEDBACK, since: int = 0) -> list[dict]:
+    """Feedback on picks, newest first."""
+    return [dict(r) for r in con.execute(
+        "SELECT * FROM feedback WHERE created_at>=? ORDER BY created_at DESC, id DESC LIMIT ?",
+        (since, limit))]
 
 
 def bump(con, key: str, n: float = 1, day: str | None = None) -> None:

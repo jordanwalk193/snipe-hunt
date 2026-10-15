@@ -95,7 +95,8 @@ def _gixen_list(con) -> list[dict]:
 def _note_snipes(con, now: float | None = None) -> int:
     """Put every Gixen snipe on the player's cards in `seen`, so sales.collect asks
     eBay what it closed at, and in `snipe_log`, so scoring learns what gets sniped
-    and for how much. Returns how many were noted."""
+    and for how much. A snipe on one of the bot's picks also counts as a weak
+    "good_pick" in `feedback`. Returns how many were noted."""
     now = now or time.time()
     noted = 0
     for s in _gixen_list(con):
@@ -106,6 +107,10 @@ def _note_snipes(con, now: float | None = None) -> int:
         db.note_snipe(con, s["item_id"], s["title"], end_ts, s.get("seller"))
         if s.get("max_bid"):
             db.log_snipe(con, s)
+            if con.execute("SELECT 1 FROM picks WHERE item_id=?", (s["item_id"],)).fetchone():
+                # sniping a pick is a quiet "good call", with your amount next to the bot's
+                db.add_feedback(con, s["item_id"], "good_pick", source="gixen",
+                                my_max=s["max_bid"])
         noted += 1
     con.commit()
     return noted
