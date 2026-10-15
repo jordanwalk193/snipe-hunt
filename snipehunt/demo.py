@@ -208,6 +208,7 @@ def build(now: datetime | None = None) -> dict:
             "snipe": snipe, "bid_now": price if snipe else None, "value": float(value),
             "deal": stars, "deal_pct": max(pct, 0), "edge": EDGES.get(n), "fast": n == 4,
             "feedback": None, "unverified": False, "want": False,
+            "seller_feedback": 1200 + 317 * n, "seller_pct": 99.8, "new_seller": False,
             "win": sales.win_bid(float(value), ship, max_bid) if hours else None,
             "last_sold": {"total": round(value * 0.96, 2), "price": round(value * 0.96 - ship, 2),
                           "n": 2 + n % 3, "at": (now - timedelta(days=3 + n)).date().isoformat()}

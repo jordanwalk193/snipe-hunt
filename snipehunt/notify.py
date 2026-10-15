@@ -142,6 +142,8 @@ def format_bedtime(picks: list[dict]) -> tuple[str, str, str | None, str | None]
 def worth_alerting(pick: dict) -> bool:
     cfg = settings.load()
     tier = pick.get("tier")
+    if pick.get("new_seller") and pick.get("capped_from"):
+        tier = pick["capped_from"]   # shown as yellow, alerted with a new-seller warning
     if tier == "drop":
         return True
     if pick.get("unverified"):
@@ -188,6 +190,20 @@ def deal_line(pick: dict) -> str:
         return f"Deal: {stars} about its {worth} value" + _guess(pick)
     return (f"Deal: {stars} {pick['deal_pct']}% under {worth} value"
             + (" at max" if pick.get("is_auction") else "") + _guess(pick))
+
+
+def seller_line(pick: dict) -> str:
+    """Seller: cardshop · 1,204 feedback, 99.8%. Flags a new seller on a dear card."""
+    if not pick.get("seller"):
+        return ""
+    line = f"Seller: {pick['seller']}"
+    if pick.get("seller_feedback") is not None:
+        line += f" · {pick['seller_feedback']:,} feedback"
+        if pick.get("seller_pct") is not None:
+            line += f", {pick['seller_pct']:g}%"
+    if pick.get("new_seller"):
+        line = f"⚠️ new seller ({pick['seller_feedback']} feedback) · " + line
+    return line
 
 
 def _price_line(pick: dict) -> str:
@@ -242,7 +258,9 @@ def format_group(entry: dict) -> str:
         lines.insert(0, EDGE_LABEL[entry["edge"]])
     for p in listings:
         lines.append(_price_line(p) + (f" · max {p['max']:.2f}" if p.get("max") is not None
-                                       else "") + f" · {p['item_id']}")
+                                       else "")
+                     + (f" · ⚠️ new seller ({p['seller_feedback']} feedback)"
+                        if p.get("new_seller") else "") + f" · {p['item_id']}")
     if entry.get("deal"):
         lines.append(deal_line(entry))
     if entry.get("why"):
@@ -253,7 +271,7 @@ def format_group(entry: dict) -> str:
 
 
 def format_pick(pick: dict) -> str:
-    """Four short lines, with the item number alone on the last one for copying."""
+    """A few short lines, with the item number alone on the last one for copying."""
     if pick.get("others"):
         return format_group(pick)
     icon = TIER_ICON.get(pick.get("tier"), "•")
@@ -267,6 +285,8 @@ def format_pick(pick: dict) -> str:
         lines.append(deal_line(pick))
     if pick.get("why"):
         lines.append(pick["why"])
+    if seller_line(pick):
+        lines.append(seller_line(pick))
     lines.append(str(pick["item_id"]))
     return "\n".join(lines)
 

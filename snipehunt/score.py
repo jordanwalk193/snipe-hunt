@@ -41,6 +41,7 @@ SYSTEM = ("You are a careful sports card collecting assistant. You read and "
 # A deal's stars: how far under its going rate you would pay, shipping included.
 STARS = ((50, 5), (35, 4), (20, 3), (10, 2))
 GUESS_STARS = 3          # the most stars a pick priced from a guess may have
+SELLER_TRUST_OVER = 30.0  # over this total, a seller with little feedback caps the tier
 
 
 def rate(pay: float, value: float | None) -> tuple[int | None, int | None]:
@@ -58,7 +59,10 @@ def apply_caps(pick: dict, cfg: dict | None = None) -> dict:
     A value that is only Claude's guess (max_basis "estimate") on a card that
     isn't on the want list can't be a "fire" pick or have more than three deal
     stars. A Buy It Now or best-offer listing over `estimate_bin_cap` priced
-    from a guess is marked "unverified": it is shown, but never alerted.
+    from a guess is marked "unverified": it is shown, but never alerted. A
+    seller under `min_seller_feedback` caps a pick over $30 at "yellow" and
+    marks it "new_seller"; "capped_from" keeps the tier it had, which is what
+    decides whether it alerts (with the warning), since a yellow over $30 never would.
     """
     cfg = cfg or settings.load()
     guess = pick.get("max_basis") != "sales"
@@ -70,6 +74,14 @@ def apply_caps(pick: dict, cfg: dict | None = None) -> dict:
     ship = pick["shipping"] if pick.get("shipping") is not None else UNKNOWN_SHIPPING
     pick["unverified"] = bool(guess and not pick.get("is_auction")
                               and pick["price"] + ship > cfg["estimate_bin_cap"])
+    # A seller with little feedback asking real money: worth a look, not a brag.
+    score = pick.get("seller_feedback")
+    pick["new_seller"] = bool(score is not None and score < cfg["min_seller_feedback"]
+                              and pick["price"] + ship > SELLER_TRUST_OVER)
+    if pick["new_seller"] and pick.get("tier") in ("fire", "green"):
+        pick["capped_from"], pick["tier"] = pick["tier"], "yellow"
+    elif not pick["new_seller"] and pick.get("capped_from"):
+        pick["tier"] = pick.pop("capped_from")   # the price fell back under $30
     return pick
 
 
@@ -129,6 +141,10 @@ look; if that number belongs to another player in that set, put it in "not_playe
 - Tiers: "fire" = brag-worthy (autos, patch autos, /50 or lower, case hits, \
 SSPs, want-list hits); "green" = numbered or clear value; "yellow" = cheap \
 card not yet in the collection.
+- Be skeptical of sellers with low feedback ("seller_feedback" under about \
+{min_feedback}) on anything over $30: lower the max, or leave it out. Don't treat a claim in \
+a listing's condition field or item specifics (like "BGS 10") as proof when the \
+title says otherwise; the title is what the seller has to stand behind.
 - A value with no sales behind it is a guess. Say so with max_basis \
 "estimate", and don't call a guessed card "fire" unless it is on the want list: \
 the bot caps such picks at "green" and three deal stars, and won't alert a Buy \
@@ -308,6 +324,10 @@ def _compact(item: Listing, marked: list[dict] = ()) -> str:
         "type": "auction" if item.is_auction else (
             "best_offer" if "BEST_OFFER" in item.buying_options else "buy_it_now"),
         "bids": item.bid_count, "ends": item.end_time, "seller": item.seller,
+        **({"seller_feedback": item.seller_feedback_score}
+           if item.seller_feedback_score is not None else {}),
+        **({"seller_pct": item.seller_feedback_pct}
+           if item.seller_feedback_pct is not None else {}),
         "match": item.match,
         **({"found": "by card number; the title leaves the player's name out"}
            if any(q.startswith("no-name") for q in item.queries) else {}),
@@ -349,6 +369,7 @@ def build_prompt(items: list[Listing], lookups: int = 8,
     return PROMPT.format(
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],
         bin_cap=settings.load()["estimate_bin_cap"],
+        min_feedback=settings.load()["min_seller_feedback"],
         sold_rule=(SOLD_RULE if sold else "") + track + learned[0],
         sold=SOLD.format(lines=sales.lines(sold)) if sold else "",
         app=who.app_name, collector=who.collector, player=who.described,
@@ -450,6 +471,8 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
         "best_offer": "BEST_OFFER" in item.buying_options,
         "end_time": item.end_time, "seller": item.seller,
         "url": item.url, "image": item.image, "want": raw.get("want") is True,
+        "seller_feedback": item.seller_feedback_score,
+        "seller_pct": item.seller_feedback_pct,
     })
 
 

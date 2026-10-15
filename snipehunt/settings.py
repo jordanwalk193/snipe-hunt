@@ -28,6 +28,8 @@ DEFAULTS: dict = {
     "price_lookups": 8,              # sold-price web lookups per scoring call; 0 = none
     # a Buy It Now over this total whose value is only a guess is shown, never alerted
     "estimate_bin_cap": 25.0,
+    # a seller under this many feedback can't make a pick over SELLER_TRUST_OVER better than yellow
+    "min_seller_feedback": 100,
     "quiet_hours": True,
     "quiet_start": "23:00",
     "quiet_end": "07:00",
@@ -77,6 +79,7 @@ RANGES = {
     "alert_min_stars": (1, 5),
     "price_lookups": (0, 12),
     "estimate_bin_cap": (0, 1000),
+    "min_seller_feedback": (0, 100000),
     "edge_min_pct": (15, 40),
     "min_overlap": (0.4, 0.7),
     "track_off": (5, 20),

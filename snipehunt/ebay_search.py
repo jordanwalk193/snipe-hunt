@@ -70,6 +70,8 @@ class Listing:
     image: str | None
     match: str = "yes"      # yes | unclear: is it really the player?
     queries: list[str] = field(default_factory=list)
+    seller_feedback_score: int | None = None    # None when eBay didn't say
+    seller_feedback_pct: float | None = None    # percent positive, e.g. 99.6
 
     @property
     def total(self) -> float:
@@ -190,6 +192,14 @@ def _money(node: dict | None) -> tuple[float | None, str]:
     return float(node["value"]), node.get("currency", "USD")
 
 
+def _number(value, kind):
+    """eBay's number, or None when it is missing or not a number."""
+    try:
+        return None if value is None or value == "" else kind(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_item(raw: dict) -> Listing | None:
     options = raw.get("buyingOptions", [])
     # For auctions the live price is currentBidPrice; `price` is the BIN price.
@@ -208,6 +218,7 @@ def parse_item(raw: dict) -> Listing | None:
         end = (datetime.fromisoformat(end.replace("Z", "+00:00"))
                .astimezone(config.TZ).isoformat(timespec="minutes"))
     item_id = raw.get("legacyItemId") or raw.get("itemId", "").split("|")[1:2][0]
+    seller = raw.get("seller") or {}
     return Listing(
         item_id=str(item_id),
         title=raw.get("title", "").strip(),
@@ -217,9 +228,11 @@ def parse_item(raw: dict) -> Listing | None:
         buying_options=options,
         bid_count=raw.get("bidCount"),
         end_time=end,
-        seller=(raw.get("seller") or {}).get("username", ""),
+        seller=seller.get("username", ""),
         url=f"https://www.ebay.com/itm/{item_id}",
         image=(raw.get("image") or {}).get("imageUrl"),
+        seller_feedback_score=_number(seller.get("feedbackScore"), int),
+        seller_feedback_pct=_number(seller.get("feedbackPercentage"), float),
     )
 
 
