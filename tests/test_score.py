@@ -164,3 +164,15 @@ def test_the_prompt_knows_a_slabbed_signature_is_not_a_pack_auto():
     assert "don't let a listing's condition field override what the title says" in text
     # it is a judging rule: it comes before the tiers and the reply format
     assert text.index("Authentic Autograph") < text.index("Tiers:") < text.index("Reply with")
+
+
+def test_the_example_preferences_carry_the_caution_lines():
+    text = (config.EXAMPLES / "preferences.example.md").read_text()
+    readme = (config.EXAMPLES.parent / "README.md").read_text()
+    for line in ("A BAS/JSA slabbed signature on a paper base card is worth maybe $20–30 at most."
+                 ' Never tier one "fire".',
+                 "A Buy It Now over $25 needs real comps; if the value is an estimate, say so and"
+                 " give it 3 stars at most.",
+                 "Be skeptical of sellers under about 100 feedback on anything over $30."):
+        assert line in text and line in readme
+    assert "Never tier one \"fire\"" in score.build_prompt([])   # a new setup starts with them

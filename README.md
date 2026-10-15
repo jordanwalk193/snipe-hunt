@@ -87,6 +87,14 @@ Edit these, then `docker compose restart`:
 | `wantlist.md` | What you're chasing and your price ceilings |
 | `preferences.md` | How you buy, written like a brief to a friend bidding for you |
 
+A few `preferences.md` lines worth keeping (they are in the example file), because they stop the most common bad pick, a slabbed signature priced like a pack-pulled auto:
+
+```markdown
+- **Signed base cards aren't autos.** A BAS/JSA slabbed signature on a paper base card is worth maybe $20–30 at most. Never tier one "fire".
+- **Buy It Now needs real comps.** A Buy It Now over $25 needs real comps; if the value is an estimate, say so and give it 3 stars at most.
+- **Watch new sellers.** Be skeptical of sellers under about 100 feedback on anything over $30.
+```
+
 Check the setup (this never prints secrets):
 
 ```
