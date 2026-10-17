@@ -63,7 +63,10 @@ FILLER = {"the", "and", "card", "cards", "baseball", "football", "basketball", "
 
 
 def words(title: str) -> frozenset[str]:
-    """The words of a title that identify the card, without the player's name or team."""
+    """The words of a title that identify the card, without the player's name or team.
+
+    On a team bot only the team's words go: the player's name is what tells two
+    cards from the same set apart."""
     who = profile.get()
     name = set(re.findall(r"[a-z0-9]+", " ".join(
         [who.player, who.search_name, *who.team_words]).lower()))
@@ -213,7 +216,24 @@ def _closeness(title: str, mine: frozenset[str], sale: dict, min_overlap: float
     overlap = len(mine & sale["words"]) / len(mine | sale["words"])
     if numbers and _year(title) and _year(title) == _year(sale["title"]):
         return 1 + overlap
+    if profile.get().mode == "team":
+        # Many players' cards share a set and parallel; only the name tells them apart.
+        if not same_player(title, sale["title"]):
+            return None
+        min_overlap = max(min_overlap, TEAM_OVERLAP)
     return overlap if overlap >= min_overlap else None
+
+
+TEAM_OVERLAP = 0.7   # a team's comps without a card number need titles this alike
+
+
+def same_player(a: str, b: str) -> bool:
+    """Team mode: False when the two titles name different roster players."""
+    who = profile.get()
+    if who.mode != "team":
+        return True
+    one, two = who.roster_player(a), who.roster_player(b)
+    return not (one and two and one != two)
 
 
 def relevant(con, items: list[Listing]) -> list[dict]:
@@ -288,6 +308,7 @@ def under_sold(sold: dict[str, list[dict]], item: Listing) -> int | None:
     mine, year, kind = words(item.title), _year(item.title), traits(item.title)
     same = [s["total"] for s in sold.get(number, [])
             if s["item_id"] != item.item_id and s["traits"] == kind
+            and same_player(item.title, s["title"])
             and (not year or not s["year"] or s["year"] == year)
             and mine and len(mine & s["words"]) / len(mine | s["words"]) >= 0.4]
     if not same:
@@ -469,7 +490,8 @@ def _same(a: str, b: str) -> bool:
     and no card numbers that disagree."""
     one, two = card_key(a), card_key(b)
     return (bool(one and two) and len(one & two) / len(one | two) >= SAME_CARD
-            and traits(a) == traits(b) and _number_match(a, b) is not False)
+            and traits(a) == traits(b) and _number_match(a, b) is not False
+            and (profile.get().mode != "team" or same_player(a, b)))
 
 
 def history(con, limit: int = 12) -> list[dict]:
