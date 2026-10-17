@@ -1,0 +1,33 @@
+[
+ null,
+ {
+  "item_id": "100000000002",
+  "card": "2020 Bowman Draft PSA 9",
+  "tier": "green",
+  "max": 15.15,
+  "value": 30.0,
+  "deal": 3,
+  "deal_pct": 42,
+  "edge": "mispriced",
+  "combined_ship": false,
+  "win": null,
+  "max_basis": "estimate",
+  "comps": "",
+  "why": "priced under going rate",
+  "title": "Jordan Walker 2020 Bowman Draft BD-57 PSA 9",
+  "price": 12.5,
+  "shipping": null,
+  "total": 12.5,
+  "is_auction": false,
+  "best_offer": true,
+  "end_time": null,
+  "seller": "othershop",
+  "url": "https://www.ebay.com/itm/100000000002",
+  "image": null,
+  "want": false,
+  "seller_feedback": null,
+  "seller_pct": null,
+  "unverified": false,
+  "new_seller": false
+ }
+]

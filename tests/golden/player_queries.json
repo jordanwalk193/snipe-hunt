@@ -1,0 +1,92 @@
+[
+ [
+  "auctions-ending",
+  "jordan walker",
+  "buyingOptions:{AUCTION}",
+  "endingSoonest"
+ ],
+ [
+  "newly-listed",
+  "jordan walker",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "auto",
+  "jordan walker auto",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "patch",
+  "jordan walker patch",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "relic",
+  "jordan walker relic",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "numbered",
+  "jordan walker /",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "typo-jordon-walker",
+  "jordon walker",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "typo-jorden-walker",
+  "jorden walker",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "typo-jordn-walker",
+  "jordn walker",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "typo-jodan-walker",
+  "jodan walker",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "typo-jordan-wlaker",
+  "jordan wlaker",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "typo-jordan-walkr",
+  "jordan walkr",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "extra-j-walker-cardinals",
+  "j walker cardinals",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "extra-walker-cardinals-rookie-lot",
+  "walker cardinals rookie lot",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ],
+ [
+  "extra-jordan-walker-topps-now",
+  "jordan walker topps now",
+  "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}",
+  "newlyListed"
+ ]
+]
