@@ -15,7 +15,7 @@ from datetime import datetime
 
 from . import (config, db, ebay_search, gitsync, gixen, hidden, inventory, inventory_sync,
                limited_drops, notify, ops, profile, rarity, reflect, report, sales, score,
-               settings, snipecheck, usage, watch)
+               settings, shortlist, snipecheck, usage, watch)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -27,9 +27,11 @@ def hourly(dry_run: bool = False) -> str:
         except RuntimeError as exc:   # GitHub being down shouldn't stop the hunt
             print(f"hourly: {exc}; using the local copy", file=sys.stderr)
     first_run = con.execute("SELECT count(*) FROM seen").fetchone()[0] == 0
+    team = profile.get().mode == "team"
     listings = ebay_search.search_all(verbose=True)
     try:   # the same cards listed without the player's name
-        listings += hidden.search(con, {i.item_id for i in listings}, verbose=True)
+        if not team:   # a team has no one name to leave out
+            listings += hidden.search(con, {i.item_id for i in listings}, verbose=True)
     except Exception as exc:
         print(f"hidden: {exc}", file=sys.stderr)
     moves = _remember(con, listings)
@@ -61,7 +63,10 @@ def hourly(dry_run: bool = False) -> str:
         except Exception as exc:
             con.rollback()
             print(f"snipecheck: {exc}", file=sys.stderr)
-    fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
+    if team:   # far too many listings to score: filter and rank them for free first
+        fresh = team_shortlist(con, listings, moves, dry_run)
+    else:
+        fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
 
     def save(batch, batch_picks) -> None:
         """Commit each scored batch so a later failure doesn't redo it."""
@@ -83,6 +88,41 @@ def hourly(dry_run: bool = False) -> str:
                           current={i.item_id: i for i in listings})
     return (f"{len(listings)} listings, {len(fresh)} new, {len(scored)} scored, "
             f"{len(picks)} picks, {sent} alerted")
+
+
+def team_budget(con, cfg: dict | None = None) -> dict:
+    """Today's Claude spend against the team bot's daily budget (0 = no limit)."""
+    cfg = cfg or settings.load(con)
+    spent = usage.summary(con)["cost_today"]
+    budget = cfg["team_daily_budget"]
+    return {"budget": budget, "spent_today": spent,
+            "reached": bool(budget) and spent >= budget}
+
+
+def team_shortlist(con, listings: list, moves: list[dict], dry_run: bool = False) -> list:
+    """What a team bot sends to Claude this run: the best-ranked new listings, up
+    to `team_claude_per_run`, and nothing once the day's budget is spent."""
+    cfg = settings.load(con)
+    kept, funnel, bundle_rows = shortlist.build(con, listings, moves, cfg=cfg)
+    new = [lk for lk in kept if db.needs_scoring(con, lk.item.item_id, lk.item.total)]
+    money = team_budget(con, cfg)
+    send = [] if money["reached"] else [lk.item for lk in new[:cfg["team_claude_per_run"]]]
+    funnel.update(new=len(new), to_claude=len(send), per_run=cfg["team_claude_per_run"],
+                  **{f"budget_{k}": v for k, v in money.items()})
+    for lk in new[:10]:
+        print(f"  {lk.points:5.1f} ${lk.item.total:>7.2f} {lk.item.title[:70]}  "
+              f"[{', '.join(lk.reasons)}]", file=sys.stderr)
+    dropped = ", ".join(f"{n} {k}" for k, n in funnel["dropped"].items() if n)
+    print(f"shortlist: {funnel['found']} found, dropped {dropped or 'none'}; "
+          f"{len(kept)} worth a look, {len(new)} new, {len(send)} to Claude"
+          + (f" (budget of ${money['budget']:.2f} reached)" if money["reached"] else ""),
+          file=sys.stderr)
+    if not dry_run:
+        shortlist.mark_tracked(con, kept, listings)
+        shortlist.save(con, funnel, new, bundle_rows)
+        db.prune_untracked(con)
+        con.commit()
+    return send
 
 
 def _gixen_list(con) -> list[dict]:
@@ -157,12 +197,21 @@ def fast(dry_run: bool = False) -> str:
         item = ebay_search.parse_item(raw)
         if item is None or item.currency != "USD":
             continue
-        item.match = ebay_search.classify(item.title)
+        if profile.get().mode == "team":
+            item.match, item.via, item.player = profile.get().match(item.title)
+        else:
+            item.match = ebay_search.classify(item.title)
         if item.match != "no" and not item.is_auction:
             found.append(item)
     new = [i for i in found if con.execute(
         "SELECT 1 FROM seen WHERE item_id=?", (i.item_id,)).fetchone() is None]
-    worth = [i for i in new if fast_worth(con, i)][:FAST_MAX]
+    if profile.get().mode == "team":   # the same free ranking as the hourly run, a higher bar
+        worth = [lk.item for lk in shortlist.build(con, new, [])[0]
+                 if lk.points >= FAST_TEAM_POINTS][:FAST_MAX]
+        if worth and team_budget(con)["reached"]:
+            return f"{len(found)} newest, {len(new)} new, {len(worth)} worth scoring, budget reached"
+    else:
+        worth = [i for i in new if fast_worth(con, i)][:FAST_MAX]
     if dry_run:
         for item in worth:
             print(f"  would score: ${item.price:.2f} {item.title}", file=sys.stderr)
@@ -191,6 +240,7 @@ def fast(dry_run: bool = False) -> str:
 FAST_MAX = 12              # listings in one fast-lane scoring call
 FAST_CALLS_PER_DAY = 30    # Claude calls the fast lane may make in a day
 FAST_KEY = "fast_calls"
+FAST_TEAM_POINTS = 4.0     # a team's new Buy It Now needs this much steal evidence to jump the queue
 # Under the setting fast_min_price, a plain card waits for the hourly run.
 
 
