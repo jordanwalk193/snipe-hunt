@@ -138,7 +138,8 @@ class EbayClient:
         self.client_id, self.client_secret = config.require(
             "EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET")
         self.marketplace = config.get("EBAY_MARKETPLACE")
-        self.category = config.get("EBAY_CATEGORY")
+        # A profile may name its own category: Pokémon cards aren't sports cards.
+        self.category = profile.get().category or config.get("EBAY_CATEGORY")
         self.token_file = config.ensure_state_dir() / "ebay_token.json"
         self.session = requests.Session()
         self.calls = 0

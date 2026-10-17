@@ -1,0 +1,17 @@
+# Basketball: a player who shares his last name with no one else in the sport.
+
+collector = "Sam"
+
+[player]
+name = "Victor Wembanyama"
+about = "the San Antonio Spurs center"
+sport = "basketball"
+team_words = ["spurs", "san antonio", "metropolitans", "mets 92", "france"]
+card_words = ["nba", "panini", "prizm", "hoops", "select", "optic", "mosaic", "donruss",
+              "national treasures", "flawless", "topps chrome"]
+wrong_words = ["baseball", "mlb", "football", "nfl", "hockey", "nhl", "soccer", "pokemon"]
+# Typos worth searching: the long last name is often misspelled.
+first_names = ["victor", "viktor", "v"]
+
+[search]
+keywords = ["auto", "patch", "/", "rookie"]

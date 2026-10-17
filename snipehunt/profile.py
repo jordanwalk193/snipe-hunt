@@ -63,11 +63,22 @@ class Profile:
     products: str = ""                # products to check for new releases
     binder_pages: dict[str, str] = field(default_factory=dict)   # card year -> page
     binder_spare: str = "unsorted"
+    category: str = ""                # eBay category id; default EBAY_CATEGORY (sports singles)
 
     def __post_init__(self) -> None:
         names = self.player.split()
-        if len(names) < 2:
-            raise ProfileError("player.name needs a first and last name")
+        if not names:
+            raise ProfileError("player.name is empty")
+        if len(names) == 1:
+            # One name: a Pokémon ("Charizard"), or a player known by one name.
+            # The name itself, or a misspelling of it, is what a title must have.
+            only = names[0].lower()
+            self.first_names = []
+            if not self.last_names:
+                self.last_names = [only, *typos(only)]
+            if self.typo_searches is None:
+                self.typo_searches = typos(only)[:MAX_TYPO_SEARCHES]
+            return
         first, last = names[0].lower(), names[-1].lower()
         if not self.first_names:
             self.first_names = [first, *typos(first), first[0]]
@@ -95,6 +106,8 @@ class Profile:
 
     @cached_property
     def _name_re(self) -> re.Pattern:
+        if not self.first_names:   # a one-word name
+            return re.compile(rf"\b{_words(self.last_names)}\b", re.I)
         return re.compile(rf"\b{_words(self.first_names)}\.?\s+{_words(self.last_names)}\b", re.I)
 
     @cached_property
@@ -188,6 +201,7 @@ class TeamProfile:
     binder_pages: dict[str, str] = field(default_factory=dict)
     binder_spare: str = "unsorted"
     search: str = ""                  # what eBay is asked for; default: the nickname
+    category: str = ""                # eBay category id; default EBAY_CATEGORY
 
     mode = "team"
 
@@ -355,6 +369,7 @@ def _parse_team(raw: dict) -> TeamProfile:
         "extra_searches": search.get("extra", []),
         "products": search.get("products", ""),
         "search": team.get("search", ""),
+        "category": str(search.get("category", "")),
         "binder_pages": {str(k): str(v) for k, v in (binder.get("pages") or {}).items()},
         "binder_spare": binder.get("spare", "unsorted"),
     }
@@ -372,7 +387,8 @@ def parse(text: str) -> Profile | TeamProfile:
         return _parse_team(raw)
     player = raw.get("player") or {}
     if not isinstance(player, dict) or not player.get("name"):
-        raise ProfileError('profile.toml needs [player] with name = "First Last", '
+        raise ProfileError('profile.toml needs [player] with name = "First Last" (or one '
+                           'name, like "Charizard"), '
                            'or [team] with name = "City Nickname"')
     search = raw.get("search") or {}
     binder = raw.get("binder") or {}
@@ -391,6 +407,7 @@ def parse(text: str) -> Profile | TeamProfile:
         "products": search.get("products", ""),
         "binder_pages": {str(k): str(v) for k, v in (binder.get("pages") or {}).items()},
         "binder_spare": binder.get("spare", "unsorted"),
+        "category": str(search.get("category", "")),
     }
     if "card_words" in player:
         known["card_words"] = player["card_words"]

@@ -228,7 +228,9 @@ def test_profile_defaults_come_from_the_name():
     assert p.classify("Paul Goldschmidt 2024 Topps") == "no"
     assert p.binder_page("2024") == "unsorted"
     with pytest.raises(profile.ProfileError):
-        profile.parse('[player]\nname = "Cher"\n')
+        profile.parse('[player]\nname = " "\n')
+    # one name is enough for a Pokémon, or a player known by one name
+    assert profile.parse('[player]\nname = "Cher"\n').classify("Cher card baseball") == "yes"
 
 
 def test_scheduler_tick_runs_one_job_at_a_time(con, monkeypatch):

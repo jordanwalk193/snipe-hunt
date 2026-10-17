@@ -1,0 +1,19 @@
+# Pokémon: one Pokémon, every card of it. A one-word name works: Snipe Hunt
+# looks for the name and its misspellings ("Charzard", "Chairzard").
+
+collector = "Sam"
+
+[player]
+name = "Charizard"
+about = "the Pokémon, any set and any language"
+sport = "pokemon"
+# A title with the name and one of these is a sure match.
+card_words = ["pokemon", "pokémon", "tcg", "holo", "base set", "ex", "gx", "vmax", "vstar",
+              "illustration rare", "full art", "psa", "cgc", "japanese"]
+wrong_words = ["custom", "proxy", "orica", "fake", "plush", "figure", "funko", "sticker",
+               "coin", "digital", "code card", "tcg online", "binder", "sleeves"]
+
+[search]
+# Pokémon singles live in eBay's CCG Individual Cards category, not sports cards.
+category = "183454"
+keywords = ["psa 10", "illustration rare", "1st edition", "japanese"]
