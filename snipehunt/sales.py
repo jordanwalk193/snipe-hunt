@@ -75,7 +75,8 @@ def _due(con, now: float) -> list:
     """Closed auctions first, then listings from before end times were kept, then
     Buy It Nows that have dropped out of the search."""
     return con.execute(
-        "SELECT item_id, title, shipping FROM seen WHERE closed_at IS NULL AND ("
+        "SELECT item_id, title, shipping FROM seen WHERE closed_at IS NULL"
+        " AND (tracked IS NULL OR tracked=1) AND ("
         " (is_auction=1 AND end_ts IS NOT NULL AND end_ts<?)"
         " OR (is_auction IS NULL AND last_seen<?)"
         " OR (is_auction=0 AND last_seen<? AND last_seen>?"
@@ -257,6 +258,43 @@ def relevant(con, items: list[Listing]) -> list[dict]:
     for sale in out:   # a hint for one listing may be the very card of another
         sale["hint"] = sale["item_id"] not in exact
     return out
+
+
+def index(con) -> dict[str, list[dict]]:
+    """Every recorded sale by card number, for checking hundreds of listings at once.
+
+    `relevant` compares each listing with every sale, which is fine for one
+    scoring call and far too slow for a team's whole search."""
+    out: dict[str, list[dict]] = {}
+    for r in con.execute("SELECT item_id, title, price, shipping, kind FROM sales"):
+        number = card_number(r["title"])
+        if number:
+            out.setdefault(number, []).append({
+                "item_id": r["item_id"], "title": r["title"], "words": words(r["title"]),
+                "traits": traits(r["title"]), "year": _year(r["title"]),
+                "total": delivered(r["price"], r["shipping"])})
+    return out
+
+
+def under_sold(sold: dict[str, list[dict]], item: Listing) -> int | None:
+    """Percent this listing is under the usual price of the same card, from `index`.
+
+    The same card means the same card number, year, grade, autograph and print
+    run, and titles at least loosely alike (the same number can be another set).
+    None when there is no such sale or it isn't cheaper."""
+    number = card_number(item.title)
+    if not number:
+        return None
+    mine, year, kind = words(item.title), _year(item.title), traits(item.title)
+    same = [s["total"] for s in sold.get(number, [])
+            if s["item_id"] != item.item_id and s["traits"] == kind
+            and (not year or not s["year"] or s["year"] == year)
+            and mine and len(mine & s["words"]) / len(mine | s["words"]) >= 0.4]
+    if not same:
+        return None
+    usual = statistics.median(same)
+    pct = round(100 * (1 - delivered(item.price, item.shipping) / usual))
+    return pct if pct > 0 else None
 
 
 def delivered(price: float, shipping: float | None) -> float:

@@ -110,9 +110,12 @@ PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
 # Added to `seen` after the first release, so sales.py can look up closed auctions.
 # `price` and `seller` came later still, for price drops and relists (watch.py).
 # `checked_at` is when sales.py last asked eBay about a Buy It Now that was still for sale.
+# `tracked` is team mode's: 0 for a listing its free filter passed over, whose
+# sold price isn't worth an eBay call. NULL (every player-mode row) means tracked.
 SEEN_ADDED = {"is_auction": "INTEGER", "end_ts": "INTEGER", "shipping": "REAL",
               "closed_at": "INTEGER", "price": "REAL", "seller": "TEXT",
-              "checked_at": "INTEGER"}
+              "checked_at": "INTEGER", "tracked": "INTEGER"}
+UNTRACKED_KEEP_DAYS = 30   # team mode forgets passed-over listings after this
 # Added to `sales`: the photo, then whether it was an auction or a fixed-price sale.
 SALES_ADDED = {"image": "TEXT", "kind": "TEXT DEFAULT 'auction'"}
 
@@ -171,6 +174,15 @@ def note_snipe(con, item_id: str, title: str, end_ts: float | None,
         "seller=COALESCE(seen.seller, excluded.seller)",
         (item_id, title, now, now, None if end_ts is None else int(end_ts), seller or None),
     )
+
+
+def prune_untracked(con, now: float | None = None) -> int:
+    """Forget team listings the free filter passed over a month ago: a team's
+    searches see tens of thousands a day, and nothing is learned from them."""
+    now = now or time.time()
+    cur = con.execute("DELETE FROM seen WHERE tracked=0 AND last_seen<?",
+                      (now - UNTRACKED_KEEP_DAYS * 86400,))
+    return cur.rowcount
 
 
 def needs_scoring(con, item_id: str, total: float) -> bool:
