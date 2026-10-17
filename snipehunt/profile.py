@@ -178,6 +178,7 @@ class TeamProfile:
     card_words: list[str] = field(default_factory=list)
     roster: list[str] = field(default_factory=list)   # players to put first, best first
     roster_any_team: bool = False     # a roster player's card from another team counts too
+    logo_only: bool = False           # true: unlicensed cards with no team logos don't count
     wrong_words: list[str] = field(default_factory=list)
     auto_wrong_words: bool = True     # add other sports and same-nickname teams elsewhere
     keyword_searches: list[str] = field(default_factory=lambda: ["auto", "patch", "/", "rookie"])
@@ -347,6 +348,7 @@ def _parse_team(raw: dict) -> TeamProfile:
         "card_words": team.get("card_words", []),
         "roster": [str(n) for n in team.get("roster", [])],
         "roster_any_team": bool(team.get("roster_any_team", False)),
+        "logo_only": bool(team.get("logo_only", False)),
         "wrong_words": team.get("wrong_words", []),
         "auto_wrong_words": bool(team.get("auto_wrong_words", True)),
         "typo_searches": search.get("typos"),

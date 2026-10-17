@@ -185,7 +185,7 @@ TEAM_SWAPS = (
 your judgement; list the ones you reject in "not_player".""",
      """- Drop anything that isn't a {name} card: the card has to show its player as \
 one of the {name} (uniform, logo or team name), or be a team card. A star who \
-played for them, pictured with another team, is not one. Listings marked \
+played for them, pictured with another team, is not one.{logo_rule} Listings marked \
 match=unclear need your judgement; list the ones you reject in "not_player".
 - A card with several teams on it (dual autos, league leaders, combos) counts \
 only when a {name} player is a featured part of it; value only that part.
@@ -209,6 +209,14 @@ it matches when that is a dollar amount, else null, "player": "…", """),
 each card you put in not_player because it is another team's card, e.g. a \
 football player whose team has the same nickname", …]}}"""),
 )
+# Panini, Leaf and other unlicensed cards show no team logos. Most team
+# collectors count them for a player who was with the team; logo_only = true
+# in the profile says otherwise.
+LOGO_RULE = (" Cards made without team logos (Panini, Leaf and other unlicensed "
+             "makers) count when their player was with the {name} or in their system "
+             "when the card was made, which a team word in the title usually means.")
+LOGO_ONLY_RULE = (" Cards made without team logos (Panini, Leaf and other unlicensed "
+                  "makers) don't count: {collector} wants the team on the card.")
 ROSTER_LINE = ("\n- {collector} chases these players most, most wanted first: {roster}. Give "
                "their cards a closer look; the bar for a steal is the same.")
 
@@ -497,6 +505,8 @@ def build_prompt(items: list[Listing], lookups: int = 8,
                                               roster=", ".join(who.roster))
                            if who.roster else "")
         extra["habits"] = habits_line(who.collector)
+        extra["logo_rule"] = (LOGO_ONLY_RULE if who.logo_only else LOGO_RULE).format(
+            name=who.player, collector=who.collector)
     return template.format(
         **extra,
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],

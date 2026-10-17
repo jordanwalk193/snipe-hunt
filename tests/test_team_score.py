@@ -103,3 +103,11 @@ def test_players_claude_finds_on_other_teams_cards_are_dropped_for_free():
 def test_the_team_prompt_asks_for_the_names_it_rejects():
     assert '"not_team": ["full name of the player' in score.team_prompt()
     assert '"not_team"' not in score.PROMPT
+
+
+def test_unlicensed_cards_count_unless_the_profile_says_logo_only(monkeypatch):
+    assert "count when their player was with the St. Louis Cardinals" in score.build_prompt(
+        [listing()], 4)
+    monkeypatch.setattr(profile, "_cache", profile.parse(TEAM.replace(
+        "logo_only = false", "logo_only = true")))
+    assert "don't count: Sam wants the team on the card" in score.build_prompt([listing()], 4)

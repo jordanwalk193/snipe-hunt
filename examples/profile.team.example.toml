@@ -20,6 +20,9 @@ nickname_words = ["cardinals", "redbirds"]
 # for Claude to judge, and on another team's card it is ruled out.
 roster = ["Jordan Walker", "Masyn Winn", "Ivan Herrera", "Nolan Arenado"]
 roster_any_team = false       # true: a roster player's card from any team counts
+# Panini and Leaf cards have no team logos. They count when the player was with
+# the team; set this to true to count only cards that show the team.
+logo_only = false
 
 # Words that mean it is something else. Other sports' words ("nfl",
 # "basketball", ...) and other leagues' teams with the same nickname
