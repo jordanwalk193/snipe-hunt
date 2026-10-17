@@ -100,3 +100,12 @@ def test_football_only_words_rule_out_the_nfl_cardinals(team, title):
 
 def test_baseball_panini_cards_still_count(team):
     assert team.classify("2022 Panini Immaculate Juan Yepez Patch Auto Cardinals") != "no"
+
+
+def test_init_team_starts_from_the_team_example(monkeypatch):
+    import sys
+    from snipehunt import __main__ as cli
+    config.PROFILE.unlink(missing_ok=True)
+    monkeypatch.setattr(sys, "argv", ["snipehunt", "init", "--team"])
+    cli.main()
+    assert profile.parse(config.PROFILE.read_text()).mode == "team"

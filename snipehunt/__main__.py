@@ -1,6 +1,8 @@
 """Snipe Hunt command line.
 
   python -m snipehunt init     copy the example profile, inventory and lists into data/
+  python -m snipehunt init --team
+                               the same, with the team-mode example profile
   python -m snipehunt check    show what is configured (never prints secrets)
   python -m snipehunt serve    run the API and the scheduler (what the container runs)
   python -m snipehunt sold gold refractor /50
@@ -24,11 +26,15 @@ STARTERS = {"profile.example.toml": config.PROFILE, "inventory.example.csv": con
             "wantlist.example.md": config.WANTLIST, "preferences.example.md": config.PREFERENCES}
 
 
-def init() -> None:
+def init(team: bool = False) -> None:
     """Create the home folders and any starter file that isn't there yet."""
     for folder in (config.DATA_DIR, config.STATE_DIR, config.REPORTS_DIR):
         folder.mkdir(parents=True, exist_ok=True)
-    for name, target in STARTERS.items():
+    starters = dict(STARTERS)
+    if team:   # team mode: follow every player of one team
+        starters = {"profile.team.example.toml": config.PROFILE,
+                    **{k: v for k, v in STARTERS.items() if v != config.PROFILE}}
+    for name, target in starters.items():
         if target.exists():
             print(f"kept     {target}")
         else:
@@ -49,7 +55,7 @@ def serve() -> None:
         print(f"{who.app_name}: DEMO MODE. Serving made-up data; no searches, no alerts.",
               file=sys.stderr)
     else:
-        print(f"{who.app_name}: hunting {who.player} cards", file=sys.stderr)
+        print(f"{who.app_name}: hunting {who.subject} cards", file=sys.stderr)
         threading.Thread(target=scheduler.run_forever, daemon=True).start()
     api.serve()
 
@@ -67,6 +73,8 @@ def sold(words: list[str]) -> None:
 def main() -> None:
     commands = {"init": init, "check": check, "serve": serve}
     name, rest = (sys.argv[1:2] or [""])[0], sys.argv[2:]
+    if name == "init" and rest == ["--team"]:
+        rest, commands["init"] = [], lambda: init(team=True)
     if name not in (*commands, "sold") or (rest and name != "sold"):
         sys.exit(__doc__)
     try:

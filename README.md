@@ -5,7 +5,7 @@
 [![CI](https://github.com/jordanwalk193/snipe-hunt/actions/workflows/ci.yml/badge.svg)](https://github.com/jordanwalk193/snipe-hunt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A self-hosted bot that hunts eBay for underpriced cards of **one player you collect**, and tells you what to snipe and for how much.
+A self-hosted bot that hunts eBay for underpriced cards of **one player you collect**, or **every player on one team**, and tells you what to snipe and for how much.
 
 Every hour it searches eBay (including misspelled listings), throws out everything that isn't your player, and has Claude compare what's left with your inventory, your want list and recent sold prices. The steals come to your phone with a suggested max bid, and to a Home Assistant dashboard.
 
@@ -35,6 +35,8 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Checks your Gixen amounts**: reads the snipes you set (never changes them) and says how each amount sits against the card's going rate: over it, a fair bid that should win, a real discount, or a long shot. A card it has no price for gets one Claude appraisal, kept so it is paid for once.
 - **Ranks the rarest cards for sale**: the ten lowest print runs on eBay right now (1/1s, then /5, /10 and so on), read from the listing titles on every search at no Claude cost.
 - **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes, and what the week's auctions sold for.
+- **Knows your spending.** From what you paid and when (`price_paid`, `order_date` in the inventory): spend by month, this month's pace against your budget, what you usually pay for an auto, a graded card, a numbered card or a base card, and a forecast of next month's spend and the likely price of your next card. On the dashboard, in the weekly report, and as "you usually pay" next to each pick.
+- **Follows a whole team** if you'd rather: [team mode](#team-mode) hunts every player on, say, the St. Louis Cardinals, filters the thousand-plus new listings an hour for free, and spends Claude only on the most likely steals, within a daily budget.
 - **Reviews and tunes itself.** A weekly self-review of its own numbers proposes fixes, and may adjust one bounded setting a week and put it back if things get worse. It never changes its own code. See [How it improves itself](#how-it-improves-itself).
 - **Shows what it costs.** Every Claude call's cost is added up per day and month and shown on the dashboard.
 
@@ -135,6 +137,22 @@ How a title is judged:
 4. Just the last name plus a team word → "unclear", unless it's one of `other_first_names`.
 
 `examples/profile.example.toml` is a complete, commented profile.
+
+## Team mode
+
+Follow a team instead of a player: every card of the St. Louis Cardinals, whoever is on it, cheapest steals first.
+
+```toml
+[team]
+name = "St. Louis Cardinals"
+roster = ["Jordan Walker", "Masyn Winn"]   # optional: players to put first
+```
+
+`python -m snipehunt init --team` starts from [`examples/profile.team.example.toml`](examples/profile.team.example.toml). One bot follows a player or a team, not both; run a second copy for the other.
+
+A team lists about 85 times as much as a player (1,128 new Cardinals listings in an hour against 13 for one of their players), so team mode filters for free before anything is paid for. It drops lots, breaks, cards you own, cards outside your price band and plain base cards. It ranks what is left with evidence of a steal first: under a recorded sale of the same card, a price cut, an auction ending with no bidders, a misspelled title. Then come autos, patches, low print runs and your roster. Only the top 30 go to Claude, within a daily budget ($5 by default; both can be changed in Home Assistant). Measured on a live run: 2,060 listings, 30 scored, 10 picks, $0.31.
+
+It also finds sellers with several cards worth having (one shipping charge), holds every want-list ceiling in code, and learns: a player Claude finds on another team's cards (the NFL Cardinals, say) is ruled out for free from then on. The dashboard gets a "best deals for the Cardinals" board, sorted by discount, with a per-player view. Everything else (deal stars, the cheapskate max, the "to win" bid, sold prices) works as in player mode. Details in [`docs/TEAM_MODE.md`](docs/TEAM_MODE.md).
 
 ## The schedule
 
@@ -254,6 +272,8 @@ eBay disables a Production keyset until your app answers its Marketplace Account
 
 Watch the dashboard's cost sensors for the first day before leaving it running.
 
+A team bot is filtered for free first and capped by a daily budget; see [team mode](#team-mode).
+
 **Does it work for football, basketball, hockey, Pokémon?** The searching and filtering work for any name. Set `EBAY_CATEGORY` if your cards aren't in Sports Trading Card Singles, and fill in `sport` and the word lists in your profile. It has only been run for real on one baseball player so far.
 
 **What is the fast lane and what does it cost?** A badly mispriced Buy It Now can be gone in minutes, long before the hourly search. Set `FAST_LANE_MINUTES=10` in `.env` and the bot makes one extra eBay search that often for the newest fixed-price listings. A listing it has never seen goes to Claude only when it is worth a look: numbered to 99 or fewer, an autograph, graded, an unclear title, asking $15 or more, or priced under a recorded sale of the same card. At most 12 listings a call and 30 calls a day, so the ceiling is a few dollars a day and most runs cost nothing. Everything else waits for the hourly run.
@@ -262,7 +282,7 @@ Watch the dashboard's cost sensors for the first day before leaving it running.
 
 **How little do I have to set up for another player?** A name, a sport and a few team words: see [`examples/profile.minimal.toml`](examples/profile.minimal.toml), a football quarterback in fifteen lines. Misspellings, searches and card numbers are worked out from there.
 
-**Can it follow more than one player?** One player per bot. Run a second copy with its own home folder and port for another.
+**Can it follow more than one player?** One player per bot, or one whole team with [team mode](#team-mode). Run a second copy with its own home folder and port for another.
 
 **How good are the prices?** They get better the longer it runs. eBay blocks its sold-listings pages, so at first most prices are Claude's estimate, with a web lookup for the dearer cards. But the bot also records the final bid of every auction for your player that it saw close (one free eBay API call each, kept for a year), and shows Claude the sales of the same card as the one being scored. Each pick says whether its max came from real sales or an estimate. A Buy It Now is recorded only when it takes no offers, because then it can only have sold at the listed price; one with Best Offer may have gone for a lower accepted offer, so it isn't counted. Treat the prices as a well-informed second opinion, and check anything expensive yourself. Once enough of its picks have sold, the bot also tells Claude how far off its going rates have been running in each price band, so the estimates correct themselves. More in [Gets smarter over time](#gets-smarter-over-time).
 
