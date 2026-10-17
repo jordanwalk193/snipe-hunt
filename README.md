@@ -78,6 +78,8 @@ cp .env.example .env        # then fill it in
 docker compose up -d
 ```
 
+After the first tagged release, the image is also published for amd64 and arm64 (a Raspberry Pi works) at `ghcr.io/jordanwalk193/snipe-hunt`: use the `image:` line in `docker-compose.yml` in place of `build: .` to skip the build. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
 The first start creates `home/data/` with starter files. The first search finds everything on eBay at once, so it sends a single welcome alert rather than one per pick; after that you only hear about new listings.
 
 Edit these, then `docker compose restart`:
