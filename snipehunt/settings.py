@@ -13,7 +13,7 @@ import re
 import sqlite3
 from datetime import time as clock
 
-from . import config, db
+from . import config, db, profile
 
 KEY = "settings"
 MAX_LIST = 12   # each extra search costs eBay API calls every hour
@@ -73,6 +73,20 @@ TUNABLES: dict = {
 }
 NEVER_TUNABLE = ("quiet", "alert", "gixen", "urgent", "bedtime", "self_tuning")
 
+# Team mode only: a team lists far more cards an hour than a player, so what
+# reaches Claude is filtered and ranked for free first (shortlist.py). These
+# exist only on a team bot; a player bot never sees them.
+TEAM_DEFAULTS: dict = {
+    "team_claude_per_run": 30,       # listings sent to Claude per hourly run, best-ranked first
+    "team_daily_budget": 5.0,        # dollars of Claude a day; at it, scoring waits for tomorrow
+    "team_min_price": 3.0,           # a plain Buy It Now under this isn't worth a look
+    "team_max_price": 250.0,         # nothing over this, auction or not
+    "team_max_run": 99,              # a print run this low or lower is worth a look
+    "team_lots": False,              # lots and team sets are skipped unless this is on
+}
+# Defaults that differ on a team bot: frugal by design, only real steals alert.
+TEAM_OVERRIDES: dict = {"price_lookups": 4, "alert_min_stars": 4}
+
 RANGES = {
     "yellow_max_total": (0, 25),
     "urgent_hours": (0, 24),
@@ -87,6 +101,11 @@ RANGES = {
     "need_snipe_hours": (1, 168),
     "monthly_budget": (0, 5000),
     "gixen_relogin_minutes": (0, 1440),
+    "team_claude_per_run": (0, 80),
+    "team_daily_budget": (0, 500),
+    "team_min_price": (0, 100),
+    "team_max_price": (1, 10000),
+    "team_max_run": (1, 999),
 }
 ITEM = {
     "sellers": re.compile(r"[A-Za-z0-9._*\-]{1,64}"),
@@ -99,11 +118,27 @@ class SettingsError(ValueError):
     pass
 
 
+def team_mode() -> bool:
+    """Is this a team bot? False when there is no profile yet."""
+    try:
+        return profile.get().mode == "team"
+    except (profile.ProfileError, OSError, ValueError):
+        return False
+
+
+def defaults() -> dict:
+    """The defaults for this bot: player mode's, or a team's with its own extras."""
+    if not team_mode():
+        return dict(DEFAULTS)
+    return {**DEFAULTS, **TEAM_OVERRIDES, **TEAM_DEFAULTS}
+
+
 def _clean(key: str, value):
     """Return `value` in the stored form for `key`, or say what is wrong with it."""
-    if key not in DEFAULTS:
+    known = defaults()
+    if key not in known:
         raise SettingsError(f"unknown setting {key!r}")
-    default = DEFAULTS[key]
+    default = known[key]
     if isinstance(default, bool):
         if not isinstance(value, bool):
             raise SettingsError(f"{key} must be true or false")
@@ -141,7 +176,7 @@ def visible() -> list[str]:
     really obeys; unset means all of them.
     """
     only = [k.strip() for k in (config.get("API_SETTINGS") or "").split(",") if k.strip()]
-    return [k for k in DEFAULTS if not only or k in only]
+    return [k for k in defaults() if not only or k in only]
 
 
 def parse_time(text: str) -> clock:
@@ -151,7 +186,7 @@ def parse_time(text: str) -> clock:
 
 def load(con=None) -> dict:
     """Every setting, with defaults for anything unset or no longer valid."""
-    values = dict(DEFAULTS)
+    values = defaults()
     try:
         stored = json.loads(db.kv_get(con or db.connect(), KEY, "{}"))
     except (sqlite3.Error, OSError, ValueError):
@@ -175,7 +210,7 @@ def update(con, changes: dict) -> dict:
     """Validate every change, then save them all. Nothing is saved if one is bad."""
     if not isinstance(changes, dict) or not changes:
         raise SettingsError("no settings given")
-    hidden = [key for key in changes if key in DEFAULTS and key not in visible()]
+    hidden = [key for key in changes if key in defaults() and key not in visible()]
     if hidden:
         raise SettingsError(f"{hidden[0]} can't be changed from Home Assistant here")
     cleaned = {key: _clean(key, value) for key, value in changes.items()}

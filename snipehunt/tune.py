@@ -40,7 +40,7 @@ class TuneError(ValueError):
 def current(con) -> dict:
     """Every tunable with its value now, its default, its bounds and its metric."""
     cfg = settings.load(con)
-    return {name: {"value": cfg[name], "default": settings.DEFAULTS[name], **spec}
+    return {name: {"value": cfg[name], "default": settings.defaults()[name], **spec}
             for name, spec in settings.TUNABLES.items()}
 
 

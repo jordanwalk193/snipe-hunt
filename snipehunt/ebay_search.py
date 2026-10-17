@@ -41,12 +41,45 @@ def queries() -> list[tuple[str, str, str, str | None]]:
     who = profile.get()
     name = who.search_name
     slug = lambda text: re.sub(r"\W+", "-", text.lower()).strip("-")   # noqa: E731
+    if who.mode == "team":
+        return team_queries(who, slug)
     out = [("auctions-ending", name, "buyingOptions:{AUCTION}", "endingSoonest"),
            ("newly-listed", name, ALL_FORMATS, "newlyListed")]
     out += [(slug(k) or "numbered", f"{name} {k}", ALL_FORMATS, "newlyListed")
             for k in who.keyword_searches]
     out += [("typo-" + slug(q), q, ALL_FORMATS, "newlyListed") for q in who.typo_searches or []]
     cfg = settings.load()
+    out += [("extra-" + slug(q), q, ALL_FORMATS, "newlyListed")
+            for q in dict.fromkeys(who.extra_searches + cfg["extra_searches"])]
+    if cfg["sellers"]:
+        out.append(("sellers", name, ALL_FORMATS + ",sellers:{"
+                    + "|".join(cfg["sellers"]) + "}", "endingSoonest"))
+    return out
+
+
+# Team mode: a team lists ~1,000 cards an hour where a player lists ~15, so its
+# main searches take more than one page, and pages are as long as eBay allows.
+TEAM_PAGE = 200
+TEAM_PAGES = {"auctions-ending": 2, "newly-listed": 2}
+TEAM_ROSTER_SEARCHES = 8   # roster players with a search of their own, best first
+
+
+def team_queries(who, slug) -> list[tuple[str, str, str, str | None]]:
+    """A team's searches. The newest listings skip what is under the price floor,
+    which is most of them; auctions don't, since a $1 auction can still be a steal."""
+    name = who.search_name
+    cfg = settings.load()
+    floor = f",price:[{cfg['team_min_price']:g}..],priceCurrency:USD"
+    out = [("auctions-ending", name, "buyingOptions:{AUCTION}", "endingSoonest"),
+           ("newly-listed", name, ALL_FORMATS + floor, "newlyListed")]
+    for k in who.keyword_searches:
+        label = slug(k) or "numbered"
+        out.append((label, f"{name} {k}", ALL_FORMATS, "newlyListed"))
+        out.append(("ending-" + label, f"{name} {k}", "buyingOptions:{AUCTION}",
+                    "endingSoonest"))
+    out += [("roster-" + slug(p), p.lower(), ALL_FORMATS, "newlyListed")
+            for p in who.roster[:TEAM_ROSTER_SEARCHES]]
+    out += [("typo-" + slug(q), q, ALL_FORMATS, "newlyListed") for q in who.typo_searches or []]
     out += [("extra-" + slug(q), q, ALL_FORMATS, "newlyListed")
             for q in dict.fromkeys(who.extra_searches + cfg["extra_searches"])]
     if cfg["sellers"]:
@@ -72,6 +105,8 @@ class Listing:
     queries: list[str] = field(default_factory=list)
     seller_feedback_score: int | None = None    # None when eBay didn't say
     seller_feedback_pct: float | None = None    # percent positive, e.g. 99.6
+    via: str | None = None      # team mode: how it matched (team, nickname, typo, roster)
+    player: str | None = None   # team mode: the roster player named in the title
 
     @property
     def total(self) -> float:
@@ -168,8 +203,11 @@ class EbayClient:
             + (f"%2Czip%3D{config.get('EBAY_ZIP')}" if config.get("EBAY_ZIP") else ""),
         }
 
-    def search(self, q: str, flt: str, sort: str | None, limit: int = 100) -> list[dict]:
+    def search(self, q: str, flt: str, sort: str | None, limit: int = 100,
+               offset: int = 0) -> list[dict]:
         params = {"q": q, "category_ids": self.category, "filter": flt, "limit": limit}
+        if offset:
+            params["offset"] = offset
         if sort:
             params["sort"] = sort
         self.calls += 1
@@ -243,9 +281,12 @@ def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[
     dropped = 0
     errors: list[str] = []
     todo = queries()
+    who = profile.get()
+    team = who.mode == "team"
     for label, q, flt, sort in todo:
         try:
-            raw_items = client.search(q, flt, sort)
+            raw_items = (_pages(client, label, q, flt, sort) if team
+                         else client.search(q, flt, sort))
         except Exception as exc:  # one bad query shouldn't sink the whole run
             errors.append(f"{label}: {exc}")
             print(f"ebay: query {label} failed: {exc}", file=sys.stderr)
@@ -255,7 +296,10 @@ def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[
             item = parse_item(raw)
             if item is None or item.currency != "USD":
                 continue
-            verdict = classify(item.title)
+            if team:
+                verdict, item.via, item.player = who.match(item.title)
+            else:
+                verdict = classify(item.title)
             if verdict == "no":
                 dropped += 1
                 continue
@@ -272,6 +316,17 @@ def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[
         print(f"  {client.calls} API calls, {len(found)} unique listings, "
               f"{dropped} dropped as someone or something else", file=sys.stderr)
     return list(found.values())
+
+
+def _pages(client: EbayClient, label: str, q: str, flt: str, sort: str | None) -> list[dict]:
+    """A team search, a page at a time; stops early when a page comes back short."""
+    out: list[dict] = []
+    for page in range(TEAM_PAGES.get(label, 1)):
+        got = client.search(q, flt, sort, limit=TEAM_PAGE, offset=page * TEAM_PAGE)
+        out += got
+        if len(got) < TEAM_PAGE:
+            break
+    return out
 
 
 def _fmt(item: Listing) -> str:
