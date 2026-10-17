@@ -1,0 +1,41 @@
+# Team mode: every card of one team, whoever is on it, cheapest steals first.
+# Use this file in place of profile.toml's [player] section: one bot follows a
+# player or a team, never both. Run a second copy for the other.
+# Only [team] name is required; delete anything you don't need.
+
+collector = "Sam"             # your first name, used in reports and prompts
+app_name = "Snipe Hunt"
+
+[team]
+name = "St. Louis Cardinals"
+sport = "baseball"            # baseball, football, basketball or hockey
+
+# How titles write the city and the nickname. Left out, they come from the
+# name ("st. louis", "st louis" and "cardinals").
+city_words = ["st louis", "st. louis", "stl"]
+nickname_words = ["cardinals", "redbirds"]
+
+# Players to put first, most wanted first. A roster player's name counts as
+# the team when the title also has a team word; with nothing else it is left
+# for Claude to judge, and on another team's card it is ruled out.
+roster = ["Jordan Walker", "Masyn Winn", "Ivan Herrera", "Nolan Arenado"]
+roster_any_team = false       # true: a roster player's card from any team counts
+
+# Words that mean it is something else. Other sports' words ("nfl",
+# "basketball", ...) and other leagues' teams with the same nickname
+# ("arizona" for the NFL Cardinals) are added for you; turn that off with
+# auto_wrong_words = false. Colleges have to be listed by hand.
+wrong_words = ["louisville", "ball state", "incarnate word", "stanford", "lamar",
+               "custom", "reprint"]
+
+# Product words that fit this sport. Left out, a short list for the sport is used.
+card_words = ["mlb", "topps", "bowman", "heritage", "stadium club", "allen", "ginter",
+              "finest", "chrome"]
+
+[search]
+# Each one is an eBay API call or two an hour: "<nickname> auto" and so on.
+keywords = ["auto", "patch", "/", "rookie"]
+# Misspelled nicknames, where other buyers' searches miss a card. Leave out to
+# have three picked for you.
+typos = ["cardnals", "cardianls", "cardinls"]
+extra = []

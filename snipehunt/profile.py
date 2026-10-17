@@ -1,7 +1,9 @@
 """Who you collect, and how to tell their cards from everyone else's.
 
-Read from data/profile.toml. Only the player's name is required; everything
-else has a default worked out from it, and each default can be overridden.
+Read from data/profile.toml. A profile follows one player ([player], the
+original) or one team ([team], team mode), never both: one bot, one hunt. Only
+the name is required; everything else has a default worked out from it, and
+each default can be overridden.
 """
 from __future__ import annotations
 
@@ -10,7 +12,7 @@ import tomllib
 from dataclasses import dataclass, field
 from functools import cached_property
 
-from . import config
+from . import config, teams
 
 # With no card words set, a title needs a team word or the sport's name to be a
 # sure match; everything else with the player's name is left for Claude to judge.
@@ -135,12 +137,228 @@ class Profile:
         return {"app_name": self.app_name, "player": self.player, "sport": self.sport,
                 "collector": self.collector}
 
+    mode = "player"
 
-def parse(text: str) -> Profile:
+    @property
+    def subject(self) -> str:
+        """Who the hunt is for, as alerts and reports name it."""
+        return self.player
+
+    def match(self, title: str) -> tuple[str, str | None, str | None]:
+        """(verdict, how it matched, which player): the same verdict as classify."""
+        verdict = self.classify(title)
+        return verdict, None if verdict == "no" else "player", (
+            None if verdict == "no" else self.player)
+
+
+def _name_pattern(name: str) -> re.Pattern:
+    """A roster player's name: first name or initial, then the last name or a typo of it."""
+    parts = name.lower().split()
+    first, last = parts[0], " ".join(parts[1:])
+    lasts = [last, *typos(last)] if " " not in last else [last]
+    return re.compile(rf"\b{_words([first, first[0]])}\.?\s+{_words(lasts)}\b", re.I)
+
+
+@dataclass
+class TeamProfile:
+    """Team mode: every card of one team, whoever is on it.
+
+    A title belongs to the team by its full name, its city with its nickname,
+    its nickname with a card or sport word, or a roster player with a team or
+    card word. Titles from other sports, and from teams elsewhere with the same
+    nickname, are ruled out by wrong_words (several are added for you).
+    """
+    team: str                          # "St. Louis Cardinals"
+    sport: str = "baseball"
+    about: str = ""
+    collector: str = "the collector"
+    app_name: str = "Snipe Hunt"
+    city_words: list[str] = field(default_factory=list)
+    nickname_words: list[str] = field(default_factory=list)
+    card_words: list[str] = field(default_factory=list)
+    roster: list[str] = field(default_factory=list)   # players to put first, best first
+    roster_any_team: bool = False     # a roster player's card from another team counts too
+    wrong_words: list[str] = field(default_factory=list)
+    auto_wrong_words: bool = True     # add other sports and same-nickname teams elsewhere
+    keyword_searches: list[str] = field(default_factory=lambda: ["auto", "patch", "/", "rookie"])
+    typo_searches: list[str] | None = None
+    extra_searches: list[str] = field(default_factory=list)
+    products: str = ""
+    binder_pages: dict[str, str] = field(default_factory=dict)
+    binder_spare: str = "unsorted"
+    search: str = ""                  # what eBay is asked for; default: the nickname
+
+    mode = "team"
+
+    def __post_init__(self) -> None:
+        words = self.team.split()
+        if len(words) < 2:
+            raise ProfileError('team.name needs a city and a nickname, like "St. Louis Cardinals"')
+        if not self.nickname_words:
+            self.nickname_words = [words[-1].lower()]
+        if not self.city_words:
+            city = " ".join(words[:-1]).lower()
+            self.city_words = list(dict.fromkeys([city, city.replace(".", "")]))
+        self.nickname_words = [w.lower() for w in self.nickname_words]
+        self.city_words = [w.lower() for w in self.city_words]
+        if not self.card_words:
+            self.card_words = list(teams.CARD_WORDS.get(self.sport, []))
+        if self.auto_wrong_words:
+            extra = teams.other_sport_words(self.sport) + [
+                c for n in self.nickname_words
+                for c in teams.same_nickname_elsewhere(self.sport, n)]
+            self.wrong_words = list(dict.fromkeys(
+                [w.lower() for w in self.wrong_words] + extra))
+            # the team's own city never rules a title out
+            self.wrong_words = [w for w in self.wrong_words if w not in self.city_words]
+        self.search = (self.search or self.nickname_words[0]).lower()
+        nick = max(self.nickname_words, key=len)
+        self.nickname_typos = [t for t in typos(nick) if t != nick[:-1] and len(t) >= 5]
+        if self.typo_searches is None:
+            self.typo_searches = self.nickname_typos[:3]
+
+    # The attributes the player-mode code reads, answered for a team.
+    @property
+    def player(self) -> str:
+        return self.team
+
+    @property
+    def subject(self) -> str:
+        return self.team
+
+    @property
+    def last(self) -> str:
+        return self.nickname_words[0].title()
+
+    @property
+    def described(self) -> str:
+        base = f"{self.team} cards, any player"
+        return f"{base} ({self.about})" if self.about else base
+
+    @property
+    def search_name(self) -> str:
+        return self.search
+
+    @property
+    def team_words(self) -> list[str]:
+        return self.city_words + self.nickname_words + self.nickname_typos
+
+    @cached_property
+    def _nick_re(self) -> re.Pattern:
+        return re.compile(rf"\b{_words(self.nickname_words + self.nickname_typos)}\b", re.I)
+
+    @cached_property
+    def _exact_nick_re(self) -> re.Pattern:
+        return re.compile(rf"\b{_words(self.nickname_words)}\b", re.I)
+
+    @cached_property
+    def _city_re(self) -> re.Pattern:
+        return re.compile(rf"\b{_words(self.city_words)}\b", re.I)
+
+    @cached_property
+    def _right_re(self) -> re.Pattern:
+        return re.compile(rf"\b{_words(self.card_words + [self.sport])}\b", re.I)
+
+    @cached_property
+    def _wrong_re(self) -> re.Pattern:
+        return re.compile(rf"\b{_words(self.wrong_words)}\b", re.I)
+
+    @cached_property
+    def _roster_res(self) -> list[tuple[str, re.Pattern]]:
+        return [(name, _name_pattern(name)) for name in self.roster if len(name.split()) >= 2]
+
+    @cached_property
+    def _others_re(self) -> re.Pattern:
+        others = [n for n in teams.others_in_league(self.sport, "")
+                  if n not in self.nickname_words]
+        return re.compile(rf"\b{_words(others)}\b", re.I)
+
+    def roster_player(self, title: str) -> str | None:
+        """The first roster player named in the title, in roster order."""
+        return next((name for name, pat in self._roster_res if pat.search(title)), None)
+
+    def other_team(self, title: str) -> bool:
+        """Does the title name another team from the same league (a combo card)?"""
+        return bool(self._others_re.search(title))
+
+    def match(self, title: str) -> tuple[str, str | None, str | None]:
+        """(yes / unclear / no, how it matched, the roster player named or None)."""
+        if self._wrong_re.search(title):
+            return "no", None, None
+        who = self.roster_player(title)
+        nick, city = self._nick_re.search(title), self._city_re.search(title)
+        # a misspelled nickname is where other buyers' searches miss a card
+        named = "nickname" if nick and self._exact_nick_re.search(title) else "typo"
+        if nick and city:
+            return "yes", "team" if named == "nickname" else "typo", who
+        if nick and self._right_re.search(title):
+            return "yes", named, who
+        if who:
+            if nick or city:
+                return "yes", "roster", who
+            if self.roster_any_team:
+                return "yes", "roster", who
+            if self.other_team(title):   # him, but on the card of another team
+                return "no", None, None
+            return "unclear", "roster", who
+        if nick:
+            return "unclear", named, None
+        return "no", None, None
+
+    def classify(self, title: str) -> str:
+        return self.match(title)[0]
+
+    def binder_page(self, year: str | None) -> str:
+        return self.binder_pages.get(str(year or ""), self.binder_spare)
+
+    def public(self) -> dict:
+        """What the dashboard needs. "player" holds the team so older dashboards still work."""
+        return {"app_name": self.app_name, "player": self.team, "sport": self.sport,
+                "collector": self.collector, "mode": "team", "team": self.team,
+                "roster": list(self.roster)}
+
+
+def _parse_team(raw: dict) -> TeamProfile:
+    team = raw["team"]
+    if not isinstance(team, dict) or not team.get("name"):
+        raise ProfileError('[team] needs name = "City Nickname", like "St. Louis Cardinals"')
+    search = raw.get("search") or {}
+    binder = raw.get("binder") or {}
+    known = {
+        "team": team["name"], "sport": team.get("sport", "baseball"),
+        "about": team.get("about", ""),
+        "collector": raw.get("collector", "the collector"),
+        "app_name": raw.get("app_name", "Snipe Hunt"),
+        "city_words": team.get("city_words", []),
+        "nickname_words": team.get("nickname_words", []),
+        "card_words": team.get("card_words", []),
+        "roster": [str(n) for n in team.get("roster", [])],
+        "roster_any_team": bool(team.get("roster_any_team", False)),
+        "wrong_words": team.get("wrong_words", []),
+        "auto_wrong_words": bool(team.get("auto_wrong_words", True)),
+        "typo_searches": search.get("typos"),
+        "extra_searches": search.get("extra", []),
+        "products": search.get("products", ""),
+        "search": team.get("search", ""),
+        "binder_pages": {str(k): str(v) for k, v in (binder.get("pages") or {}).items()},
+        "binder_spare": binder.get("spare", "unsorted"),
+    }
+    if "keywords" in search:
+        known["keyword_searches"] = search["keywords"]
+    return TeamProfile(**known)
+
+
+def parse(text: str) -> Profile | TeamProfile:
     raw = tomllib.loads(text)
+    if "team" in raw:
+        if "player" in raw:
+            raise ProfileError("profile.toml has both [player] and [team]: one bot follows "
+                               "one or the other. Run a second copy for the other hunt.")
+        return _parse_team(raw)
     player = raw.get("player") or {}
     if not isinstance(player, dict) or not player.get("name"):
-        raise ProfileError('profile.toml needs [player] with name = "First Last"')
+        raise ProfileError('profile.toml needs [player] with name = "First Last", '
+                           'or [team] with name = "City Nickname"')
     search = raw.get("search") or {}
     binder = raw.get("binder") or {}
     known = {
@@ -166,10 +384,10 @@ def parse(text: str) -> Profile:
     return Profile(**known)
 
 
-_cache: Profile | None = None
+_cache: Profile | TeamProfile | None = None
 
 
-def get() -> Profile:
+def get() -> Profile | TeamProfile:
     global _cache
     if _cache is None:
         if not config.PROFILE.exists():
@@ -181,6 +399,13 @@ def get() -> Profile:
 def describe() -> None:
     p = get()
     print(f"{p.app_name}: {p.collector} collects {p.described} ({p.sport})")
+    if p.mode == "team":
+        print("city words:", ", ".join(p.city_words))
+        print("nicknames: ", ", ".join(p.nickname_words))
+        print("roster:    ", ", ".join(p.roster) or "(none)")
+        print("ruled out: ", ", ".join(p.wrong_words))
+        print("typo searches:", ", ".join(p.typo_searches or []))
+        return
     print("first names:", ", ".join(p.first_names))
     print("last names: ", ", ".join(p.last_names))
     print("typo searches:", ", ".join(p.typo_searches or []))
