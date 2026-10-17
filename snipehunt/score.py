@@ -10,6 +10,7 @@ import csv
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import unicodedata
@@ -176,6 +177,46 @@ edge, say what the seller got wrong"}}], "not_player": ["item_id", …]}}
 {learned}{sold}=== listings (JSON lines) ===
 {listings}
 """
+
+# Team mode's prompt is player mode's with the player-only lines swapped out,
+# so the rules both share (HARD RULES above all) can't drift apart.
+TEAM_SWAPS = (
+    ("""- Drop anything that isn't a {name} card. Listings marked match=unclear need \
+your judgement; list the ones you reject in "not_player".""",
+     """- Drop anything that isn't a {name} card: the card has to show its player as \
+one of the {name} (uniform, logo or team name), or be a team card. A star who \
+played for them, pictured with another team, is not one. Listings marked \
+match=unclear need your judgement; list the ones you reject in "not_player".
+- A card with several teams on it (dual autos, league leaders, combos) counts \
+only when a {name} player is a featured part of it; value only that part.
+- {collector} is building a {name} collection as cheaply as possible. A steal \
+beats a nice card at a fair price: favor real discounts to the going rate, and \
+for the same card always the cheapest copy, shipping counted. A card at a fair \
+price is a pick only when it is on the want list and under its ceiling.{roster}
+- Say who is on each pick in "player": the full name, several joined with " / ", \
+or "team card"."""),
+    ("""- A listing marked "found": "by card number…" came from a search for one of \
+{name}'s card numbers and does not name the player. If the year, set and card \
+number make it {name}'s card, it is "hidden" by definition and worth a close \
+look; if that number belongs to another player in that set, put it in "not_player".
+""", ""),
+    (""""want": true if \
+it is on wantlist.md else false, """, """"want": true if \
+it is on wantlist.md else false, "want_ceiling": the Ceiling of the wantlist.md row \
+it matches when that is a dollar amount, else null, "player": "…", """),
+)
+ROSTER_LINE = ("\n- {collector} chases these players most, most wanted first: {roster}. Give "
+               "their cards a closer look; the bar for a steal is the same.")
+
+
+def team_prompt() -> str:
+    text = PROMPT
+    for old, new in TEAM_SWAPS:
+        if old not in text:   # a change to PROMPT must update the swap with it
+            raise RuntimeError(f"team prompt: line not found in PROMPT: {old[:60]!r}")
+        text = text.replace(old, new)
+    return text
+
 
 SOLD_RULE = """- "sold prices seen" below are real eBay sales this bot recorded itself: \
 auction results, and lines marked BIN, which are fixed-price sales at the \
@@ -350,19 +391,45 @@ know, set max_basis to "estimate", and be more cautious with your max the less \
 sure you are."""
 
 
-def inventory_for_scoring() -> str:
-    """The inventory cut down to the columns that identify a card."""
+def inventory_for_scoring(items: list[Listing] | None = None) -> str:
+    """The inventory cut down to the columns that identify a card.
+
+    With `items` (team mode), only the rows that could be one of those cards: a
+    team collection runs to thousands of rows and every one is paid for on
+    every call. A row is kept when its player is named in one of the titles, or
+    its year and card number are in one. Without a player column, all rows stay.
+    """
     text = config.INVENTORY.read_text()
     reader = csv.DictReader(io.StringIO(text))
-    keep = [c for c in reader.fieldnames or [] if c in CARD_COLUMNS]
+    keep = [c for c in reader.fieldnames or [] if c in CARD_COLUMNS + ("player",)
+            and (c != "player" or items is not None)]
     if len(keep) < 3:   # a layout of the collector's own: send it as it is
         return text
+    rows = list(reader)
+    if items is not None and "player" in (reader.fieldnames or []):
+        titles = " ".join(i.title for i in items).lower()
+        numbers = {re.sub(r"[^A-Z0-9]", "", n) for n in
+                   (sales.card_number(i.title) for i in items) if n}
+        rows = [r for r in rows if (r.get("player") or "").strip().lower() in titles
+                and (r.get("player") or "").strip()
+                or re.sub(r"[^A-Z0-9]", "", (r.get("card_no") or "").upper()) in numbers]
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=keep, extrasaction="ignore",
                             lineterminator="\n")
     writer.writeheader()
-    writer.writerows(reader)
+    writer.writerows(rows)
     return out.getvalue()
+
+
+def ceilings() -> set[float]:
+    """The dollar ceilings on the want list: the only ones a pick may claim."""
+    from .snapshot import wantlist   # snapshot imports this module; kept local
+    out = set()
+    for row in wantlist():
+        found = re.fullmatch(r"\$?\s*(\d+(?:\.\d+)?)", row["ceiling"].replace(",", "").strip())
+        if found:
+            out.add(float(found.group(1)))
+    return out
 
 
 def build_prompt(items: list[Listing], lookups: int = 8,
@@ -371,7 +438,15 @@ def build_prompt(items: list[Listing], lookups: int = 8,
                  marked: list[dict] = ()) -> str:
     """`marked` are cards marked overvalued (overvalued()); similar listings say so."""
     who = profile.get()
-    return PROMPT.format(
+    team = who.mode == "team"
+    template = team_prompt() if team else PROMPT
+    extra = {}
+    if team:
+        extra["roster"] = (ROSTER_LINE.format(collector=who.collector,
+                                              roster=", ".join(who.roster))
+                           if who.roster else "")
+    return template.format(
+        **extra,
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],
         bin_cap=settings.load()["estimate_bin_cap"],
         min_feedback=settings.load()["min_seller_feedback"],
@@ -382,7 +457,7 @@ def build_prompt(items: list[Listing], lookups: int = 8,
         lookup_rule=LOOKUPS.format(lookups=lookups) if lookups else NO_LOOKUPS,
         preferences=config.PREFERENCES.read_text(),
         wantlist=config.WANTLIST.read_text(),
-        inventory=inventory_for_scoring(),
+        inventory=inventory_for_scoring(items if team else None),
         listings="\n".join(_compact(i, marked) for i in items))
 
 
@@ -453,8 +528,21 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
         value = round(float(raw["value"]), 2)
     except (KeyError, TypeError, ValueError):
         value = None
-    # What you would really pay: the asking price, or the snipe if it wins at its max.
+    team = profile.get().mode == "team"
     ship = item.shipping if item.shipping is not None else UNKNOWN_SHIPPING
+    if team and raw.get("want") is True:
+        # A want-list ceiling is a promise: the card, shipping and all, costs no more.
+        try:
+            ceiling = float(raw.get("want_ceiling"))
+        except (TypeError, ValueError):
+            ceiling = None
+        if ceiling is not None and ceiling in ceilings():
+            if not item.is_auction and item.price + ship > ceiling:
+                return None
+            max_bid = min(max_bid, round(ceiling - ship, 2))
+            if item.price > max_bid:
+                return None
+    # What you would really pay: the asking price, or the snipe if it wins at its max.
     combined_ship = bool(ship) and (item.seller or "").lower() in combined
     if combined_ship:
         ship = 0
@@ -463,7 +551,7 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
     if edge not in EDGES or (deal_pct or 0) < settings.load()["edge_min_pct"] or (
             edge == "mispriced" and item.is_auction):
         edge = None   # the numbers have to back the claim
-    return apply_caps({
+    pick = {
         "item_id": item.item_id, "card": str(raw.get("card") or item.title)[:90],
         "tier": tier, "max": max_bid, "value": value, "deal": deal, "deal_pct": deal_pct,
         "edge": edge, "combined_ship": combined_ship,
@@ -478,7 +566,10 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
         "url": item.url, "image": item.image, "want": raw.get("want") is True,
         "seller_feedback": item.seller_feedback_score,
         "seller_pct": item.seller_feedback_pct,
-    })
+    }
+    if team:   # who is on it, for the dashboard's per-player view
+        pick["player"] = _plain(raw.get("player"), 60) or item.player or "unknown"
+    return apply_caps(pick)
 
 
 def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None

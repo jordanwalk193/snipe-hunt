@@ -136,3 +136,14 @@ def test_the_improvement_instructions_keep_their_off_limits_list():
 def test_ci_still_runs_these_tests():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "python -m pytest" in ci and "pull_request" in ci
+
+
+def test_the_team_prompt_carries_the_same_hard_rules(monkeypatch):
+    from snipehunt import profile
+    monkeypatch.setattr(profile, "_cache", profile.parse(
+        (config.EXAMPLES / "profile.team.example.toml").read_text()))
+    text = score.team_prompt()
+    assert ("HARD RULES: recommend only. Never bid, buy, make offers, message sellers or "
+            "touch Gixen. You may only read web pages.") in text
+    # team mode scores with the same Claude call and the same two tools
+    assert "ask_claude(" in source("score.py") and "team_prompt" in source("score.py")
