@@ -192,7 +192,7 @@ only when a {name} player is a featured part of it; value only that part.
 - {collector} is building a {name} collection as cheaply as possible. A steal \
 beats a nice card at a fair price: favor real discounts to the going rate, and \
 for the same card always the cheapest copy, shipping counted. A card at a fair \
-price is a pick only when it is on the want list and under its ceiling.{roster}
+price is a pick only when it is on the want list and under its ceiling.{roster}{habits}
 - Say who is on each pick in "player": the full name, several joined with " / ", \
 or "team card"."""),
     ("""- A listing marked "found": "by card number…" came from a search for one of \
@@ -207,6 +207,23 @@ it matches when that is a dollar amount, else null, "player": "…", """),
 )
 ROSTER_LINE = ("\n- {collector} chases these players most, most wanted first: {roster}. Give "
                "their cards a closer look; the bar for a steal is the same.")
+
+
+HABITS_LINE = ("\n- What {collector} usually pays (from the inventory): {kinds}. A max "
+               "well above that for the same kind of card needs a real reason.")
+
+
+def habits_line(collector: str) -> str:
+    """Team mode: the collector's own usual prices, an anchor for a cheapskate max."""
+    from . import spending   # spending reads settings and the inventory; kept local
+    try:
+        kinds = spending.summary()["by_kind"]
+    except (KeyError, OSError, ValueError):
+        return ""
+    if not kinds:
+        return ""
+    return HABITS_LINE.format(collector=collector, kinds=", ".join(
+        f"{k} ${v['usual']:.2f}" for k, v in kinds.items()))
 
 
 def team_prompt() -> str:
@@ -445,6 +462,7 @@ def build_prompt(items: list[Listing], lookups: int = 8,
         extra["roster"] = (ROSTER_LINE.format(collector=who.collector,
                                               roster=", ".join(who.roster))
                            if who.roster else "")
+        extra["habits"] = habits_line(who.collector)
     return template.format(
         **extra,
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],

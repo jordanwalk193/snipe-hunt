@@ -72,3 +72,12 @@ def test_only_inventory_rows_that_could_match_are_sent(monkeypatch):
                                         listing(2, "2023 Topps Cardinals #87 refractor")])
     assert "Masyn Winn" in text and "Someone Else" in text and "Goldschmidt" not in text
     assert text.splitlines()[0].endswith(",player")
+
+
+def test_the_team_prompt_anchors_maxes_on_what_the_collector_usually_pays():
+    config.INVENTORY.write_text(
+        "id,year,set,card,parallel,card_no,serial,rc,auto,relic,graded,status,price_paid,order_date\n"
+        + "".join(f"{i},2023,Topps,Base,Base,{i},,,Y,,,In binder,9.00,2026-09-0{i}\n"
+                  for i in range(1, 5)))
+    text = score.build_prompt([listing()], 4)
+    assert "What Sam usually pays (from the inventory): auto $9.00" in text

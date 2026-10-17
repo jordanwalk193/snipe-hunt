@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import config, db, inventory, profile, sales, settings, tune
+from . import config, db, inventory, profile, sales, settings, spending, tune
 from .notify import TIER_ICON, TIER_ORDER
 from .score import ask_claude
 
@@ -246,6 +246,7 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
           f"- **{tot['cards']} cards**, **${tot['spent']:.2f} spent**"
           + (f" ({tot['unpriced']} cards have no price recorded yet)" if tot["unpriced"] else ""),
           f"- {tot['in_binder']} in the binder, {tot['to_file']} delivered and waiting to be filed",
+          "", "## Spending", *spending.lines(spending.summary(rows, now.date())),
           "", f"## Wins and losses ({len(wins)} won, {len(losses)} lost)"]
     for ev in wins:
         md.append(f"- ✅ {ev.get('title') or 'item ' + str(ev.get('item_id'))} · "

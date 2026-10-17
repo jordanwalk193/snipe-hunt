@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import (config, db, gixen, inventory, profile, rarity, report, sales, scheduler,
-               settings, shortlist, snipecheck, tune, watch)
+               settings, shortlist, snipecheck, spending, tune, watch)
 from . import usage
 from .notify import TIER_ORDER
 
@@ -55,6 +55,7 @@ def _slim(pick: dict) -> dict:
         if pick.get("is_auction") else None,
         # team mode: who is on the card
         **({"player": pick["player"]} if pick.get("player") else {}),
+        "usual_paid": pick.get("usual_paid"),   # what you usually pay for this kind of card
     }
 
 
@@ -342,6 +343,10 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
     for p in picks:   # a "good call" stays on the board; the dashboard marks it
         p["feedback"] = given.get(p["item_id"])
     picks = ranked(picks)
+    spend = spending.summary(rows, now.date(), cfg["monthly_budget"])
+    for p in picks:   # "you usually pay" next to each pick, once there is a history
+        usual = spending.usual_for(spend, p.get("title") or p.get("card") or "")
+        p["usual_paid"] = usual["usual"] if usual else None
     state = status(con, picks, now)
     state.update(usage.summary(con, now))
     state["need_snipe"] = need_snipe(picks, now, cfg["need_snipe_hours"],
@@ -362,6 +367,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "rarest_census": rarity.census(con),
         "moves": watch.load(con, now.isoformat(timespec="minutes")),
         "wantlist": wantlist(),
+        # what you have paid by month and kind of card, and what you will likely pay next
+        "spending": spend,
         # what the weekly self-review changed on its own, and how each change turned out
         "tuning": {"on": cfg["self_tuning"], "log": tune.view(con),
                    "tunables": tune.current(con)},

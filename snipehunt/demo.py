@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from . import config, profile, sales, settings, snapshot, snipecheck
+from . import config, profile, sales, settings, snapshot, snipecheck, spending
 
 # (tier, card, price, shipping, max, value, hours until it ends or None for Buy It Now,
 #  basis, snipe, why, colour)
@@ -235,6 +235,13 @@ def build(now: datetime | None = None) -> dict:
         years[c["n"][:4]] = years.get(c["n"][:4], 0) + 1
     unpaid = [c for c in cards if c["s"] in ("Won", "Awaiting payment")]
     cfg = {**settings.DEFAULTS, "monthly_budget": 150.0, "sellers": SELLERS[:2]}
+    spend = spending.summary(
+        [{"price_paid": c["p"], "order_date": c["d"], "auto": "Y" if "A" in c["f"] else "",
+          "serial": "/99" if "N" in c["f"] else "", "rc": "Y" if "R" in c["f"] else ""}
+         for c in cards], now.date(), cfg["monthly_budget"])
+    for p in picks:
+        usual = spending.usual_for(spend, p.get("card") or "")
+        p["usual_paid"] = usual["usual"] if usual else None
     return {
         "api": snapshot.VERSION, "demo": True, "profile": who.public(),
         "generated": now.isoformat(timespec="seconds"),
@@ -294,6 +301,7 @@ def build(now: datetime | None = None) -> dict:
         "rarest_census": {"one_of_one": 4, "to_10": 11, "to_50": 37},
         "moves": _moves(now),
         "wantlist": snapshot.wantlist(),
+        "spending": spend,
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": None,
     }
