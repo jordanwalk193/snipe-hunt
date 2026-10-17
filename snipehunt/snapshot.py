@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import (config, db, gixen, inventory, profile, rarity, report, sales, scheduler,
-               settings, snipecheck, tune, watch)
+               settings, shortlist, snipecheck, tune, watch)
 from . import usage
 from .notify import TIER_ORDER
 
@@ -53,6 +53,8 @@ def _slim(pick: dict) -> dict:
         # older picks were saved before the win bid existed; work it out for them too
         "win": sales.win_bid(pick.get("value"), pick.get("shipping"), pick.get("max"))
         if pick.get("is_auction") else None,
+        # team mode: who is on the card
+        **({"player": pick["player"]} if pick.get("player") else {}),
     }
 
 
@@ -90,6 +92,47 @@ def ranked(picks: list[dict]) -> list[dict]:
     return sorted(picks, key=lambda p: (
         p.get("deal") == 1, not p.get("edge"), TIER_ORDER.get(p.get("tier"), 9),
         -(p.get("deal") or 0), p.get("total") or 0, p.get("end_time") or "9"))
+
+
+BOARD_SIZE = 25
+
+
+def steal_order(picks: list[dict]) -> list[dict]:
+    """Team mode's board: the biggest discount to the going rate first, then stars,
+    then the cheapest. A pick with a guessed price or one star isn't a steal."""
+    good = [p for p in picks if not p.get("unverified") and (p.get("deal") or 0) >= 2]
+    return sorted(good, key=lambda p: (-(p.get("deal_pct") or 0), -(p.get("deal") or 0),
+                                       p.get("total") or 0))
+
+
+def by_player(picks: list[dict]) -> list[dict]:
+    """Each player's live picks: how many, the best steal and the cheapest card."""
+    groups: dict[str, list[dict]] = {}
+    for p in picks:
+        groups.setdefault(p.get("player") or "unknown", []).append(p)
+    out = []
+    for name, group in groups.items():
+        best = max(group, key=lambda p: (p.get("deal_pct") or 0, p.get("deal") or 0))
+        cheap = min(group, key=lambda p: p.get("total") or 0)
+        out.append({"player": name, "picks": len(group), "best": best["item_id"],
+                    "best_deal_pct": best.get("deal_pct"), "best_card": best.get("card"),
+                    "cheapest_total": cheap.get("total"), "cheapest": cheap["item_id"],
+                    "saved": round(sum(max(0.0, (p.get("value") or 0) - (p.get("total") or 0))
+                                       for p in group), 2)})
+    out.sort(key=lambda g: (-g["picks"], -(g["best_deal_pct"] or 0)))
+    return out
+
+
+def team_view(con, picks: list[dict], cfg: dict) -> dict:
+    """What a team bot's dashboard adds: the steal board, players, the free funnel,
+    seller bundles and the day's Claude budget."""
+    from .jobs import team_budget   # jobs imports most of the package; kept local
+    who = profile.get()
+    board = steal_order(picks)
+    return {"name": who.team, "roster": list(who.roster),
+            "board": [_slim(p) for p in board[:BOARD_SIZE]],
+            "players": by_player(picks), **shortlist.load(con),
+            "budget": team_budget(con, cfg), "per_run": cfg["team_claude_per_run"]}
 
 
 def need_snipe(picks: list[dict], now: datetime, hours: float,
@@ -324,6 +367,7 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
                    "tunables": tune.current(con)},
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),
+        **({"team": team_view(con, picks, cfg)} if profile.get().mode == "team" else {}),
     }
 
 

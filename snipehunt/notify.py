@@ -253,7 +253,7 @@ def format_group(entry: dict) -> str:
     """One card listed by several sellers: the card, then a line for each listing."""
     listings = sorted(members(entry), key=lambda p: p.get("end_time") or "9")
     icon = TIER_ICON.get(entry.get("tier"), "•")
-    lines = [f"{icon} {entry['card']} ({len(listings)} listings)"]
+    lines = [f"{icon} {_who(entry)}{entry['card']} ({len(listings)} listings)"]
     if entry.get("edge") in EDGE_LABEL:
         lines.insert(0, EDGE_LABEL[entry["edge"]])
     for p in listings:
@@ -275,7 +275,7 @@ def format_pick(pick: dict) -> str:
     if pick.get("others"):
         return format_group(pick)
     icon = TIER_ICON.get(pick.get("tier"), "•")
-    lines = [f"{icon} {pick['card']}", _price_line(pick)]
+    lines = [f"{icon} {_who(pick)}{pick['card']}", _price_line(pick)]
     if pick.get("edge") in EDGE_LABEL:
         lines.insert(0, EDGE_LABEL[pick["edge"]])
     if pick.get("max") is not None:
@@ -291,8 +291,20 @@ def format_pick(pick: dict) -> str:
     return "\n".join(lines)
 
 
+def _who(pick: dict) -> str:
+    """Team mode: the player, when the card name doesn't already say."""
+    name = pick.get("player")
+    if not name or name == "unknown" or name.lower() in str(pick.get("card", "")).lower():
+        return ""
+    return f"{name} · "
+
+
 def _rank(pick: dict) -> tuple:
-    """Cards that slipped through the cracks lead a bundle, then tier, then what ends first."""
+    """Cards that slipped through the cracks lead a bundle, then tier, then what ends first.
+    A team bot leads with the deepest discount instead: steals, then the rest."""
+    if profile.get().mode == "team":
+        return (pick.get("edge") not in EDGE_LABEL, -(pick.get("deal_pct") or 0),
+                TIER_ORDER.get(pick.get("tier"), 9), pick.get("end_time") or "9")
     return (pick.get("edge") not in EDGE_LABEL, TIER_ORDER.get(pick.get("tier"), 9),
             pick.get("end_time") or "9")
 
@@ -301,7 +313,9 @@ def format_bundle(picks: list[dict], part: str = ""
                   ) -> tuple[str, str, str | None, str | None]:
     picks = sorted(picks, key=_rank)
     n = len(picks)
-    title = f"{profile.get().app_name}: {n} steal{'s' if n != 1 else ''}{part}"
+    who = profile.get()
+    kind = f"{who.last} steal" if who.mode == "team" else "steal"   # "3 Cardinals steals"
+    title = f"{who.app_name}: {n} {kind}{'s' if n != 1 else ''}{part}"
     body = "\n\n".join(format_pick(p) for p in picks)
     top = picks[0]
     return title, body, top.get("url"), top.get("image")
