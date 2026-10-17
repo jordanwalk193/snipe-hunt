@@ -204,6 +204,10 @@ look; if that number belongs to another player in that set, put it in "not_playe
 it is on wantlist.md else false, """, """"want": true if \
 it is on wantlist.md else false, "want_ceiling": the Ceiling of the wantlist.md row \
 it matches when that is a dollar amount, else null, "player": "…", """),
+    ("""], "not_player": ["item_id", …]}}""",
+     """], "not_player": ["item_id", …], "not_team": ["full name of the player on \
+each card you put in not_player because it is another team's card, e.g. a \
+football player whose team has the same nickname", …]}}"""),
 )
 ROSTER_LINE = ("\n- {collector} chases these players most, most wanted first: {roster}. Give "
                "their cards a closer look; the bar for a steal is the same.")
@@ -224,6 +228,36 @@ def habits_line(collector: str) -> str:
         return ""
     return HABITS_LINE.format(collector=collector, kinds=", ".join(
         f"{k} ${v['usual']:.2f}" for k, v in kinds.items()))
+
+
+NOT_TEAM_KEY = "not_team_names"
+NOT_TEAM_KEEP = 400
+NAME = re.compile(r"[A-Za-z][A-Za-z.'\- ]{3,38}[A-Za-z.]")
+
+
+def learn_not_team(con, names) -> int:
+    """Team mode: remember the players Claude said are another team's, so their
+    cards are dropped for free from the next search on (see TeamProfile.learned).
+
+    The names come from Claude reading stranger-written titles, so only plain
+    two-to-four-word names are kept, never a roster player, and they are only
+    ever used as words to rule a title out."""
+    if not isinstance(names, list):
+        return 0
+    who = profile.get()
+    roster = {n.lower() for n in who.roster}
+    clean = []
+    for name in names[:40]:
+        name = " ".join(str(name or "").split())
+        if (NAME.fullmatch(name) and 2 <= len(name.split()) <= 4
+                and name.lower() not in roster and who.roster_player(name) is None):
+            clean.append(name.lower())
+    if not clean:
+        return 0
+    known = json.loads(db.kv_get(con, NOT_TEAM_KEY, "[]"))
+    merged = list(dict.fromkeys(clean + known))[:NOT_TEAM_KEEP]
+    db.kv_set(con, NOT_TEAM_KEY, json.dumps(merged))
+    return len(set(clean) - set(known))
 
 
 def team_prompt() -> str:
@@ -623,6 +657,8 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
             print(f"score: batch {n}/{len(batches)} failed, keeping the first "
                   f"{len(scored)} listings: {exc}", file=sys.stderr)
             break
+        if con is not None and profile.get().mode == "team":
+            learn_not_team(con, reply.get("not_team"))
         batch_picks: list[dict] = []
         for raw in reply.get("picks", []) or []:
             item = by_id.get(str(raw.get("item_id")))

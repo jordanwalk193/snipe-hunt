@@ -283,6 +283,9 @@ def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[
     todo = queries()
     who = profile.get()
     team = who.mode == "team"
+    if team:   # players already found on another team's cards are ruled out for free
+        from . import db, score   # both import this module; kept local
+        who.learn(json.loads(db.kv_get(db.connect(), score.NOT_TEAM_KEY, "[]")))
     for label, q, flt, sort in todo:
         try:
             raw_items = (_pages(client, label, q, flt, sort) if team

@@ -281,9 +281,22 @@ class TeamProfile:
         """Does the title name another team from the same league (a combo card)?"""
         return bool(self._others_re.search(title))
 
+    # Players Claude found on other teams' cards with the same nickname (score.learn_not_team).
+    learned: list[str] = field(default_factory=list, repr=False)
+
+    def learn(self, names: list[str]) -> None:
+        self.learned = list(names)
+        self.__dict__.pop("_learned_re", None)
+
+    @cached_property
+    def _learned_re(self) -> re.Pattern:
+        return re.compile(rf"\b{_words(self.learned)}\b", re.I)
+
     def match(self, title: str) -> tuple[str, str | None, str | None]:
         """(yes / unclear / no, how it matched, the roster player named or None)."""
         if self._wrong_re.search(title):
+            return "no", None, None
+        if self.learned and self._learned_re.search(title):
             return "no", None, None
         who = self.roster_player(title)
         nick, city = self._nick_re.search(title), self._city_re.search(title)

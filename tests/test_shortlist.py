@@ -52,7 +52,7 @@ def test_lots_come_back_when_the_setting_says_so():
     db.connect().close()
     from snipehunt import settings
     settings.update(db.connect(), {"team_lots": True})
-    kept, _, _ = run([item(1, "Cardinals Topps Masyn Winn RC lot of 5 cards")])
+    kept, _, _ = run([item(1, "Cardinals Topps Masyn Winn RC auto lot of 5 cards")])
     assert len(kept) == 1
 
 
@@ -83,21 +83,36 @@ def test_price_cuts_sleepers_and_typos_are_worth_a_look():
     assert "misspelled title" in reasons[typo.item_id]
 
 
-def test_cheap_buy_it_nows_need_a_reason_beyond_the_card():
-    kept, funnel, _ = run([item(1, "2024 Topps Cardinals Masyn Winn RC #50", price=1.0)])
+def test_cheap_buy_it_nows_need_a_strong_reason():
+    kept, funnel, _ = run([item(1, "2024 Topps Cardinals Masyn Winn Refractor /99 #50", price=1.0)])
     assert kept == [] and funnel["dropped"]["too_cheap"] == 1
     # an auction is never floored: a $1 auction can still be the steal
-    kept, _, _ = run([item(2, "2024 Topps Cardinals Masyn Winn RC #50", price=1.0, auction=True,
-                           bids=3, hours=30)])
+    kept, _, _ = run([item(2, "2024 Topps Cardinals Masyn Winn Refractor /99 #50", price=1.0,
+                           auction=True, bids=3, hours=30)])
+    assert len(kept) == 1
+    # and a cheap copy of a good card is what a frugal collection is built from
+    kept, _, _ = run([item(3, "2024 Topps Cardinals Masyn Winn auto #50", price=1.0)])
     assert len(kept) == 1
 
 
+def test_a_rookie_or_roster_card_alone_is_not_worth_a_call():
+    kept, funnel, _ = run([item(1, "2024 Topps Cardinals Masyn Winn RC #50")])
+    assert kept == [] and funnel["dropped"]["plain"] == 1
+
+
+def test_a_bare_nickname_ranks_far_below_a_sure_match():
+    sure = item(1, "2024 Topps Cardinals Masyn Winn auto")
+    bare = item(2, "Cardinals Kirk auto /25")                # likely the football team
+    kept, _, _ = run([bare, sure])
+    assert kept[0].item.item_id == sure.item_id
+
+
 def test_owned_cards_are_skipped():
-    rows = [{"year": "2024", "card_no": "#50", "player": "Masyn Winn", "parallel": "Base",
-             "serial": "", "auto": "", "graded": "", "status": "In binder"}]
-    owned = item(1, "2024 Topps Cardinals Masyn Winn RC #50")
-    gold = item(2, "2024 Topps Cardinals Masyn Winn RC #50 Gold /2024")
-    other = item(3, "2024 Topps Cardinals Masyn Winn RC #51")
+    rows = [{"year": "2024", "card_no": "#50", "player": "Masyn Winn", "parallel": "Refractor",
+             "serial": "/99", "auto": "", "graded": "", "status": "In binder"}]
+    owned = item(1, "2024 Topps Cardinals Masyn Winn RC #50 Refractor /99")
+    gold = item(2, "2024 Topps Cardinals Masyn Winn RC #50 Gold Refractor /50")
+    other = item(3, "2024 Topps Cardinals Masyn Winn RC #51 Refractor /99")
     kept, funnel, _ = run([owned, gold, other], rows=rows)
     assert funnel["dropped"]["owned"] == 1
     assert {lk.item.item_id for lk in kept} == {gold.item_id, other.item_id}
@@ -111,8 +126,8 @@ def test_combo_cards_need_someone_on_the_roster():
 
 
 def test_roster_order_and_new_sellers():
-    first = item(1, "Jordan Walker Cardinals Topps RC #1")
-    later = item(2, "Nolan Arenado Cardinals Topps #2")
+    first = item(1, "Jordan Walker Cardinals Topps auto #1")
+    later = item(2, "Nolan Arenado Cardinals Topps auto #2")
     risky = item(3, "Jordan Walker Cardinals Topps auto /50", price=80.0, feedback=4)
     kept, _, _ = run([later, first, risky])
     pts = {lk.item.item_id: lk for lk in kept}
@@ -121,7 +136,7 @@ def test_roster_order_and_new_sellers():
 
 
 def test_sellers_with_several_cards_make_a_bundle():
-    cards = [item(n, f"Cardinals Topps Masyn Winn RC refractor #{n}", ship=4.0, seller="bulkshop")
+    cards = [item(n, f"Cardinals Topps Masyn Winn RC refractor /99 #{n}", ship=4.0, seller="bulkshop")
              for n in range(1, 5)]
     _, _, bundles = run(cards)
     assert bundles[0]["seller"] == "bulkshop" and bundles[0]["count"] == 4

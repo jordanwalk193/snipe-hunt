@@ -76,6 +76,20 @@ CARD_WORDS = {
 }
 
 
+# Words that only fit one sport's cards: positions, gear and product lines that
+# sport alone has. Titles of the NFL Cardinals rarely say "Arizona" or
+# "football", but they do say "QB", "helmet" or "Phoenix". Product lines that
+# exist for more than one sport (Prizm, Select, Immaculate, Donruss) aren't here.
+ONLY_IN = {
+    "football": ["qb", "wr", "rb", "helmet", "touchdown", "rookies & stars", "rookies and stars",
+                 "xr", "obsidian", "phoenix", "spectra", "playbook", "plates & patches",
+                 "gridiron", "score-a-treat", "super bowl", "pro bowl", "draft picks football"],
+    "basketball": ["hoops", "nba hoops", "court kings", "dunk", "g league", "g-league"],
+    "hockey": ["young guns", "o-pee-chee", "opc", "goalie", "stanley cup"],
+    "baseball": ["mlb", "bowman", "1st bowman", "pitcher", "world series", "heritage high number"],
+}
+
+
 def league_of(sport: str) -> str | None:
     return next((key for key, (s, _) in LEAGUES.items() if s == sport), None)
 
@@ -95,4 +109,7 @@ def same_nickname_elsewhere(sport: str, nickname: str) -> list[str]:
 
 
 def other_sport_words(sport: str) -> list[str]:
-    return [w for s, words in SPORT_WORDS.items() if s != sport for w in words]
+    """Every word that says a title is from another sport."""
+    return [w for s, words in SPORT_WORDS.items() if s != sport for w in words] + [
+        w for s, words in ONLY_IN.items() if s != sport for w in words
+        if w not in CARD_WORDS.get(sport, []) and w not in ONLY_IN.get(sport, [])]

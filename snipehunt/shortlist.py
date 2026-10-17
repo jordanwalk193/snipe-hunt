@@ -27,6 +27,7 @@ CANDIDATES_SHOWN = 15
 SLEEPER_HOURS = 6         # an auction ending this soon with SLEEPER_BIDS or fewer bids
 SLEEPER_BIDS = 1
 BUNDLE_MIN = 3            # one seller with this many worth-a-look cards is a bundle
+BUNDLE_FROM = 150         # bundles are built from the best-ranked this many, not the whole list
 SELLER_TRUST_OVER = 30.0  # the same line score.apply_caps draws
 # Lots, team sets and other things that aren't one card. Packed product and
 # breaks are never cards; lots are, but their value is anyone's guess.
@@ -78,7 +79,7 @@ def look(item: Listing, cfg: dict, sold: dict, moves: dict, want: list[set[str]]
         out.add(2.5, "misspelled title")
     title_words = set(re.findall(r"[a-z0-9]+", item.title.lower()))
     if any(len(w & title_words) >= max(2, round(0.75 * len(w))) for w in want):
-        out.add(4.0, "want list")
+        out.add(3.0, "want list")
     # What makes a card worth chasing at all.
     run = rarity.print_run(item.title)
     if run is not None and run <= cfg["team_max_run"]:
@@ -97,7 +98,9 @@ def look(item: Listing, cfg: dict, sold: dict, moves: dict, want: list[set[str]]
         out.add(max(1.0, 2.5 - 0.5 * place), item.player)
     # Doubts, and the frugal tilt: cheap copies of good cards first.
     if item.match == "unclear":
-        out.add(-1.0, "unclear match")
+        # A roster player with no team word is usually right; a bare nickname with no
+        # card word is usually another sport's team.
+        out.add(-0.5 if item.via == "roster" else -2.5, "unclear match")
     total = sales.delivered(item.price, item.shipping)
     if (item.seller_feedback_score is not None and total > SELLER_TRUST_OVER
             and item.seller_feedback_score < cfg["min_seller_feedback"]):
@@ -107,8 +110,23 @@ def look(item: Listing, cfg: dict, sold: dict, moves: dict, want: list[set[str]]
     return out
 
 
+# Reasons that add points but don't earn a look on their own: a plain rookie card
+# or a plain card of a roster player at the going rate isn't a steal.
+WEAK = ("unclear", "new seller", "cheap", "rookie", "gem mint", "combo")
+
+
+def _strong(lk: Look) -> bool:
+    """Enough to look at even under the price floor: a cheap copy of a good card is
+    exactly what a frugal collection is built from."""
+    run = rarity.print_run(lk.item.title)
+    return (lk.under_pct is not None or "want list" in lk.reasons or "auto" in lk.reasons
+            or "patch" in lk.reasons or (run is not None and run <= 25)
+            or any(r.startswith("price cut") for r in lk.reasons))
+
+
 def _reason_to_look(lk: Look) -> bool:
-    return any(not r.startswith(("unclear", "new seller", "cheap")) for r in lk.reasons)
+    roster = lk.item.player or ""
+    return any(not r.startswith(WEAK) and r != roster for r in lk.reasons)
 
 
 def want_words() -> list[set[str]]:
@@ -167,14 +185,13 @@ def build(con, listings: list[Listing], moves: list[dict], rows: list[dict] | No
         if not _reason_to_look(lk):
             dropped["plain"] += 1
             continue
-        if (not item.is_auction and total < cfg["team_min_price"]
-                and lk.under_pct is None and "want list" not in lk.reasons):
+        if not item.is_auction and total < cfg["team_min_price"] and not _strong(lk):
             dropped["too_cheap"] += 1
             continue
         kept.append(lk)
     kept.sort(key=lambda lk: (-lk.points, sales.delivered(lk.item.price, lk.item.shipping)))
     funnel = {"found": len(listings), "dropped": dropped, "worth_a_look": len(kept)}
-    return kept, funnel, bundles(kept)
+    return kept, funnel, bundles(kept[:BUNDLE_FROM])
 
 
 def bundles(kept: list[Look]) -> list[dict]:

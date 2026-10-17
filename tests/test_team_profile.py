@@ -87,3 +87,16 @@ def test_player_profiles_answer_the_new_questions():
     assert p.match("2023 Topps Chrome Jordan Walker RC #209 Cardinals") == (
         "yes", "player", "Jordan Walker")
     assert p.match("Larry Walker Cardinals 2005 Topps")[0] == "no"
+
+
+@pytest.mark.parametrize("title", [
+    "2023 Panini Phoenix Michael Wilson RC Auto Patch Cardinals",
+    "Cardinals QB rookie auto Prizm",
+    "2023 Panini Obsidian Cardinals helmet",
+])
+def test_football_only_words_rule_out_the_nfl_cardinals(team, title):
+    assert team.classify(title) == "no"
+
+
+def test_baseball_panini_cards_still_count(team):
+    assert team.classify("2022 Panini Immaculate Juan Yepez Patch Auto Cardinals") != "no"
