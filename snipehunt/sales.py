@@ -22,7 +22,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from . import config, db, profile, settings
+from . import config, db, profile, settings, usage
 from .hidden import CODE, YEAR
 from .ebay_search import EbayClient, Listing, _money
 
@@ -135,9 +135,11 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
     rows = _due(con, now)
     if not rows:
         return 0
-    client = client or EbayClient()
+    client = client or EbayClient(con)
     added = 0
     for row in rows:
+        if not usage.ebay_allowed("item", con):
+            break   # the day's eBay calls are spent; the rest wait for tomorrow
         try:
             raw = client.item(row["item_id"])
         except Exception as exc:   # leave it for the next run
@@ -245,7 +247,7 @@ def relevant(con, items: list[Listing]) -> list[dict]:
     back with "hint" set so the prompt marks it as a different card.
     """
     sales = [dict(r) for r in con.execute(
-        "SELECT item_id, title, price, shipping, bids, sold_at, kind FROM sales "
+        "SELECT item_id, title, price, shipping, bids, sold_at, kind, source FROM sales "
         "ORDER BY sold_at DESC")]
     if not sales:
         return []
@@ -259,7 +261,7 @@ def relevant(con, items: list[Listing]) -> list[dict]:
         mine = words(item.title)
         if not mine:
             continue
-        grade, auto, run = traits(item.title)
+        grade, auto, run = item_traits(item)
         same, hints = [], []
         for sale in sales:
             if sale["item_id"] == item.item_id or not sale["words"]:
@@ -336,6 +338,8 @@ def lines(sales: list[dict]) -> str:
         bids = f", {bid_count(s['bids'])}" if s["bids"] else ""
         if s.get("kind") == "bin":   # a fixed price, paid as listed
             bids = ", BIN"
+        if s.get("source") in SOURCE_LABEL:   # not one the bot looked up itself
+            bids += f", {SOURCE_LABEL[s['source']]}"
         out.append(f"{day:%Y-%m-%d} | ${s['price']:.2f} {ship}{bids} | {s['title']}"
                    + (HINT if s.get("hint") else ""))
     return "\n".join(out)
@@ -361,7 +365,7 @@ def with_calls(con, since: float = 0) -> list[dict]:
     out = []
     for row in con.execute(
             "SELECT s.item_id, s.title, s.price, s.shipping, s.bids, s.sold_at, s.image, "
-            "s.kind, p.data "
+            "s.kind, s.source, p.data "
             "FROM sales s LEFT JOIN picks p USING (item_id) WHERE s.sold_at>=? "
             "ORDER BY s.sold_at DESC", (since,)):
         row = dict(row)
@@ -477,6 +481,25 @@ AUTO = re.compile(r"\b(auto|autos|autograph|autographed|signed|rpa)\b", re.I)
 RUN = re.compile(r"/\s?(\d{1,4})\b")
 
 
+def item_traits(item: Listing) -> tuple:
+    """A listing's traits: the title's, with what its item specifics add.
+
+    A print run or autograph only the specifics mention is still part of the card
+    (that is how a mislabeled listing gets the right comps), and the fake-autograph
+    check overrules a title's "auto"."""
+    grade, auto, run = traits(item.title)
+    specifics = getattr(item, "aspects", None) or {}
+    if specifics:
+        from . import aspects   # it reads the database; only listings read in full need it
+        names = aspects.names()
+        if run is None:
+            found = re.search(r"(\d{1,4})\s*$", specifics.get(names["print_run"], "").strip())
+            run = found.group(1) if found and found.group(1) != "0" else None
+        if not auto and specifics.get(names["autographed"], "").strip().lower() == "yes":
+            auto = True
+    return grade, auto and "fake_auto" not in getattr(item, "flags", ()), run
+
+
 def traits(title: str) -> tuple:
     """What changes a card's price without changing many words: grade, autograph, print run."""
     grade = GRADE.search(title)
@@ -587,6 +610,86 @@ def last_sold(rows: list[dict], title: str, item_id: str = "") -> dict | None:
     return {"total": same[0]["total"], "price": same[0]["price"], "n": len(same),
             "estimated": same[0]["estimated"],
             "at": datetime.fromtimestamp(same[0]["sold_at"], config.TZ).date().isoformat()}
+
+
+FRESH_DAYS = 180   # comps older than this count for less (score.thin_comps)
+SOURCE_LABEL = {"gixen": "your Gixen win", "won": "your win", "manual": "entered by hand"}
+
+
+def ledger_comps(con, item: Listing, now: float | None = None) -> list[dict]:
+    """Recorded sales of exactly this card, newest first.
+
+    Exactly: the same card number and year where the titles have them, the
+    same set and parallel words (min_overlap), the same print run, autograph
+    and grade, and raw against raw, graded against graded (eBay's condition
+    says which when the title doesn't)."""
+    mine = words(item.title)
+    if not mine:
+        return []
+    want = item_traits(item)
+    graded = getattr(item, "graded", None)
+    min_overlap = settings.load(con)["min_overlap"]
+    out = []
+    for r in con.execute("SELECT item_id, title, price, shipping, sold_at, kind, source "
+                         "FROM sales ORDER BY sold_at DESC"):
+        sale = dict(r)
+        if sale["item_id"] == item.item_id:
+            continue
+        sale["words"] = words(sale["title"])
+        if not sale["words"] or traits(sale["title"]) != want:
+            continue
+        sale_graded = traits(sale["title"])[0] is not None
+        if graded is not None and want[0] is None and sale_graded != graded:
+            continue   # the title names no grade, but eBay says graded (or raw)
+        if _closeness(item.title, mine, sale, min_overlap) is None:
+            continue
+        sale["total"] = delivered(sale["price"], sale["shipping"])
+        out.append(sale)
+    return out
+
+
+def from_mail(con) -> int:
+    """Your own wins from email (eBay "You won", Gixen end notices) as sales.
+
+    One per item number; a price the bot already looked up on eBay is kept."""
+    added = 0
+    for r in con.execute("SELECT data FROM mail_events WHERE type='won'"):
+        ev = json.loads(r["data"])
+        item_id, price = str(ev.get("item_id") or ""), ev.get("price")
+        if not item_id.isdigit() or price is None:
+            continue
+        try:
+            when = datetime.fromisoformat(str(ev.get("date"))).replace(
+                hour=12, tzinfo=config.TZ).timestamp()
+            price = float(price)
+            shipping = float(ev["shipping"]) if ev.get("shipping") is not None else None
+        except (TypeError, ValueError):
+            continue
+        cur = con.execute(
+            "INSERT OR IGNORE INTO sales (item_id, title, price, shipping, bids, sold_at, image,"
+            " kind, source) VALUES (?,?,?,?,NULL,?,NULL,'auction',?)",
+            (item_id, str(ev.get("title") or "")[:200], price, shipping, int(when),
+             "gixen" if ev.get("source") == "gixen" else "won"))
+        added += cur.rowcount
+    con.commit()
+    return added
+
+
+def add_manual(con, item_id: str, price: float, shipping: float | None, title: str,
+               now: float | None = None) -> None:
+    """A sold price you saw yourself, kept like any other (and replacing it)."""
+    if not str(item_id).isdigit():
+        raise ValueError("the item number is digits only")
+    if price <= 0 or (shipping is not None and shipping < 0):
+        raise ValueError("price must be over 0 and shipping 0 or more")
+    title = " ".join(str(title).split())[:200]
+    if not title:
+        raise ValueError("give the card's title, so it can be matched to listings")
+    con.execute("INSERT OR REPLACE INTO sales (item_id, title, price, shipping, bids, sold_at,"
+                " image, kind, source) VALUES (?,?,?,?,NULL,?,NULL,'auction','manual')",
+                (str(item_id), title, round(price, 2),
+                 None if shipping is None else round(shipping, 2), int(now or time.time())))
+    con.commit()
 
 
 def search(con, query: str, limit: int = 25) -> list[dict]:

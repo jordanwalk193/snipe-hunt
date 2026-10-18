@@ -234,7 +234,7 @@ def build(now: datetime | None = None) -> dict:
     for c in cards:
         years[c["n"][:4]] = years.get(c["n"][:4], 0) + 1
     unpaid = [c for c in cards if c["s"] in ("Won", "Awaiting payment")]
-    cfg = {**settings.DEFAULTS, "monthly_budget": 150.0, "sellers": SELLERS[:2]}
+    cfg = {**settings.defaults(), "monthly_budget": 150.0, "sellers": SELLERS[:2]}
     spend = spending.summary(
         [{"price_paid": c["p"], "order_date": c["d"], "auto": "Y" if "A" in c["f"] else "",
           "serial": "/99" if "N" in c["f"] else "", "rc": "Y" if "R" in c["f"] else ""}

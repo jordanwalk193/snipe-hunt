@@ -11,21 +11,18 @@ Read-only, like every other search.
 """
 from __future__ import annotations
 
-import re
 import sys
 import time
 from collections import Counter
 
-from . import ebay_search, profile
+from . import ebay_search, known_cards, profile, usage
 from .ebay_search import ALL_FORMATS, EbayClient, Listing
+from .known_cards import CODE, YEAR   # one definition of a card number, shared
 
 PER_RUN = 6        # eBay calls per hourly run; the card numbers take turns
 MIN_SEEN = 3       # a card number has to turn up this often to be trusted
 MAX_CODES = 24
 LOOK_BACK_DAYS = 120
-# BD-57, BCP-146, CDA-JW, 88US-49: letters, a dash, then the number or initials.
-CODE = re.compile(r"(?<![A-Z0-9-])([A-Z0-9]{1,5}-[A-Z0-9]{1,5})(?![A-Z0-9-])")
-YEAR = re.compile(r"\b(19[5-9]\d|20[0-4]\d)\b")
 
 
 def card_numbers(con, now: float | None = None) -> list[tuple[str, str]]:
@@ -46,7 +43,12 @@ def card_numbers(con, now: float | None = None) -> list[tuple[str, str]]:
             # a real card number has a digit, or ends in the player's initials (CDA-JW)
             if any(ch.isdigit() for ch in code) or code.split("-")[1].startswith(initials):
                 counts[(year.group(1), code)] += 1
-    return [pair for pair, n in counts.most_common(MAX_CODES) if n >= MIN_SEEN]
+    learned = [pair for pair, n in counts.most_common(MAX_CODES) if n >= MIN_SEEN]
+    # and the numbers known_cards.toml pins to one year, which need no learning
+    table = known_cards.load(with_inventory=False)
+    filed = [(str(cards[0].year), cards[0].number.upper())
+             for cards in table.by_number.values() if len({c.year for c in cards}) == 1]
+    return list(dict.fromkeys(learned + filed))[:MAX_CODES]
 
 
 def search(con, known: set[str], client: EbayClient | None = None,
@@ -60,8 +62,12 @@ def search(con, known: set[str], client: EbayClient | None = None,
     turn = int(now // 3600)
     mine = [pairs[(turn * PER_RUN + n) % len(pairs)] for n in range(min(PER_RUN, len(pairs)))]
     client = client or EbayClient()
+    client.lane = "hidden"
     found: dict[str, Listing] = {}
     for year, code in dict.fromkeys(mine):
+        if not usage.ebay_allowed("hidden"):
+            print("hidden: daily eBay call budget reached, skipped", file=sys.stderr)
+            break
         try:
             raw_items = client.search(f"{year} {code}", ALL_FORMATS, "newlyListed", limit=50)
         except Exception as exc:   # one bad search shouldn't stop the hunt

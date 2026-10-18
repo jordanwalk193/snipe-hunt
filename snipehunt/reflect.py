@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from . import config, db, gitsync, notify, profile, rarity, sales, score, tune
+from . import config, db, gitsync, notify, profile, rarity, sales, score, tune, usage
 
 WEEK = 7 * 86400
 LOOK_BACK = 4            # earlier reviews whose proposals are followed up
@@ -182,6 +182,9 @@ def window(con, start: float, end: float) -> dict:
             "usd_per_pick": round(sum(cost.values()) / len(picks), 3) if picks else None},
         "ebay_calls_per_run": {job: round(calls[job] / runs[job], 1)
                                for job in calls if runs.get(job)},
+        # every eBay call by lane (usage.lane_of), so a lane that costs more than it finds shows
+        "ebay_calls_by_lane": {key.split(":", 1)[1]: int(n) for key, n in sorted(stats.items())
+                               if key.startswith(usage.LANE_KEY + ":")},
         "reliability": {
             "runs": {job: int(n) for job, n in runs.items()},
             "failures": {job: int(n) for job, n in per_job("failures").items()},

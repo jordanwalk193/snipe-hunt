@@ -5,3 +5,7 @@ __pycache__/
 .venv/
 /home/
 *.db
+# local state the bot keeps beside data/ (eBay token, item cache); never committed
+/state/
+*.db-journal
+*.db-wal

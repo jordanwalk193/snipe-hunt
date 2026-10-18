@@ -8,7 +8,7 @@ from typing import Callable
 
 import requests
 
-from . import config, db, ebay_search, notify, profile
+from . import config, db, ebay_search, notify, profile, usage
 
 
 def heartbeat(job: str, ok: bool = True, msg: str = "") -> None:
@@ -64,6 +64,7 @@ def _count(con, job: str, error: str | None = None) -> None:
     """Note one run for the weekly self-review: that it ran, what it cost eBay, how it failed."""
     db.bump(con, f"runs:{job}")
     db.bump(con, f"ebay_calls:{job}", ebay_search.API_CALLS)
+    usage.save_lanes(con, ebay_search.LANE_CALLS)
     if error:
         db.bump(con, f"failures:{job}")
         db.bump(con, f"error:{job}:{error[:40]}")

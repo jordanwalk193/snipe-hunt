@@ -8,6 +8,10 @@
   python -m snipehunt sold gold refractor /50
                                price check: what cards with those words in the
                                title sold for, from the bot's own record
+  python -m snipehunt sale add <item_id> <price> <ship> "<title>"
+                               add a sold price you saw yourself (ship may be "?")
+  python -m snipehunt inventory check
+                               list problems in inventory.csv; changes nothing
 
 Set SNIPEHUNT_DEMO=1 to serve made-up data instead: a way to see the dashboard
 before you have eBay or Claude keys.
@@ -20,10 +24,11 @@ import shutil
 import sys
 import threading
 
-from . import api, config, db, profile, sales, scheduler
+from . import api, config, db, inventory, known_cards, profile, sales, scheduler
 
 STARTERS = {"profile.example.toml": config.PROFILE, "inventory.example.csv": config.INVENTORY,
-            "wantlist.example.md": config.WANTLIST, "preferences.example.md": config.PREFERENCES}
+            "wantlist.example.md": config.WANTLIST, "preferences.example.md": config.PREFERENCES,
+            "known_cards.example.toml": config.DATA_DIR / known_cards.FILE}
 
 
 def init(team: bool = False) -> None:
@@ -70,9 +75,33 @@ def sold(words: list[str]) -> None:
               "records one each time an auction it has seen closes with bids.")
 
 
+def sale_add(args: list[str]) -> None:
+    """sale add <item_id> <price> <ship> "<title>": a sold price entered by hand."""
+    if len(args) < 5 or args[0] != "add":
+        sys.exit('usage: python -m snipehunt sale add <item_id> <price> <ship> "<title>"')
+    item_id, price, ship, title = args[1], args[2], args[3], " ".join(args[4:])
+    try:
+        sales.add_manual(db.connect(), item_id, float(price.lstrip("$")),
+                         None if ship in ("?", "") else float(ship.lstrip("$")), title)
+    except ValueError as exc:
+        sys.exit(f"error: {exc}")
+    print(f"added: {item_id} ${float(price.lstrip('$')):.2f} (manual) {title}")
+
+
+def inventory_check() -> None:
+    _, rows = inventory.read()
+    found = inventory.check(rows, known_cards.load(with_inventory=False))
+    print(inventory.check_summary(found))
+    print("\n".join(inventory.check_lines(found, limit=50)))
+
+
 def main() -> None:
     commands = {"init": init, "check": check, "serve": serve}
     name, rest = (sys.argv[1:2] or [""])[0], sys.argv[2:]
+    if name == "sale":
+        return sale_add(rest)
+    if name == "inventory" and rest == ["check"]:
+        return inventory_check()
     if name == "init" and rest == ["--team"]:
         rest, commands["init"] = [], lambda: init(team=True)
     if name not in (*commands, "sold") or (rest and name != "sold"):

@@ -11,25 +11,44 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 import requests
 
-from . import config, profile, settings
+from . import config, profile, settings, usage
 
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 ITEM_URL = "https://api.ebay.com/buy/browse/v1/item/get_item_by_legacy_id"
 SCOPE = "https://api.ebay.com/oauth/api_scope"
 ALL_FORMATS = "buyingOptions:{AUCTION|FIXED_PRICE|BEST_OFFER}"
+# Short descriptions carry condition and item-specifics text for free, so every
+# search asks for them; it is still one call.
+FIELDGROUPS = "EXTENDED"
+RATE_RETRIES = 2   # a rate-limited call is tried this many more times, then its lane waits
 
 API_CALLS = 0   # eBay calls this process has made, for the weekly self-review
+LANE_CALLS: Counter = Counter()   # the same calls by lane (usage.lane_of), saved by ops.py
 
 
-def _count_call() -> None:
+class RateLimited(RuntimeError):
+    """eBay said too many calls: skip this lane for the rest of the run."""
+
+
+def _count_call(lane: str = "other") -> None:
     global API_CALLS
     API_CALLS += 1
+    LANE_CALLS[lane] += 1
+
+
+def price_filter(low: float | None = None, high: float | None = None) -> str:
+    """eBay's price filter, always with its currency: without priceCurrency eBay
+    answers error 12012. The only place a price filter is written."""
+    lo = "" if low is None else f"{low:g}"
+    hi = "" if high is None else f"{high:g}"
+    return f"price:[{lo}..{hi}],priceCurrency:USD"
 
 
 def queries() -> list[tuple[str, str, str, str | None]]:
@@ -69,7 +88,7 @@ def team_queries(who, slug) -> list[tuple[str, str, str, str | None]]:
     which is most of them; auctions don't, since a $1 auction can still be a steal."""
     name = who.search_name
     cfg = settings.load()
-    floor = f",price:[{cfg['team_min_price']:g}..],priceCurrency:USD"
+    floor = "," + price_filter(cfg["team_min_price"])
     out = [("auctions-ending", name, "buyingOptions:{AUCTION}", "endingSoonest"),
            ("newly-listed", name, ALL_FORMATS + floor, "newlyListed")]
     for k in who.keyword_searches:
@@ -107,6 +126,19 @@ class Listing:
     seller_feedback_pct: float | None = None    # percent positive, e.g. 99.6
     via: str | None = None      # team mode: how it matched (team, nickname, typo, roster)
     player: str | None = None   # team mode: the roster player named in the title
+    category_id: str | None = None   # eBay's leaf category; 261328 is sports card singles
+    condition_id: str | None = None  # 2750 graded, 4000 ungraded
+    image_count: int | None = None   # the main photo plus additionalImages
+    short_description: str = ""      # condition / item-specifics text from the search
+    aspects: dict = field(default_factory=dict)   # item specifics, once read with item()
+    lane: str = ""                   # "midtier" for the mid-tier lane's listings
+    flags: list[str] = field(default_factory=list)    # filters.py warnings (fake_auto, …)
+    signals: list[dict] = field(default_factory=list)  # mislabel.py signals that fired
+
+    @property
+    def graded(self) -> bool | None:
+        """True for a graded card, False for raw, None when eBay didn't say."""
+        return {"2750": True, "4000": False}.get(self.condition_id or "")
 
     @property
     def total(self) -> float:
@@ -134,15 +166,20 @@ def classify(title: str) -> str:
 
 
 class EbayClient:
-    def __init__(self) -> None:
+    def __init__(self, con=None) -> None:
         self.client_id, self.client_secret = config.require(
             "EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET")
         self.marketplace = config.get("EBAY_MARKETPLACE")
         # A profile may name its own category: Pokémon cards aren't sports cards.
-        self.category = profile.get().category or config.get("EBAY_CATEGORY")
+        # "" means no category at all (lots are listed outside the singles category).
+        chosen = profile.get().category
+        self.category = config.get("EBAY_CATEGORY") if chosen is None else chosen
         self.token_file = config.ensure_state_dir() / "ebay_token.json"
         self.session = requests.Session()
         self.calls = 0
+        self.lane = "other"   # what the next call is for; search_all sets it per query
+        self.con = con        # for the item cache; None opens its own connection
+        self.attempts = 5     # tries per call on a network error or 5xx; a low lane uses 1
 
     def _token(self) -> str:
         if self.token_file.exists():
@@ -168,25 +205,34 @@ class EbayClient:
         return body["access_token"]
 
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
-        """One HTTP call, retried with backoff on rate limits and 5xx."""
+        """One HTTP call, retried with backoff on 5xx. A rate limit (429, or eBay's
+        "call limit" error) gets RATE_RETRIES more tries, then raises RateLimited."""
         missing_ok = kwargs.pop("missing_ok", False)
         delay = 2.0
+        limited = 0
+        last = self.attempts - 1
         for attempt in range(5):
             try:
                 resp = self.session.request(method, url, timeout=30, **kwargs)
             except requests.RequestException as exc:
-                if attempt == 4:
+                if attempt >= last:
                     raise
                 print(f"ebay: {type(exc).__name__}, retry in {delay:.0f}s", file=sys.stderr)
             else:
-                if resp.status_code not in (429, 500, 502, 503, 504):
+                is_limit = resp.status_code == 429 or (
+                    resp.status_code >= 400 and "call limit" in resp.text[:500].lower())
+                if is_limit:
+                    limited += 1
+                    if limited > RATE_RETRIES:
+                        raise RateLimited(f"eBay rate limit after {RATE_RETRIES} retries: {url}")
+                elif resp.status_code not in (500, 502, 503, 504):
                     if missing_ok and resp.status_code in (400, 404):
                         return resp
                     if resp.status_code >= 400:
                         raise RuntimeError(
                             f"eBay {resp.status_code} for {url}: {resp.text[:300]}")
                     return resp
-                if attempt == 4:
+                if attempt >= last and not is_limit:
                     raise RuntimeError(f"eBay {resp.status_code} after retries: {url}")
                 retry_after = resp.headers.get("Retry-After", "")
                 if retry_after.isdigit():
@@ -204,25 +250,48 @@ class EbayClient:
             + (f"%2Czip%3D{config.get('EBAY_ZIP')}" if config.get("EBAY_ZIP") else ""),
         }
 
+    def _search_json(self, params: dict, lane: str, category: str | None = None) -> dict:
+        """The one search call; search() and refinements() both come through here."""
+        category = self.category if category is None else category
+        if category:
+            params["category_ids"] = category
+        self.calls += 1
+        _count_call(lane)
+        return self._request("GET", SEARCH_URL, params=params, headers=self._headers()).json()
+
     def search(self, q: str, flt: str, sort: str | None, limit: int = 100,
-               offset: int = 0) -> list[dict]:
-        params = {"q": q, "category_ids": self.category, "filter": flt, "limit": limit}
+               offset: int = 0, category: str | None = None) -> list[dict]:
+        params = {"q": q, "filter": flt, "limit": limit, "fieldgroups": FIELDGROUPS}
         if offset:
             params["offset"] = offset
         if sort:
             params["sort"] = sort
-        self.calls += 1
-        _count_call()
-        resp = self._request("GET", SEARCH_URL, params=params, headers=self._headers())
-        return resp.json().get("itemSummaries", []) or []
+        found = self._search_json(params, usage.lane_of(self.lane), category)
+        return found.get("itemSummaries", []) or []
 
-    def item(self, item_id: str) -> dict | None:
-        """One listing by its item number, ended or not. None once eBay has dropped it."""
+    def refinements(self, q: str) -> list[dict]:
+        """eBay's own item-specifics names and values for a search (aspects.py)."""
+        body = self._search_json({"q": q, "limit": 1, "fieldgroups": "ASPECT_REFINEMENTS"},
+                                 "aspects")
+        return (body.get("refinement") or {}).get("aspectDistributions", []) or []
+
+    def item(self, item_id: str, lane: str = "item") -> dict | None:
+        """One listing by its item number, ended or not. None once eBay has dropped it.
+
+        A live listing read today is answered from the cache (item_cache.py) instead."""
+        from . import item_cache   # it opens the database; kept local
+        cached = item_cache.get(self.con, item_id)
+        if cached is not None:
+            return cached
         self.calls += 1
-        _count_call()
+        _count_call(lane)
         resp = self._request("GET", ITEM_URL, params={"legacy_item_id": item_id},
                              headers=self._headers(), missing_ok=True)
-        return resp.json() if resp.status_code == 200 else None
+        if resp.status_code != 200:
+            return None
+        body = resp.json()
+        item_cache.put(self.con, item_id, body)
+        return body
 
 
 def _money(node: dict | None) -> tuple[float | None, str]:
@@ -258,6 +327,8 @@ def parse_item(raw: dict) -> Listing | None:
                .astimezone(config.TZ).isoformat(timespec="minutes"))
     item_id = raw.get("legacyItemId") or raw.get("itemId", "").split("|")[1:2][0]
     seller = raw.get("seller") or {}
+    category = raw.get("categoryId") or next(
+        (c.get("categoryId") for c in raw.get("categories") or [] if c.get("categoryId")), None)
     return Listing(
         item_id=str(item_id),
         title=raw.get("title", "").strip(),
@@ -272,7 +343,35 @@ def parse_item(raw: dict) -> Listing | None:
         image=(raw.get("image") or {}).get("imageUrl"),
         seller_feedback_score=_number(seller.get("feedbackScore"), int),
         seller_feedback_pct=_number(seller.get("feedbackPercentage"), float),
+        category_id=str(category) if category else None,
+        condition_id=str(raw["conditionId"]) if raw.get("conditionId") else None,
+        image_count=image_count(raw),
+        short_description=str(raw.get("shortDescription") or "")[:600],
+        aspects=aspects_of(raw),
     )
+
+
+def image_count(raw: dict) -> int | None:
+    """The main photo plus the extra ones; None when eBay sent no photo fields at all."""
+    if "image" not in raw and "additionalImages" not in raw:
+        return None
+    return (1 if raw.get("image") else 0) + len(raw.get("additionalImages") or [])
+
+
+def aspects_of(raw: dict) -> dict:
+    """Item specifics (name -> value) from a single-listing read; empty for search results."""
+    return {str(a["name"]): str(a.get("value", ""))
+            for a in raw.get("localizedAspects") or [] if a.get("name")}
+
+
+def enrich(item: Listing, raw: dict) -> Listing:
+    """Fill a search result in from its single-listing read: item specifics, photos."""
+    item.aspects = aspects_of(raw) or item.aspects
+    item.image_count = image_count(raw) if image_count(raw) is not None else item.image_count
+    item.category_id = str(raw.get("categoryId") or item.category_id or "") or None
+    item.condition_id = str(raw.get("conditionId") or item.condition_id or "") or None
+    item.short_description = item.short_description or str(raw.get("shortDescription") or "")[:600]
+    return item
 
 
 def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[Listing]:
@@ -287,10 +386,19 @@ def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[
     if team:   # players already found on another team's cards are ruled out for free
         from . import db, score   # both import this module; kept local
         who.learn(json.loads(db.kv_get(db.connect(), score.NOT_TEAM_KEY, "[]")))
+    skipped = []
     for label, q, flt, sort in todo:
+        if not usage.ebay_allowed(usage.lane_of(label)):
+            skipped.append(label)   # over the day's share of eBay calls: the least useful wait
+            continue
+        client.lane = label
         try:
             raw_items = (_pages(client, label, q, flt, sort) if team
                          else client.search(q, flt, sort))
+        except RateLimited as exc:   # this lane waits for the next run
+            errors.append(f"{label}: {exc}")
+            print(f"ebay: {label} skipped this run: {exc}", file=sys.stderr)
+            continue
         except Exception as exc:  # one bad query shouldn't sink the whole run
             errors.append(f"{label}: {exc}")
             print(f"ebay: query {label} failed: {exc}", file=sys.stderr)
@@ -314,7 +422,9 @@ def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[
             kept += 1
         if verbose:
             print(f"  {label:16} {len(raw_items):3} results, {kept:3} kept", file=sys.stderr)
-    if errors and len(errors) == len(todo):
+    if skipped:
+        print(f"ebay: daily call budget: skipped {', '.join(skipped)}", file=sys.stderr)
+    if errors and len(errors) == len(todo) - len(skipped):
         raise RuntimeError("every eBay query failed: " + errors[0])
     if verbose:
         print(f"  {client.calls} API calls, {len(found)} unique listings, "

@@ -240,8 +240,10 @@ def test_the_same_card_from_several_sellers_is_one_entry_with_a_line_each(monkey
     assert [len(notify.members(e)) for e in entries] == [1, 2]       # the graded copy stands alone
     lines = notify.format_pick(entries[1]).split("\n")
     assert lines[0] == "🟢 2023 Topps Chrome Blue Refractor /150 (2 listings)"   # ends first, so leads
-    assert lines[1] == "$9.00 + free ship · ends Mon 7:00 PM EDT · max 22.22 · 222222222222"
-    assert lines[2] == "$12.50 + $1.25 ship · ends Mon 9:14 PM EDT · max 25.25 · 111111111111"
+    assert lines[1] == ("$9.00 + free ship · ends Mon 7:00 PM EDT / 4:00 PM PDT · max 22.22 · "
+                        "222222222222")
+    assert lines[2] == ("$12.50 + $1.25 ship · ends Mon 9:14 PM EDT / 6:14 PM PDT · max 25.25 · "
+                        "111111111111")
     assert lines[-1] == "Tip: use a Gixen group bid."
     # a group is one pick toward a message, and every listing in it is marked alerted
     extra = [pick(item_id=str(n), title=f"2023 Topps Jordan Walker insert {n}", tier="yellow",

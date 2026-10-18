@@ -61,7 +61,8 @@ def test_an_auction_max_is_held_under_the_ceiling():
 def test_a_ceiling_claude_made_up_is_ignored():
     want_ceiling("$12")
     raw = {"tier": "fire", "max": 20.0, "value": 30, "want": True, "want_ceiling": 99}
-    assert score._pick_dict(listing(price=3.0, auction=True), raw)["max"] == 20.0
+    # Claude's 20.00, as the odd-cent cheapskate max every auction pick gets
+    assert score._pick_dict(listing(price=3.0, auction=True), raw)["max"] == 19.19
 
 
 def test_only_inventory_rows_that_could_match_are_sent(monkeypatch):

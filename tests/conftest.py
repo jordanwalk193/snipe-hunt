@@ -22,3 +22,32 @@ def isolated_home(tmp_path, monkeypatch):
         (config.EXAMPLES / "preferences.example.md").read_text())
     monkeypatch.setattr(config, "_cache", dict(config.DEFAULTS))
     monkeypatch.setattr(profile, "_cache", profile.parse(EXAMPLE.read_text()))
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """No test may reach the network, even with made-up keys set."""
+    import requests
+
+    def blocked(self, method, url, *args, **kwargs):
+        raise requests.ConnectionError(f"network is off in tests: {method} {url}")
+    monkeypatch.setattr(requests.Session, "request", blocked)
+
+
+@pytest.fixture(autouse=True)
+def no_retry_waits(monkeypatch):
+    """eBay retries back off with sleeps; with the network off they would only slow tests."""
+    from snipehunt import ebay_search
+    monkeypatch.setattr(ebay_search.time, "sleep", lambda seconds: None)
+
+
+@pytest.fixture(autouse=True)
+def fresh_call_counts(monkeypatch):
+    """eBay call counts live in the process (ebay_search, usage); each test starts at zero."""
+    from collections import Counter
+
+    from snipehunt import ebay_search, usage
+    monkeypatch.setattr(ebay_search, "API_CALLS", 0)
+    monkeypatch.setattr(ebay_search, "LANE_CALLS", Counter())
+    monkeypatch.setattr(usage, "_today", {})
+    monkeypatch.setattr(usage, "_warned", [])

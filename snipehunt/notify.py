@@ -5,10 +5,11 @@ import argparse
 import json
 import sys
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 
-from . import config, db, profile, sales, score, settings
+from . import config, db, filters, pricing, profile, sales, score, settings
 
 TIER_ICON = {"fire": "🔥", "green": "🟢", "yellow": "🟡", "drop": "⏰"}
 TIER_ORDER = {"drop": 0, "fire": 1, "green": 2, "yellow": 3}
@@ -20,6 +21,8 @@ PENDING_KEY = "pending_picks"
 BEDTIME_KEY = "bedtime_bundle_night"
 BEDTIME_AFTER = 2                # hours past the end of quiet hours the bedtime bundle covers
 BIN_GONE = 2 * 3600              # a Buy It Now out of the results this long has likely sold
+# eBay shows many buyers Pacific time, so every end time is given in both.
+ET, PT = ZoneInfo("America/New_York"), ZoneInfo("America/Los_Angeles")
 
 
 def configured() -> bool:
@@ -148,6 +151,8 @@ def worth_alerting(pick: dict) -> bool:
         return True
     if pick.get("unverified"):
         return False   # a dear Buy It Now priced from a guess: the dashboard shows it
+    if pick.get("scam_risk") and not (pick.get("comps_n") and not pick.get("new_seller")):
+        return False   # too good from a new seller: only real sales and a small total may alert
     if pick.get("deal") is not None and pick["deal"] < cfg["alert_min_stars"]:
         return False   # not a good enough price; picks with no rating still pass
     if tier in ("fire", "green"):
@@ -172,7 +177,7 @@ def split_for_quiet_hours(picks: list[dict], now: datetime | None = None
 
 # Why a pick is more than a fair price (score.EDGES), as the phone shows it.
 EDGE_LABEL = {"mispriced": "💎 PRICE MISTAKE", "hidden": "🕵️ SLIPPED THROUGH",
-              "sleeper": "😴 SLEEPER AUCTION"}
+              "sleeper": "😴 SLEEPER AUCTION", "mislabeled": "🏷️ MISLABELED"}
 
 
 GUESS = " (guess, no sales found)"
@@ -215,10 +220,55 @@ def _price_line(pick: dict) -> str:
         line += " (combined ship w/ open order)"
     end = _ends(pick)
     if end and pick.get("is_auction"):
-        line += f" · ends {config.local(end).strftime('%a %-I:%M %p %Z')}"
+        line += f" · ends {ends_text(end)}"
     elif not pick.get("is_auction"):
         line += " · Buy It Now" + ("/Offer" if pick.get("best_offer") else "")
     return line
+
+
+def ends_text(end: datetime, zones: bool = True) -> str:
+    """Mon 9:14 PM EDT / 6:14 PM PDT, or with zones=False, Mon 9:14 PM ET / 6:14 PM PT."""
+    et, pt = end.astimezone(ET), end.astimezone(PT)
+    if zones:
+        return f"{et:%a %-I:%M %p %Z} / {pt:%-I:%M %p %Z}"
+    return f"{et:%a %-I:%M %p} ET / {pt:%-I:%M %p} PT"
+
+
+def bin_line(pick: dict) -> str:
+    """BIN ok ≤ $12.12 · offer idea: $10.10. The offer is a number to type yourself."""
+    most = pick.get("max")
+    if pick.get("is_auction") or most is None or pick.get("tier") == "drop":
+        return ""
+    line = f"BIN ok ≤ ${most:.2f}"
+    if pick.get("best_offer"):
+        line += f" · offer idea: ${pricing.offer_idea(most):.2f} (you'd send it, not the bot)"
+    return line
+
+
+# Warning flags as the phone shows them, worst first.
+WATCH = (("fake_auto", filters.FAKE_AUTO_WHY), ("scam_risk", "too good for a new seller"),
+         ("new_seller", "new seller"), ("thin_listing", "thin listing"),
+         ("unverified", "price is a guess"))
+
+
+def watch_outs(pick: dict) -> str:
+    """Watch-outs: printed signature, not an auto · new seller (12 feedback). Or "none"."""
+    found = []
+    flags = set(pick.get("flags") or [])
+    for key, text in WATCH:
+        if pick.get(key) or key in flags:
+            if key == "new_seller" and pick.get("seller_feedback") is not None:
+                text += f" ({pick['seller_feedback']} feedback)"
+            found.append(text)
+    for s in (pick.get("midtier") or {}).get("signals", []):
+        if not s.get("positive") and s.get("name") not in ("facsimile_guard",
+                                                           "too_good_new_seller"):
+            found.append(f"{s['name']} ({s['why']})")
+    if any(s.get("name") == "facsimile_guard" and s.get("why") and "fake_auto" not in flags
+           for s in (pick.get("midtier") or {}).get("signals", [])):
+        found.append(next(s["why"] for s in pick["midtier"]["signals"]
+                          if s.get("name") == "facsimile_guard"))
+    return "Watch-outs: " + (", ".join(dict.fromkeys(found)) or "none")
 
 
 def members(entry: dict) -> list[dict]:
@@ -265,6 +315,9 @@ def format_group(entry: dict) -> str:
         lines.append(deal_line(entry))
     if entry.get("why"):
         lines.append(entry["why"])
+    if entry.get("tier") != "drop":
+        lines.append(watch_outs({**entry, **{k: any(p.get(k) for p in listings)
+                                            for k, _ in WATCH}}))
     if sum(bool(p.get("is_auction")) for p in listings) > 1:
         lines.append(GROUP_TIP)
     return "\n".join(lines)
@@ -281,14 +334,52 @@ def format_pick(pick: dict) -> str:
     if pick.get("max") is not None:
         basis = pick.get("max_basis", "estimate")
         lines.append(f"Max: {pick['max']:.2f}" + (_guess(pick) or f" ({basis})"))
+    if bin_line(pick):
+        lines.append(bin_line(pick))
     if pick.get("deal"):
         lines.append(deal_line(pick))
     if pick.get("why"):
         lines.append(pick["why"])
     if seller_line(pick):
         lines.append(seller_line(pick))
+    if pick.get("tier") != "drop":
+        lines.append(watch_outs(pick))
     lines.append(str(pick["item_id"]))
     return "\n".join(lines)
+
+
+def _short(text: str, limit: int = 60) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def format_midtier(pick: dict) -> str:
+    """The mid-tier lane's block: the item number alone on line 2, for pasting into Gixen."""
+    lane = pick.get("midtier") or {}
+    stars = "★" * (pick.get("deal") or 0)
+    n = lane.get("comps_n") or 0
+    basis = (f"from {n} sold comp{'s' if n != 1 else ''}" if n
+             else "estimate, no sold comps")
+    value = f"value ~${lane.get('value') or pick.get('value') or 0:.0f} {basis}; " \
+            f"ship ${lane.get('ship', 0):.2f}"
+    if pick.get("is_auction"):
+        top = f"Max: {pick['max']:.2f}  ({value})"
+        end = _ends(pick)
+        when = f"Ends: {ends_text(end, zones=False)}" if end else "Ends: ?"
+    else:
+        top = f"BIN ok ≤ ${lane.get('bin_ok', pick.get('max') or 0):.2f}  ({value})"
+        ship = pick.get("shipping")
+        when = (f"BIN ${pick['price']:.2f} + "
+                + ("ship ?" if ship is None else f"${ship:.2f} ship"))
+        if lane.get("offer_idea"):
+            when += f"  · offer idea: ${lane['offer_idea']:.2f} (text only; nothing is sent)"
+    why = [f"{s['name']}({s['why']})" for s in lane.get("signals", []) if s.get("positive")]
+    return "\n".join([
+        f"🎯 MIDTIER {stars} {_short(pick.get('card') or pick.get('title'))}",
+        str(pick["item_id"]), top, when,
+        "Why: " + (", ".join(why) or "-"),
+        watch_outs(pick),
+        f"https://www.ebay.com/itm/{pick['item_id']}"])
 
 
 def _who(pick: dict) -> str:

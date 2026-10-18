@@ -63,7 +63,10 @@ class Profile:
     products: str = ""                # products to check for new releases
     binder_pages: dict[str, str] = field(default_factory=dict)   # card year -> page
     binder_spare: str = "unsorted"
-    category: str = ""                # eBay category id; default EBAY_CATEGORY (sports singles)
+    category: str | None = None       # eBay category id; None = EBAY_CATEGORY, "" = none
+    junk_words: list[str] | None = None   # titles to drop unscored; None = filters.JUNK_WORDS
+    lots: bool = True                 # false: drop "lot of" listings before scoring
+    midtier: dict | None = None       # [search.midtier]; None = the mid-tier lane is off
 
     def __post_init__(self) -> None:
         names = self.player.split()
@@ -201,7 +204,10 @@ class TeamProfile:
     binder_pages: dict[str, str] = field(default_factory=dict)
     binder_spare: str = "unsorted"
     search: str = ""                  # what eBay is asked for; default: the nickname
-    category: str = ""                # eBay category id; default EBAY_CATEGORY
+    category: str | None = None       # eBay category id; None = EBAY_CATEGORY, "" = none
+    junk_words: list[str] | None = None
+    lots: bool = True
+    midtier = None                    # the mid-tier lane is player mode only
 
     mode = "team"
 
@@ -369,13 +375,25 @@ def _parse_team(raw: dict) -> TeamProfile:
         "extra_searches": search.get("extra", []),
         "products": search.get("products", ""),
         "search": team.get("search", ""),
-        "category": str(search.get("category", "")),
+        **_search_extras(search),
         "binder_pages": {str(k): str(v) for k, v in (binder.get("pages") or {}).items()},
         "binder_spare": binder.get("spare", "unsorted"),
     }
     if "keywords" in search:
         known["keyword_searches"] = search["keywords"]
     return TeamProfile(**known)
+
+
+def _search_extras(search: dict) -> dict:
+    """[search] keys both modes share: the eBay category, junk words, lots."""
+    out: dict = {"lots": bool(search.get("lots", True))}
+    for key in ("category_id", "category"):   # category_id is the newer name
+        if key in search:
+            out["category"] = str(search[key]).strip()
+            break
+    if "junk_words" in search:
+        out["junk_words"] = [str(w) for w in search["junk_words"]]
+    return out
 
 
 def parse(text: str) -> Profile | TeamProfile:
@@ -407,8 +425,10 @@ def parse(text: str) -> Profile | TeamProfile:
         "products": search.get("products", ""),
         "binder_pages": {str(k): str(v) for k, v in (binder.get("pages") or {}).items()},
         "binder_spare": binder.get("spare", "unsorted"),
-        "category": str(search.get("category", "")),
+        **_search_extras(search),
     }
+    if isinstance(search.get("midtier"), dict):
+        known["midtier"] = dict(search["midtier"])
     if "card_words" in player:
         known["card_words"] = player["card_words"]
     if "keywords" in search:

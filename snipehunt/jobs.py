@@ -13,9 +13,10 @@ import sys
 import time
 from datetime import datetime
 
-from . import (config, db, ebay_search, gitsync, gixen, hidden, inventory, inventory_sync,
-               limited_drops, notify, ops, profile, rarity, reflect, report, sales, score,
-               settings, shortlist, snipecheck, usage, watch)
+from . import (aspects, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
+               inventory_sync, limited_drops, midtier, notify, ops, profile, rarity,
+               reflect, report, sales, score, settings, shortlist, snipecheck, usage, watch,
+               wins)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -34,6 +35,11 @@ def hourly(dry_run: bool = False) -> str:
             listings += hidden.search(con, {i.item_id for i in listings}, verbose=True)
     except Exception as exc:
         print(f"hidden: {exc}", file=sys.stderr)
+    # reprints, customs and "you pick" listings never reach Claude; fake autos are flagged
+    listings, junked = filters.prefilter(listings)
+    if junked:
+        print(f"filters: dropped {sum(junked.values())} ("
+              + ", ".join(f"{n} {w}" for w, n in junked.items()) + ")", file=sys.stderr)
     moves = _remember(con, listings)
     if not dry_run and not first_run:
         watch.save(con, moves)
@@ -63,11 +69,6 @@ def hourly(dry_run: bool = False) -> str:
         except Exception as exc:
             con.rollback()
             print(f"snipecheck: {exc}", file=sys.stderr)
-    if team:   # far too many listings to score: filter and rank them for free first
-        fresh = team_shortlist(con, listings, moves, dry_run)
-    else:
-        fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
-
     def save(batch, batch_picks) -> None:
         """Commit each scored batch so a later failure doesn't redo it."""
         if dry_run:
@@ -78,6 +79,21 @@ def hourly(dry_run: bool = False) -> str:
         for p in batch_picks:
             db.save_pick(con, p)
         con.commit()
+
+    lane_ids: set[str] = set()
+    if not team and not first_run and (midtier.config_now(con) or {}).get("enabled"):
+        try:   # the mid-tier lane takes the listings it flags; the rest score as usual
+            lane_picks, lane_sent = midtier.run(con, set(), save, dry_run)
+            lane_ids = {p["item_id"] for p in lane_picks}
+            print(f"midtier: {len(lane_picks)} picks, {lane_sent} alerted", file=sys.stderr)
+        except Exception as exc:   # the main lanes come first
+            con.rollback()
+            print(f"midtier: {exc}", file=sys.stderr)
+    if team:   # far too many listings to score: filter and rank them for free first
+        fresh = team_shortlist(con, listings, moves, dry_run)
+    else:
+        fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)
+                 and i.item_id not in lane_ids]
 
     picks, scored = (score.score(fresh, verbose=True, on_batch=save, con=con)
                      if fresh else ([], []))
@@ -191,7 +207,10 @@ def fast(dry_run: bool = False) -> str:
     if con.execute("SELECT count(*) FROM seen").fetchone()[0] == 0:
         return "waiting for the first hourly run"
     client = ebay_search.EbayClient()
+    client.lane = "fast"
     found = []
+    if not usage.ebay_allowed("keyword"):
+        return "daily eBay call budget reached"
     for raw in client.search(profile.get().search_name, "buyingOptions:{FIXED_PRICE|BEST_OFFER}",
                              "newlyListed", limit=50):
         item = ebay_search.parse_item(raw)
@@ -203,6 +222,7 @@ def fast(dry_run: bool = False) -> str:
             item.match = ebay_search.classify(item.title)
         if item.match != "no" and not item.is_auction:
             found.append(item)
+    found, _ = filters.prefilter(found)
     new = [i for i in found if con.execute(
         "SELECT 1 FROM seen WHERE item_id=?", (i.item_id,)).fetchone() is None]
     if profile.get().mode == "team":   # the same free ranking as the hourly run, a higher bar
@@ -288,17 +308,31 @@ def daily(dry_run: bool = False) -> str:
         parts.append(f"{len(drops)} new drops, {sent} alerted")
     except Exception as exc:
         errors.append(f"drops: {exc}")
+    events: list[dict] = []
     if not inventory_sync.configured():
         parts.append("email sync is off (no Gmail login set)")
     else:
         try:
             result = inventory_sync.run(dry_run=dry_run)
+            events = result["events"]
             for line in result["changes"]:
                 print("  " + line, file=sys.stderr)
             parts.append(f"{result['emails']} emails, {len(result['changes'])} "
                          f"inventory changes{' (dry run)' if dry_run else ''}")
         except Exception as exc:
             errors.append(f"inventory sync: {exc}")
+    try:   # your own wins: their sold prices, their binder pages, and combined invoices
+        if not dry_run:
+            parts.append(f"{sales.from_mail(con)} sold prices from win emails")
+        parts.append(f"{wins.announce(con, events, dry_run)} wins announced, "
+                     f"{wins.remind(con, dry_run=dry_run)} combined-shipping reminders")
+    except Exception as exc:
+        errors.append(f"wins: {exc}")
+    if (midtier.config_now(con) or {}).get("enabled") and notify.configured() and not dry_run:
+        try:
+            notify.send(f"{profile.get().app_name}: midtier summary", midtier.summary(con))
+        except Exception as exc:
+            errors.append(f"midtier summary: {exc}")
     if errors:
         raise RuntimeError("; ".join(errors + parts))
     return "; ".join(parts)
@@ -317,6 +351,11 @@ def weekly(dry_run: bool = False, now: datetime | None = None) -> str:
             except Exception as exc:
                 notes.append(f"Inventory sync failed before this report: {exc}")
     releases = monthly = None
+    if settings.load(con)["aspect_refresh"] and config.get("EBAY_CLIENT_ID") and not dry_run:
+        try:   # eBay's own item-specifics names, for the mislabel and fake-auto checks
+            aspects.refresh(con)
+        except Exception as exc:
+            notes.append(f"Item-specifics refresh failed: {exc}")
     try:
         releases = limited_drops.check_new_releases(verbose=True)
     except Exception as exc:

@@ -17,7 +17,7 @@ LOCK_FILE = "git.lock"
 
 @contextmanager
 def locked():
-    """One git command sequence at a time: jobs and buttons share the checkout."""
+    """One git command sequence at a time: jobs and buttons share the working copy."""
     with open(config.ensure_state_dir() / LOCK_FILE, "w") as fh:
         fcntl.flock(fh, fcntl.LOCK_EX)
         yield

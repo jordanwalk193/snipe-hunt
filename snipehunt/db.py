@@ -116,8 +116,11 @@ SEEN_ADDED = {"is_auction": "INTEGER", "end_ts": "INTEGER", "shipping": "REAL",
               "closed_at": "INTEGER", "price": "REAL", "seller": "TEXT",
               "checked_at": "INTEGER", "tracked": "INTEGER"}
 UNTRACKED_KEEP_DAYS = 30   # team mode forgets passed-over listings after this
-# Added to `sales`: the photo, then whether it was an auction or a fixed-price sale.
-SALES_ADDED = {"image": "TEXT", "kind": "TEXT DEFAULT 'auction'"}
+# Added to `sales`: the photo, then whether it was an auction or a fixed-price sale,
+# then where the price came from: ebay (the bot looked it up), gixen or won (an
+# email about one of your own wins), manual (`python -m snipehunt sale add`).
+SALES_ADDED = {"image": "TEXT", "kind": "TEXT DEFAULT 'auction'",
+               "source": "TEXT DEFAULT 'ebay'"}
 
 
 def connect() -> sqlite3.Connection:

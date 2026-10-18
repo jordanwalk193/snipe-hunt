@@ -1,0 +1,76 @@
+# Card numbers and the products and years they belong to. Snipe Hunt uses this
+# to spot listings with the wrong year or set, to put wins on the right binder
+# page, and to check the inventory. Card numbers seen in your inventory are
+# added on their own; list here the ones that need explaining.
+#
+# number / numbers  the card number as printed (BA-JW1, BHP-52)
+# year              the year on the card
+# product           the set
+# keywords          words that pick this product when one number is in several
+#                   products; with more than one product and no keyword in the
+#                   title, the year is left undecided
+# drift_years       years sellers often list it under by mistake: a weak signal,
+#                   not a different card
+# parallels, autos  for reference, shown to Claude
+
+[[card]]
+number = "FMF-10"
+year = 2021
+product = "Bowman Chrome 40-Man Futures"
+drift_years = [2023]
+parallels = ["Atomic /150", "Orange /25", "SuperFractor 1/1"]
+autos = ["FMFA-JW /99"]
+
+[[card]]
+number = "SOS-19"
+year = 2023
+product = "Bowman / Bowman Chrome Sights on September"
+parallels = ["Atomic /150"]
+autos = ["/30"]
+
+[[card]]
+numbers = ["BHP-52", "BHPC-52"]
+year = 2022
+product = "Bowman Heritage"
+drift_years = [2023]   # released 2023-03-29, so many listings say 2023
+
+[[card]]
+number = "BCP-236"
+year = 2021
+product = "Bowman Chrome Prospects"
+
+[[card]]
+number = "DI-JW1"
+year = 2019
+product = "Leaf Metal PG All-American Direct Autographs"
+
+# BA-JW1 is in five Leaf products; only a product word in the title decides which.
+[[card]]
+number = "BA-JW1"
+year = 2019
+product = "Leaf Metal PG All-American"
+keywords = ["all-american", "all american", "pg aa"]
+
+[[card]]
+number = "BA-JW1"
+year = 2019
+product = "Leaf PG National Showcase"
+keywords = ["national showcase"]
+
+[[card]]
+number = "BA-JW1"
+year = 2020
+product = "Leaf Valiant"
+keywords = ["valiant"]
+
+[[card]]
+number = "BA-JW1"
+year = 2022
+product = "Leaf Metal"
+keywords = ["metal"]
+
+[[card]]
+number = "BA-JW1"
+year = 2023
+product = "Leaf Metal"
+keywords = ["metal"]

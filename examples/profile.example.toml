@@ -43,6 +43,34 @@ typos = ["jordon walker", "jorden walker", "jordn walker", "jodan walker",
 extra = ["j walker cardinals", "walker cardinals rookie lot", "jordan walker topps now"]
 # Products to check for new releases each week.
 products = "Topps Update, Topps Chrome Update, Bowman Draft, Holiday, Heritage High Number, Finest, Cosmic Chrome, Pristine, Stadium Club, Bowman's Best, Allen & Ginter, Gypsy Queen, Archives, Panini products"
+# eBay category every search is limited to. 261328 is Sports Trading Card Singles
+# (the default); "" searches every category, which lots are often listed in.
+category_id = "261328"
+# Titles with any of these words are dropped before scoring. Leave it out for
+# the defaults: reprint, rp, custom, digital, facsimile, proxy, art card,
+# you pick, pick your, u pick, complete your set.
+# junk_words = ["reprint", "rp", "custom", "digital", "facsimile", "proxy", "art card",
+#               "you pick", "pick your", "u pick", "complete your set"]
+lots = true                   # false drops "lot of" listings before scoring
+
+# The mid-tier lane: $20-$80 cards whose listings get them wrong (misspelled
+# name, autograph or parallel only in the item specifics, wrong year). Delete
+# this block to turn it off. Recommend only, like everything else. The card
+# numbers and years it checks titles against are in data/known_cards.toml.
+[search.midtier]
+enabled = true
+min_pay = 20.0                # the band is on what you'd pay (max + shipping)
+max_pay = 80.0
+category_id = "261328"
+auction_window_hours = 36
+deal_ratio = 0.60             # alert only when paying is at most 60% of the going rate
+min_comps_for_5_star = 3
+getitem_daily_budget = 120    # item-specifics reads a day
+search_daily_budget = 400     # mid-tier searches a day (eBay allows 5,000 calls for everything)
+odd_hours_et = [1, 6]         # an auction ending 1:00-6:59 AM ET on these days is a tiebreaker
+odd_weekdays = ["Mon", "Tue", "Wed", "Thu"]
+thin_listing_max_title_tokens = 7
+new_seller_feedback_below = 50
 
 [binder]
 # Which binder page a card goes on, by the year on the card. Optional.

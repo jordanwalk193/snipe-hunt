@@ -49,6 +49,10 @@ DEFAULTS: dict = {
     "track_off": 10,                 # percent the going rates must be off before scoring is told
     "fast_min_price": 15.0,          # under this, a plain Buy It Now waits for the hourly run
     "self_tuning": True,             # the weekly self-review may adjust one tunable a week
+    # eBay Browse calls a day for the whole app (eBay's default allowance); past 80%
+    # the least useful lanes stop first (usage.CUT_ORDER)
+    "ebay_daily_cap": 5000,
+    "aspect_refresh": True,          # one eBay call a week for eBay's item-specifics names
 }
 
 # What the weekly self-review may adjust on its own, and how far (tune.py).
@@ -86,6 +90,10 @@ TEAM_DEFAULTS: dict = {
 }
 # Defaults that differ on a team bot: frugal by design, only real steals alert.
 TEAM_OVERRIDES: dict = {"price_lookups": 4, "alert_min_stars": 4}
+# The mid-tier lane's switches, on a bot whose profile has [search.midtier]. Their
+# defaults come from the profile (midtier.py); Home Assistant may override them.
+MIDTIER_KEYS = {"midtier_enabled": "enabled", "midtier_deal_ratio": "deal_ratio",
+                "midtier_max_pay": "max_pay"}
 
 RANGES = {
     "yellow_max_total": (0, 25),
@@ -106,6 +114,9 @@ RANGES = {
     "team_min_price": (0, 100),
     "team_max_price": (1, 10000),
     "team_max_run": (1, 999),
+    "ebay_daily_cap": (100, 1000000),
+    "midtier_deal_ratio": (0.2, 0.95),
+    "midtier_max_pay": (20, 1000),
 }
 ITEM = {
     "sellers": re.compile(r"[A-Za-z0-9._*\-]{1,64}"),
@@ -129,8 +140,21 @@ def team_mode() -> bool:
 def defaults() -> dict:
     """The defaults for this bot: player mode's, or a team's with its own extras."""
     if not team_mode():
-        return dict(DEFAULTS)
+        return {**DEFAULTS, **midtier_defaults()}
     return {**DEFAULTS, **TEAM_OVERRIDES, **TEAM_DEFAULTS}
+
+
+def midtier_defaults() -> dict:
+    """The mid-tier switches as the profile sets them; none without [search.midtier]."""
+    try:
+        from . import midtier   # it reads settings; kept local
+        cfg = midtier.profile_config()
+    except (profile.ProfileError, OSError, ValueError):
+        return {}
+    if cfg is None:
+        return {}
+    return {key: (bool(cfg[name]) if name == "enabled" else float(cfg[name]))
+            for key, name in MIDTIER_KEYS.items()}
 
 
 def _clean(key: str, value):

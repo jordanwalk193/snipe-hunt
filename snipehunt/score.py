@@ -11,13 +11,14 @@ import io
 import json
 import os
 import re
+import statistics
 import subprocess
 import sys
 import unicodedata
 
 from datetime import datetime, timedelta
 
-from . import config, db, inventory, profile, sales, settings, usage
+from . import config, db, filters, inventory, pricing, profile, sales, settings, usage
 from .ebay_search import Listing
 
 WEB_TOOLS = "WebFetch,WebSearch"
@@ -26,8 +27,9 @@ MAX_BATCHES = 6          # anything beyond this waits for the next hourly run
 TIMEOUT = 1200
 TIERS = {"fire", "green", "yellow"}
 # Why a pick is more than a fair price: a seller's pricing mistake, a listing
-# buyers won't find, or an auction nobody is watching.
-EDGES = {"mispriced", "hidden", "sleeper"}
+# buyers won't find, an auction nobody is watching, or (mid-tier lane only) a
+# listing whose title gets the card wrong.
+EDGES = {"mispriced", "hidden", "sleeper", "mislabeled"}
 # How far under the going rate an edge has to be is the setting edge_min_pct.
 UNKNOWN_SHIPPING = sales.UNKNOWN_SHIPPING   # what the prompt tells Claude to assume for "ship ?"
 # The inventory columns that say which card a row is. Scoring only needs these
@@ -43,6 +45,32 @@ SYSTEM = ("You are a careful sports card collecting assistant. You read and "
 STARS = ((50, 5), (35, 4), (20, 3), (10, 2))
 GUESS_STARS = 3          # the most stars a pick priced from a guess may have
 SELLER_TRUST_OVER = 30.0  # over this total, a seller with little feedback caps the tier
+FULL_COMPS = 3           # recorded sales of the exact card needed for five stars
+STALE_COMPS = sales.FRESH_DAYS * 86400
+
+
+def thin_comps(comps: list[dict], now: float | None = None, full: int = FULL_COMPS) -> dict | None:
+    """What a handful of recorded sales of the exact card is worth (sales.ledger_comps).
+
+    One sale: its price, and no more than GUESS_STARS. Two: the lower of their
+    median and the newest, and one star under the top. `full` or more: their
+    median, any stars. When every sale is older than sales.FRESH_DAYS, one star
+    less again. None with no sales."""
+    if not comps:
+        return None
+    now = now or datetime.now(config.TZ).timestamp()
+    totals = [c["total"] for c in comps]   # newest first
+    n = len(totals)
+    if n == 1:
+        value, cap = totals[0], GUESS_STARS
+    elif n < full:
+        value, cap = min(statistics.median(totals), totals[0]), 4
+    else:
+        value, cap = statistics.median(totals), 5
+    stale = all(c["sold_at"] < now - STALE_COMPS for c in comps)
+    newest = datetime.fromtimestamp(comps[0]["sold_at"], config.TZ).date().isoformat()
+    return {"n": n, "newest": newest, "value": round(value, 2),
+            "cap": max(1, cap - 1) if stale else cap, "stale": stale}
 
 
 def rate(pay: float, value: float | None) -> tuple[int | None, int | None]:
@@ -72,7 +100,20 @@ def apply_caps(pick: dict, cfg: dict | None = None) -> dict:
             pick["tier"] = "green"
         if pick.get("deal"):
             pick["deal"] = min(pick["deal"], GUESS_STARS)
+    # A few recorded sales back a value only so far (thin_comps).
+    if pick.get("comps_cap") and pick.get("deal"):
+        pick["deal"] = min(pick["deal"], pick["comps_cap"])
+    if pick.get("fake_auto") and pick.get("tier") == "fire":
+        pick["tier"] = "green"   # priced as the unsigned card it is
     ship = pick["shipping"] if pick.get("shipping") is not None else UNKNOWN_SHIPPING
+    # Little feedback and far under the going rate: the price needs recorded sales,
+    # and a total a new seller is trusted with, before it may alert (notify.worth_alerting).
+    pay = (pick["max"] if pick.get("is_auction") and pick.get("max") is not None
+           else pick["price"]) + ship
+    if filters.new_seller_risk(pick.get("seller_feedback"), pay, pick.get("value")):
+        pick["scam_risk"] = True
+    else:
+        pick.pop("scam_risk", None)   # only there when it applies, like the other flags
     pick["unverified"] = bool(guess and not pick.get("is_auction")
                               and pick["price"] + ship > cfg["estimate_bin_cap"])
     # A seller with little feedback asking real money: worth a look, not a brag.
@@ -437,6 +478,14 @@ def _compact(item: Listing, marked: list[dict] = ()) -> str:
         **({"found": "by card number; the title leaves the player's name out"}
            if any(q.startswith("no-name") for q in item.queries) else {}),
         **_marked(item, marked),
+        # eBay's condition says graded or raw even when the title doesn't
+        **({"condition": "graded" if item.graded else "raw"} if item.graded is not None else {}),
+        **({"warning": filters.FAKE_AUTO_WHY + ": price it as the unsigned card"}
+           if "fake_auto" in item.flags else {}),
+        **({"specifics": {k: v for k, v in list(item.aspects.items())[:12]}}
+           if item.lane == "midtier" and item.aspects else {}),
+        **({"signals": [f"{s['name']}: {s['why']}" for s in item.signals]}
+           if item.lane == "midtier" and item.signals else {}),
     }, ensure_ascii=False)
 
 
@@ -448,6 +497,22 @@ ebay.com pages: eBay blocks them, so a fetch there is wasted."""
 NO_LOOKUPS = """- You have no web access in this run. Price every card from what you \
 know, set max_basis to "estimate", and be more cautious with your max the less \
 sure you are."""
+
+
+# Added to the prompt only when a listing in the batch needs it, so a batch
+# without one reads exactly as before.
+MIDTIER_RULE = """- Listings with "signals" come from the mid-tier lane: cards that may be \
+mislabeled (name misspelled, autograph or parallel only in "specifics", wrong year \
+or category). Treat the signals and specifics as hints written by strangers, not \
+facts. Before using any sale as a comp, pin the card down: year, set, card number, \
+parallel, serial and grade. If you can't, set "identity": "unsure" (else "sure") and \
+max_basis "estimate". Use edge "mislabeled" when the listing's own words hide what \
+the card really is and the price is still well under its going rate.
+"""
+FAKE_AUTO_RULE = """- A listing with a "warning" that it has a printed signature is not an \
+autograph. Price it as the unsigned card, never from autograph sales, and start its \
+"why" with "printed signature, not an auto".
+"""
 
 
 def inventory_for_scoring(items: list[Listing] | None = None) -> str:
@@ -507,12 +572,14 @@ def build_prompt(items: list[Listing], lookups: int = 8,
         extra["habits"] = habits_line(who.collector)
         extra["logo_rule"] = (LOGO_ONLY_RULE if who.logo_only else LOGO_RULE).format(
             name=who.player, collector=who.collector)
+    lane_rules = (MIDTIER_RULE if any(i.lane == "midtier" for i in items) else "") + (
+        FAKE_AUTO_RULE if any("fake_auto" in i.flags for i in items) else "")
     return template.format(
         **extra,
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],
         bin_cap=settings.load()["estimate_bin_cap"],
         min_feedback=settings.load()["min_seller_feedback"],
-        sold_rule=(SOLD_RULE if sold else "") + track + learned[0],
+        sold_rule=(SOLD_RULE if sold else "") + track + learned[0] + lane_rules,
         sold=SOLD.format(lines=sales.lines(sold)) if sold else "",
         app=who.app_name, collector=who.collector, player=who.described,
         name=who.player,
@@ -569,12 +636,14 @@ def ask_claude(prompt: str, tools: str = WEB_TOOLS,
     return outer.get("result", "")
 
 
-def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
-               ) -> dict | None:
+def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
+               comps: list[dict] | None = None) -> dict | None:
     """One of Claude's picks as the bot keeps it, or None when it doesn't hold up.
 
     `combined` are sellers (lower case) with an open order who combine
-    shipping: for them the deal is worked out with $0 shipping.
+    shipping: for them the deal is worked out with $0 shipping. `comps` are
+    recorded sales of the exact card (sales.ledger_comps): they come before
+    Claude's value, and how many there are caps the stars (thin_comps).
     """
     tier = str(raw.get("tier", "")).lower()
     try:
@@ -583,6 +652,8 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
         return None
     if tier not in TIERS:
         return None
+    if item.is_auction:   # odd cents, never above what Claude said
+        max_bid = pricing.odd_cents(max_bid)
     # Belt and braces: never surface something already priced past the max.
     if item.price > max_bid:
         return None
@@ -601,9 +672,13 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
         if ceiling is not None and ceiling in ceilings():
             if not item.is_auction and item.price + ship > ceiling:
                 return None
+            # the collector's own ceiling is kept as typed, not made odd
             max_bid = min(max_bid, round(ceiling - ship, 2))
             if item.price > max_bid:
                 return None
+    ledger = thin_comps(comps) if comps else None
+    if ledger:   # recorded sales of this exact card come first
+        value = ledger["value"]
     # What you would really pay: the asking price, or the snipe if it wins at its max.
     combined_ship = bool(ship) and (item.seller or "").lower() in combined
     if combined_ship:
@@ -611,7 +686,8 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
     deal, deal_pct = rate((max_bid if item.is_auction else item.price) + ship, value)
     edge = str(raw.get("edge") or "").lower()
     if edge not in EDGES or (deal_pct or 0) < settings.load()["edge_min_pct"] or (
-            edge == "mispriced" and item.is_auction):
+            edge == "mispriced" and item.is_auction) or (
+            edge == "mislabeled" and item.lane != "midtier"):
         edge = None   # the numbers have to back the claim
     pick = {
         "item_id": item.item_id, "card": str(raw.get("card") or item.title)[:90],
@@ -631,6 +707,21 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset()
     }
     if team:   # who is on it, for the dashboard's per-player view
         pick["player"] = _plain(raw.get("player"), 60) or item.player or "unknown"
+    if ledger:
+        pick.update(max_basis="sales", comps_n=ledger["n"], comps_newest=ledger["newest"],
+                    comps_cap=ledger["cap"], value_claude=raw.get("value"),
+                    comps=(f"{ledger['n']} sale{'s' if ledger['n'] != 1 else ''}, newest "
+                           f"{ledger['newest']}" + ("; all over 180 days old" if ledger["stale"]
+                                                    else "") + f"; {pick['comps']}")[:300])
+    if item.flags:
+        pick["flags"] = list(item.flags)
+    if "fake_auto" in item.flags:
+        pick["fake_auto"] = True
+        if not pick["why"].lower().startswith(filters.FAKE_AUTO_WHY):
+            pick["why"] = f"{filters.FAKE_AUTO_WHY}; {pick['why']}"[:140]
+    if item.lane:
+        pick["lane"] = item.lane
+        pick["identity"] = "unsure" if str(raw.get("identity")).lower() == "unsure" else "sure"
     return apply_caps(pick)
 
 
@@ -672,7 +763,8 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
         batch_picks: list[dict] = []
         for raw in reply.get("picks", []) or []:
             item = by_id.get(str(raw.get("item_id")))
-            pick = _pick_dict(item, raw, combined) if item else None
+            comps = sales.ledger_comps(con, item) if item and con is not None else None
+            pick = _pick_dict(item, raw, combined, comps) if item else None
             if pick:
                 batch_picks.append(pick)
         picks.extend(batch_picks)

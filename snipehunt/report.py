@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import config, db, inventory, profile, sales, settings, spending, tune
+from . import config, db, inventory, known_cards, profile, sales, settings, spending, tune
 from .notify import TIER_ICON, TIER_ORDER
 from .score import ask_claude
 
@@ -276,6 +276,10 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
     md += feedback_section(con, since)
     md += missed_section(con, now)
 
+    checked = inventory.check(rows, known_cards.load(with_inventory=False), now.date())
+    md += ["", "## Inventory check", "Nothing here was changed; fix what needs it in "
+           "inventory.csv.", *inventory.check_lines(checked)]
+
     md += ["", "## Self-tuning"]
     md += tune.lines(tune.view(con, 6)) or [
         "- No settings have been tuned yet." if settings.load(con)["self_tuning"]
@@ -297,7 +301,8 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
 
     summary = (f"{len(wins)} won, {len(losses)} lost · {n_unpaid} unpaid · "
                f"{len(delivered)} delivered · {len(snipes)} snipes on the board\n"
-               f"{tot['cards']} cards, ${tot['spent']:.2f} spent")
+               f"{tot['cards']} cards, ${tot['spent']:.2f} spent\n"
+               + inventory.check_summary(checked))
     return "\n".join(md) + "\n", summary
 
 
