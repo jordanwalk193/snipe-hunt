@@ -17,8 +17,9 @@ recommends what to snipe. These rules hold in every session, whoever starts it.
   or the environment (`config.SECRETS`), not in settings or the repo. Test
   fixtures use made-up values: no real IPs, hostnames, sellers, item numbers,
   prices or email addresses.
-- `tests/test_guards.py` checks the rules above. Never weaken or delete a guard;
-  add one when a new code path touches eBay, Gixen, Gmail or Claude.
+- `tests/test_guards.py` and `tests/test_safety.py` check the rules above. Never
+  weaken or delete a guard; add one when a new code path touches eBay, Gixen,
+  Gmail or Claude.
 
 ## How to work
 

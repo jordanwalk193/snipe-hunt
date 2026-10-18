@@ -4,6 +4,37 @@ Snipe Hunt follows [semantic versioning](https://semver.org). The API snapshot
 (`"api": 1`) is the contract with the Home Assistant integration: new keys may
 appear in any release; renaming or removing one needs a new API version.
 
+## Unreleased
+
+### Mid-tier steals lane
+- A $20–$80 lane for mislabeled listings (`[search.midtier]`, `midtier.py`):
+  misspellings searched first, auctions ending within 36 hours and Buy It Now /
+  Best Offer listings in category 261328, item specifics read within a daily
+  budget, eight detectors in `mislabel.py`, its own max (`deal_ratio` of the
+  value, odd cents), "BIN ok" and offer-idea text, its own alert block with the
+  item number on line two, and a daily summary. Home Assistant settings
+  `midtier_enabled`, `midtier_deal_ratio`, `midtier_max_pay`. Recommend only.
+
+### Every lane
+- Junk-word filter (`[search] junk_words`, `lots`), fake-autograph flag, new-seller
+  scam guard (`filters.py`).
+- `[search] category_id` ("" for none), condition and photo count on every listing,
+  one `price_filter()` that always adds `priceCurrency:USD`, EXTENDED search fields.
+- eBay calls counted per lane, daily cap `ebay_daily_cap` with lanes cut in
+  priority order past 80%, two retries on a rate limit, a same-day cache of
+  single-listing reads; per-lane counts in the weekly self-review.
+- Thin-comp star caps from recorded sales of the exact card; ledger value first.
+- `data/known_cards.toml` (card numbers, years, mix-ups), read by the detectors,
+  the card-number searches, the inventory check and win messages.
+- Weekly refresh of eBay's item-specifics names (`aspect_refresh`).
+- Sold prices from your won emails and `python -m snipehunt sale add`; the sold
+  block names each price's source.
+- Alerts: ET and PT end times, odd-cent auction maxes, "BIN ok ≤ $X", offer
+  ideas, a Watch-outs line.
+- `python -m snipehunt inventory check` and a weekly report section (read-only).
+- Win messages with the binder page, combined-shipping reminders.
+- `tests/test_safety.py`; tests can no longer reach the network.
+
 ## 0.1.0 (not yet released)
 
 The first tagged release. Everything below is new.

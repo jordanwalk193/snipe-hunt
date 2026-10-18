@@ -156,6 +156,81 @@ A team lists about 85 times as much as a player (1,128 new Cardinals listings in
 
 It also finds sellers with several cards worth having (one shipping charge), holds every want-list ceiling in code, and learns: a player Claude finds on another team's cards (the NFL Cardinals, say) is ruled out for free from then on. The dashboard gets a "best deals for the Cardinals" board, sorted by discount, with a per-player view. Everything else (deal stars, the cheapskate max, the "to win" bid, sold prices) works as in player mode. Details in [`docs/TEAM_MODE.md`](docs/TEAM_MODE.md).
 
+## Mid-tier steals lane
+
+A lane of its own for $20–$80 cards whose listings get them wrong: the name misspelled, the autograph or parallel only in the item specifics, the wrong year, the wrong category. Those are the cards most buyers never see. It is **recommend only**, like the rest of the bot: it searches and reads single listings, and never bids, makes an offer, buys, or touches Gixen (`tests/test_safety.py` checks the source for that).
+
+Each hour it searches the player's misspellings first, then the name, then the keyword searches in turn: auctions ending in the next 36 hours (`price:[..80]`; a $9 bid today can still be a $30 card), and Buy It Now / Best Offer listings at $20–$80, both in category 261328. eBay's price filter isn't always exact, so the band is checked again on what you would actually pay, shipping included. Reprints, customs and "you pick" listings are dropped. A listing that already shows a sign of being mislabeled, or whose recorded sales already put it within reach, has its item specifics read (within a daily budget), and the detectors run:
+
+| Signal | Weight | Fires when |
+|---|---|---|
+| `typo_name` | +3 | the title misspells the player ("Jordon Walker") and never spells it right |
+| `hidden_auto` | +3 | the specifics say Autographed: Yes, or a Hard Signed / On-Card / Sticker autograph, and the title doesn't say auto |
+| `hidden_parallel` | +2 | a print run, serial or parallel in the specifics or description that the title leaves out |
+| `year_set_mismatch` | +2 | the title's year doesn't fit its card number (`data/known_cards.toml`) |
+| `year_drift` | +1 | a known, harmless year mix-up (BHP-52 listed as 2023) |
+| `wrong_category` | +1 | listed outside Sports Trading Card Singles |
+| `thin_listing` | +1 | one photo, a title of seven words or fewer, or no Card Number in the specifics |
+| `odd_end_time` | +1 | an auction ending 1:00–6:59 AM Eastern; a tiebreaker only, never enough alone |
+| `facsimile_guard` | −5 | says auto, isn't one: Autographed: No, a facsimile or printed signature, a Platinum Anniversary base card, a reprint |
+| `too_good_new_seller` | −3 | under 50 feedback and asking under 40% of the going rate |
+
+Only listings with more weight for than against, and at least one sign that isn't the end time, go to Claude. Claude is shown the signals and the specifics, is told to pin the card down (year, set, number, parallel, serial, grade) before using a comp, and to say "unsure" when it can't. Then the lane decides for itself:
+
+- **Value**: recorded sales of the exact card first (see thin comps below), else Claude's value.
+- **Max**: `rec_max = min(deal_ratio × value − shipping, max_pay − shipping)`, as an odd-cent cheapskate snipe (35.35, 47.47), never above `rec_max`. A Buy It Now shows "BIN ok ≤ $X" instead, and a Best Offer listing an "offer idea" at 85% of that, as text only.
+- **Alert** only when `rec_max` plus shipping reaches `min_pay`, the price you could pay right now (the next bid, for an auction) is within `deal_ratio` of the value, Claude was sure of the card, and the signals still say mislabeled. A printed signature holds the alert back unless real sales of the unsigned card still make it a deal.
+
+```
+🎯 MIDTIER ★★★★ 2021 Bowman Chrome Jordon Walker Atomic Refractor
+900000000001
+Max: 35.35  (value ~$62 from 3 sold comps; ship $4.99)
+Ends: Tue 3:12 AM ET / 12:12 AM PT
+Why: typo_name("Jordon"), hidden_parallel(/150 in specifics, not title), odd_end_time(Tue 3 AM ET)
+Watch-outs: none
+https://www.ebay.com/itm/900000000001
+```
+
+The item number sits alone on its own line so it pastes straight into Gixen. Quiet hours hold these like any other alert, and a daily "midtier summary" counts what was searched, read, flagged and alerted, and the eBay calls it took.
+
+Turn it on with `[search.midtier]` in the profile (the example profile has it, with every key and its default); without that block the lane is off. Home Assistant can switch it off and change `deal_ratio` and `max_pay` (settings `midtier_enabled`, `midtier_deal_ratio`, `midtier_max_pay`).
+
+| Key | Default | |
+|---|---|---|
+| `enabled` | true | |
+| `min_pay`, `max_pay` | 20, 80 | the band, on what you'd pay with shipping |
+| `category_id` | "261328" | Sports Trading Card Singles |
+| `auction_window_hours` | 36 | |
+| `deal_ratio` | 0.60 | alert at 60% of the going rate or less |
+| `min_comps_for_5_star` | 3 | |
+| `getitem_daily_budget`, `search_daily_budget` | 120, 400 | eBay calls a day for this lane |
+| `odd_hours_et`, `odd_weekdays` | [1, 6], Mon–Thu | both hours included |
+| `thin_listing_max_title_tokens` | 7 | |
+| `new_seller_feedback_below` | 50 | |
+
+**API budget.** eBay gives an app 5,000 Browse calls a day for everything. The lane spreads its 400 searches over the day (about 17 an hour, misspellings and the name every hour, keyword searches taking turns) and reads at most 120 listings in full; a listing read once is not read again that day. The other lanes come first: past 80% of the day's calls the lane is the first to stop.
+
+**Known limits.** The Browse API has no sold prices, so values come from the bot's own ledger (which fills up over weeks) or Claude's estimate, and a guess is capped at three stars. The odd-end-time signal is weak and only ever tips a close call. Item specifics are written by sellers and can be wrong too.
+
+## All-lane improvements
+
+These apply to every search, not just the mid-tier lane.
+
+- **Junk filter.** Titles with `reprint`, `rp`, `custom`, `digital`, `facsimile`, `proxy`, `art card`, `you pick`, `pick your`, `u pick` or `complete your set` are dropped before scoring, so they cost nothing. Change the list with `[search] junk_words`; lots stay in unless you set `lots = false`.
+- **Fake autographs.** A title that says auto on a card that isn't signed (item specifics say Autographed: No, a facsimile, printed or pre-printed signature, or a Topps Chrome Platinum Anniversary base card without an autograph card number or "Autographs" set name) is kept but flagged. Scoring is told to price it as the unsigned card, its comps come from unsigned sales, it can't be 🔥, and its "why" starts with "printed signature, not an auto".
+- **New-seller scam guard.** Under 50 feedback and paying under 40% of the going rate is flagged "too good for a new seller", and alerts only when the value comes from recorded sales and the total is one a new seller is trusted with (`SELLER_TRUST_OVER`, $30).
+- **Category and condition.** Every search is limited to category 261328 unless the profile's `[search] category_id` says otherwise (`""` searches everywhere, where lots are often listed). eBay's condition (2750 graded, 4000 ungraded) and photo count are read from every result, and scoring is told graded or raw so comps match.
+- **One price filter.** Every price filter is written by `ebay_search.price_filter()`, which always adds `priceCurrency:USD` (without it eBay answers error 12012); a test checks no other code writes one. Prices are checked again after the search.
+- **API budget and lane priority.** Every eBay call is counted by lane (auctions-ending and newly-listed as "core", keyword, typo, extra, sellers, hidden, midtier, item reads, aspects), and the counts are in the weekly self-review. The daily cap is the setting `ebay_daily_cap` (5,000, eBay's default). Past 80% of it a warning is logged and lanes stop in this order: midtier and extra searches at 80%, hidden at 85%, typo at 90%, keyword at 95%; the two main searches and sold-price look-ups only at the cap. A rate limit (HTTP 429, or eBay's "call limit" error) gets two retries with backoff, then that lane waits for the next run. A live listing read once is answered from the database the rest of that day; after it ends it is always read fresh, since sold prices depend on the final answer.
+- **Thin comps.** Recorded sales of the exact card (same number and year, same set and parallel words, same print run, autograph and grade, graded against graded) come before Claude's value. One sale caps a pick at three stars; two use the lower of their median and the newest, and cap it at four; three or more allow five. When every sale is more than 180 days old, one more star comes off. The comps line starts "N sales, newest YYYY-MM-DD". A guess stays capped at three, as before.
+- **Card years: `data/known_cards.toml`.** Card number to product and year, with the usual mix-ups: BA-JW1 is in five Leaf products and only gets a year when the title names one (All-American, National Showcase, Valiant, Metal); FMF-10 is 2021 Bowman Chrome 40-Man Futures; BHP-52 and BHPC-52 are 2022 Bowman Heritage released in 2023, so "2023" is drift, not a different card. `init` copies [`examples/known_cards.example.toml`](examples/known_cards.example.toml); the inventory's own card numbers and years are added on their own (the file always wins), and the card-number searches use every number the file pins to one year.
+- **eBay's own field names.** Once a week (setting `aspect_refresh`, on by default, one call) the bot asks eBay which item-specifics names and values it uses for the player's cards and keeps them; the detectors look names up there instead of guessing.
+- **More sold prices.** Your own wins from email (eBay "You won", Gixen end notices) are added to the ledger, one per item number, marked as yours; a price the bot looked up itself is kept over the email. Enter one by hand with `python -m snipehunt sale add <item_id> <price> <ship> "<title>"`. The sold block in the scoring prompt says where each price came from.
+- **Alerts.** End times in Eastern and Pacific ("ends Tue 3:12 AM EDT / 12:12 AM PDT"), the item number alone on its own line, an odd-cent max on every auction pick (D dollars and D cents, never above the max; a want-list ceiling is kept as you typed it), "BIN ok ≤ $X" on Buy It Nows and an "offer idea" on Best Offer listings (text only), and a "Watch-outs:" line on every alert: printed signature, new seller, thin listing, too good for a new seller, guessed price, or "none".
+- **Inventory check.** `python -m snipehunt inventory check`, and a section of the weekly report, list problems without changing the CSV: possible duplicates (same card, serial, seller and order date, or notes saying "Same item as"), Delivered rows older than 14 days, In transit past a due date in the notes, years that don't fit `known_cards.toml`, missing card numbers and item ids, the trade pile (dupe=Y), and a front page that isn't exactly 9 cards.
+- **Win messages.** The daily email sync announces each new win once, with "Binder: 2021 → pp4–5". When the title's year is wrong and the card number says otherwise it uses the real year and says so; when the year came from the title alone it adds "check the back of the card".
+- **Combined shipping.** When two or more open wins or unpaid orders are with one seller, you get "<seller>: N wins, wait for one combined invoice before paying.", at most once a day per seller, and no more once they are paid.
+
 ## The schedule
 
 One process runs everything. Times are in `SNIPEHUNT_TZ`.
@@ -163,8 +238,8 @@ One process runs everything. Times are in `SNIPEHUNT_TZ`.
 | When | What |
 |---|---|
 | Every hour, on the hour | Search, score, alert |
-| 9:00am | Limited-drops check, inventory sync from email |
-| Sunday 6:45pm | Weekly report (the first Sunday adds a value check, duplicates and grading candidates) |
+| 9:00am | Limited-drops check, inventory sync from email, win messages, combined-shipping reminders, the mid-tier summary |
+| Sunday 6:45pm | Weekly report (with the inventory check; the first Sunday adds a value check, duplicates and grading candidates), eBay field names refresh |
 | Sunday 7:30pm | Weekly self-review; see [How it improves itself](#how-it-improves-itself) |
 
 Run any of them by hand, with `--dry-run` to see what it would do:
@@ -258,6 +333,7 @@ eBay disables a Production keyset until your app answers its Marketplace Account
 
 - The API needs a bearer token on every request and can only do eight things: hide a pick, give feedback on a pick, restore hidden picks, mark cards filed, refresh, start a search, re-read Gixen, send a test alert.
 - Claude reads listing titles and emails written by strangers, so it runs with web search and web fetch only: no shell, no file access.
+- eBay is searched and single listings are read; nothing else. `tests/test_safety.py` fails the build if any module names an order, offer or checkout endpoint, writes to Gixen, or holds something that looks like a real token.
 - Gmail and Gixen are read-only. Gixen allows one login at a time, so the bot and your browser sign each other out; after losing its session the bot waits two hours before signing back in.
 
 ## Questions people ask
