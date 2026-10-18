@@ -23,7 +23,8 @@ def team(monkeypatch):
 
 
 def listing(n, title, price=10.0):
-    verdict, via, player = profile.get().match(title)
+    # built at import, before any fixture: use the team profile, never the machine's own home
+    verdict, via, player = profile.parse(TEAM).match(title)
     return Listing(str(800000000000 + n), title, price, "USD", 1.0, ["FIXED_PRICE"], None, None,
                    "shop", "", None, verdict, via=via, player=player)
 
