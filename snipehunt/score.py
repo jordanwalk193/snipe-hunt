@@ -745,6 +745,8 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
     for n, batch in enumerate(batches, 1):
         by_id = {i.item_id: i for i in batch}
         try:
+            if con is not None:   # never hold the write lock through a Claude call
+                con.commit()
             sold = sales.relevant(con, batch) if con is not None else []
             track = sales.track_record(con) if con is not None else ""
             reply = extract_json(ask_claude(

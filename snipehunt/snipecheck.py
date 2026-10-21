@@ -130,6 +130,9 @@ def appraise(con, snipes: list[dict], now: float | None = None) -> int:
         snipes="\n".join(json.dumps({
             "item_id": s["item_id"], "title": s["title"], "bid_now": s.get("current_bid"),
             "ends": s.get("end_time")}, ensure_ascii=False) for s in todo))
+    # A Claude call takes a minute: don't hold the write lock through it (the Gixen
+    # cache read above writes), or the dashboard and the cost record wait on it.
+    con.commit()
     reply = score.extract_json(score.ask_claude(
         prompt, tools=score.WEB_TOOLS if lookups else ""))
     asked, done = {s["item_id"] for s in todo}, 0

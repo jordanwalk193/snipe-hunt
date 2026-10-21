@@ -19,24 +19,66 @@ KEEP_DAYS = 62
 JOB_ENV = "SNIPEHUNT_JOB"   # set by jobs.main to the name of the job that is running
 
 
-def record(usd) -> None:
-    """Add one call's cost to today's total. Never raises: this is bookkeeping."""
+SPOOL = "claude_cost_spool.jsonl"   # costs that couldn't be written yet
+BUSY_MS = 2000   # the run that called Claude may itself hold the write lock: don't wait 30s
+
+
+def _spool(entry: dict) -> None:
+    with open(config.ensure_state_dir() / SPOOL, "a") as fh:
+        fh.write(json.dumps(entry) + "\n")
+
+
+def _take_spool() -> list[dict]:
+    """The spooled costs, claimed by renaming the file so no two runs add them twice."""
+    path = config.ensure_state_dir() / SPOOL
+    claimed = path.with_suffix(f".{os.getpid()}")
     try:
-        usd = float(usd)
+        path.rename(claimed)
+    except FileNotFoundError:
+        return []
+    out = [json.loads(line) for line in claimed.read_text().splitlines() if line.strip()]
+    claimed.unlink()
+    return out
+
+
+def record(usd) -> None:
+    """Add one call's cost to today's total. Never raises: this is bookkeeping.
+
+    When the database is busy (often this same run, mid-write), the cost goes to
+    a spool file instead and is added at the next call that gets through.
+    """
+    try:
+        entry = {"usd": float(usd), "day": datetime.now(config.TZ).date().isoformat(),
+                 "job": os.environ.get(JOB_ENV) or "other"}   # which job spent it
+    except (TypeError, ValueError):
+        return
+    try:
         con = db.connect()
-        days = json.loads(db.kv_get(con, KEY, "{}"))
-        today = datetime.now(config.TZ).date().isoformat()
-        entry = days.setdefault(today, {"usd": 0.0, "calls": 0})
-        entry["usd"] = round(entry["usd"] + usd, 4)
-        entry["calls"] += 1
-        db.kv_set(con, KEY, json.dumps(dict(sorted(days.items())[-KEEP_DAYS:])))
-        job = os.environ.get(JOB_ENV) or "other"   # which job spent it, for the self-review
-        db.bump(con, f"cost:{job}", usd, today)
-        db.bump(con, f"claude_calls:{job}", 1, today)
-        con.commit()
-        con.close()
+        con.execute(f"PRAGMA busy_timeout={BUSY_MS}")
+        con.execute("BEGIN IMMEDIATE")   # take the lock now, or fail fast
     except Exception as exc:
-        print(f"usage: could not record a Claude cost: {exc}", file=sys.stderr)
+        _spool(entry)
+        print(f"usage: database busy, cost spooled: {exc}", file=sys.stderr)
+        return
+    pending = []
+    try:
+        pending = _take_spool()
+        days = json.loads(db.kv_get(con, KEY, "{}"))
+        for e in [*pending, entry]:
+            day = days.setdefault(e["day"], {"usd": 0.0, "calls": 0})
+            day["usd"] = round(day["usd"] + e["usd"], 4)
+            day["calls"] += 1
+            db.bump(con, f"cost:{e['job']}", e["usd"], e["day"])
+            db.bump(con, f"claude_calls:{e['job']}", 1, e["day"])
+        db.kv_set(con, KEY, json.dumps(dict(sorted(days.items())[-KEEP_DAYS:])))
+        con.commit()
+    except Exception as exc:
+        con.rollback()
+        for e in [*pending, entry]:
+            _spool(e)
+        print(f"usage: could not record a Claude cost, spooled: {exc}", file=sys.stderr)
+    finally:
+        con.close()
 
 
 def summary(con, now: datetime | None = None) -> dict:
