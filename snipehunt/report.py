@@ -5,7 +5,8 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import config, db, inventory, known_cards, profile, sales, settings, spending, tune
+from . import (calibrate, config, db, inventory, known_cards, profile, sales, settings,
+               spending, tune)
 from .notify import TIER_ICON, TIER_ORDER
 from .score import ask_claude
 
@@ -281,6 +282,7 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
            "inventory.csv.", *inventory.check_lines(checked)]
 
     md += ["", "## Self-tuning"]
+    md += ["- Price calibration: " + calibrate.summary(calibrate.factors(con))]
     md += tune.lines(tune.view(con, 6)) or [
         "- No settings have been tuned yet." if settings.load(con)["self_tuning"]
         else "- Switched off."]

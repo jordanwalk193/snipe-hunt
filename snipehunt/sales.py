@@ -378,12 +378,16 @@ def with_calls(con, since: float = 0) -> list[dict]:
         if pick and pick.get("max") is not None and row["kind"] != "bin":
             value = pick.get("value")
             win = win_bid(value, row["shipping"], pick["max"])
+            # Claude's own guess before calibrate.py corrected it (the same when it didn't)
+            raw = pick.get("value_raw", value)
             row["call"] = {"tier": pick.get("tier"), "max": pick["max"], "value": value,
+                           "value_raw": raw, "basis": pick.get("max_basis"),
                            "under_max": row["price"] <= pick["max"], "win": win,
                            # a snipe at the win bid would have been in the running
                            "under_win": row["price"] <= (win or pick["max"])}
             # how far the real delivered price was from the going rate; + means it sold higher
             row["off"] = (row["total"] - value) / value if value else None
+            row["off_raw"] = (row["total"] - raw) / raw if raw else None
         out.append(row)
     return out
 

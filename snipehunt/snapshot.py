@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from . import (config, db, gixen, inventory, profile, rarity, report, sales, scheduler,
                settings, shortlist, snipecheck, spending, tune, watch)
-from . import usage
+from . import calibrate, usage
 from .notify import TIER_ORDER
 
 VERSION = 1
@@ -372,6 +372,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         # what the weekly self-review changed on its own, and how each change turned out
         "tuning": {"on": cfg["self_tuning"], "log": tune.view(con),
                    "tunables": tune.current(con)},
+        # how the bot corrects its own guessed going rates, per price band
+        "calibration": {"on": cfg["calibrate"], "bands": calibrate.factors(con)},
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),
         **({"team": team_view(con, picks, cfg)} if profile.get().mode == "team" else {}),

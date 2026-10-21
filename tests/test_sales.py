@@ -138,6 +138,7 @@ def test_the_dashboard_gets_recent_sales_and_how_the_picks_turned_out():
     assert view["value_gap_pct"] == 20      # $12 and $32 delivered against $15 and $40
     assert [s["item_id"] for s in view["sold"]] == ["1", "2", "3"]
     assert view["sold"][0]["call"] == {"tier": "fire", "max": 12.12, "value": 15.0,
+                                       "value_raw": 15.0, "basis": None,
                                        "under_max": True, "win": None, "under_win": True}
     # the second went past the max of 20.20 but a bid at the going rate would have held
     assert view["sold"][1]["call"]["win"] == 38.07 and view["under_win"] == 2

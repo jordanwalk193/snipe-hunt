@@ -6,6 +6,26 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### It corrects its own guesses
+- Guessed going rates are corrected per price band from how Claude's raw
+  guesses sold (`calibrate.py`): shrunk toward 1 while results are few, only
+  past `track_off`, held to x0.75..x1.40. An auction's max moves with its
+  value; Claude's number is kept as `value_raw`. Setting `calibrate`
+  (default on). Snapshot key `calibration`; shown in the weekly report and the
+  self-review.
+
+### Self-review
+- Snipes on picks by tier and price band (sniped, won, lost, your max vs the
+  bot's) and what won snipes cost against the going rate.
+- Claude CLI failures raise `ClaudeError`, so they are counted apart.
+- The prompt says which way `value_bias_pct` points.
+
+### Reliability
+- Claude costs are spooled to a file when the database is busy and added by
+  the next call, instead of being lost.
+- Scoring and the snipe check commit before every Claude call, so no run holds
+  the write lock through one.
+
 ### Mid-tier steals lane
 - A $20–$80 lane for mislabeled listings (`[search.midtier]`, `midtier.py`):
   misspellings searched first, auctions ending within 36 hours and Buy It Now /

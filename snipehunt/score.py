@@ -18,7 +18,8 @@ import unicodedata
 
 from datetime import datetime, timedelta
 
-from . import config, db, filters, inventory, pricing, profile, sales, settings, usage
+from . import (calibrate, config, db, filters, inventory, pricing, profile, sales, settings,
+               usage)
 from .ebay_search import Listing
 
 WEB_TOOLS = "WebFetch,WebSearch"
@@ -597,6 +598,11 @@ def extract_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
+class ClaudeError(RuntimeError):
+    """The claude CLI failed or answered with an error (an outage or a usage limit,
+    not a bug in the bot). Its own name, so the weekly numbers can tell them apart."""
+
+
 def ask_claude(prompt: str, tools: str = WEB_TOOLS,
                timeout: int = TIMEOUT) -> str:
     """Run `claude -p` in the state directory, away from any project files.
@@ -627,23 +633,27 @@ def ask_claude(prompt: str, tools: str = WEB_TOOLS,
             f"The Claude CLI ({cmd[0]!r}) wasn't found. Install it with `npm install -g "
             "@anthropic-ai/claude-code`, or set CLAUDE_BIN to its full path") from None
     if proc.returncode != 0:
-        raise RuntimeError(f"claude -p exit {proc.returncode}: "
+        raise ClaudeError(f"claude -p exit {proc.returncode}: "
                            f"{(proc.stderr or proc.stdout)[:300]}")
     outer = json.loads(proc.stdout)
     usage.record(outer.get("total_cost_usd") or 0)
     if outer.get("is_error"):
-        raise RuntimeError(f"claude -p error: {str(outer.get('result'))[:300]}")
+        raise ClaudeError(f"claude -p error: {str(outer.get('result'))[:300]}")
     return outer.get("result", "")
 
 
 def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
-               comps: list[dict] | None = None) -> dict | None:
+               comps: list[dict] | None = None, learned: dict | None = None
+               ) -> dict | None:
     """One of Claude's picks as the bot keeps it, or None when it doesn't hold up.
 
     `combined` are sellers (lower case) with an open order who combine
     shipping: for them the deal is worked out with $0 shipping. `comps` are
     recorded sales of the exact card (sales.ledger_comps): they come before
     Claude's value, and how many there are caps the stars (thin_comps).
+    `learned` are calibrate.factors: a guessed value (and an auction's max with
+    it) is corrected by its band's factor, and Claude's own number is kept as
+    "value_raw".
     """
     tier = str(raw.get("tier", "")).lower()
     try:
@@ -652,15 +662,22 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
         return None
     if tier not in TIERS:
         return None
-    if item.is_auction:   # odd cents, never above what Claude said
-        max_bid = pricing.odd_cents(max_bid)
-    # Belt and braces: never surface something already priced past the max.
-    if item.price > max_bid:
-        return None
     try:
         value = round(float(raw["value"]), 2)
     except (KeyError, TypeError, ValueError):
         value = None
+    ledger = thin_comps(comps) if comps else None
+    basis = "sales" if raw.get("max_basis") == "sales" or ledger else "estimate"
+    value_raw, factor = value, calibrate.adjust(value, basis, learned or {})
+    if factor != 1.0:
+        value = round(value * factor, 2)
+        if item.is_auction:   # a max that never wins is no use; it moves with the value
+            max_bid = round(max_bid * factor, 2)
+    if item.is_auction:   # odd cents, never above what Claude said (or the correction)
+        max_bid = pricing.odd_cents(max_bid)
+    # Belt and braces: never surface something already priced past the max.
+    if item.price > max_bid:
+        return None
     team = profile.get().mode == "team"
     ship = item.shipping if item.shipping is not None else UNKNOWN_SHIPPING
     if team and raw.get("want") is True:
@@ -676,7 +693,6 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
             max_bid = min(max_bid, round(ceiling - ship, 2))
             if item.price > max_bid:
                 return None
-    ledger = thin_comps(comps) if comps else None
     if ledger:   # recorded sales of this exact card come first
         value = ledger["value"]
     # What you would really pay: the asking price, or the snipe if it wins at its max.
@@ -696,6 +712,7 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
         "win": sales.win_bid(value, 0.0 if combined_ship else item.shipping, max_bid)
         if item.is_auction else None,
         "max_basis": "sales" if raw.get("max_basis") == "sales" else "estimate",
+        **({"value_raw": value_raw, "calibrated": factor} if factor != 1.0 else {}),
         "comps": str(raw.get("comps", ""))[:300], "why": str(raw.get("why", ""))[:140],
         "title": item.title, "price": item.price, "shipping": item.shipping,
         "total": item.total, "is_auction": item.is_auction,
@@ -742,6 +759,10 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
     scored: list[Listing] = []
     batches = [items[i:i + BATCH] for i in range(0, len(items), BATCH)][:MAX_BATCHES]
     combined = combined_sellers(con) if con is not None else frozenset()
+    learned_factors = calibrate.factors(con) if con is not None else {}
+    if verbose and learned_factors:
+        print(f"score: calibrating guesses: {calibrate.summary(learned_factors)}",
+              file=sys.stderr)
     for n, batch in enumerate(batches, 1):
         by_id = {i.item_id: i for i in batch}
         try:
@@ -766,7 +787,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
         for raw in reply.get("picks", []) or []:
             item = by_id.get(str(raw.get("item_id")))
             comps = sales.ledger_comps(con, item) if item and con is not None else None
-            pick = _pick_dict(item, raw, combined, comps) if item else None
+            pick = _pick_dict(item, raw, combined, comps, learned_factors) if item else None
             if pick:
                 batch_picks.append(pick)
         picks.extend(batch_picks)

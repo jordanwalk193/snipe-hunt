@@ -277,3 +277,40 @@ def test_the_runs_are_counted_for_the_review(monkeypatch):
     assert db.stat_totals(con, day, day) == {
         "runs:hourly": 2, "ebay_calls:hourly": 34, "failures:hourly": 1,
         "error:hourly:KeyError": 1, "cost:hourly": 0.25, "claude_calls:hourly": 1}
+
+
+def test_the_review_is_told_which_way_the_bias_points():
+    from snipehunt import reflect
+    assert "ABOVE zero means cards sold for MORE" in reflect.PROMPT
+    assert '"calibration"' in reflect.PROMPT
+
+
+def test_snipes_on_picks_are_counted_by_tier_and_how_they_ended():
+    import time as _t
+    from snipehunt import config as _c, db as _db, reflect
+    con = _db.connect()
+    now = _t.time()
+    picks = [{"item_id": i, "tier": t, "value": v, "is_auction": True}
+             for i, t, v in (("w", "green", 20.0), ("l", "green", 20.0), ("n", "fire", 80.0))]
+    for item_id, my, bot in (("w", 9.09, 12.12), ("l", 15.15, 12.12)):
+        con.execute("INSERT INTO snipe_log VALUES (?,?,?,?,?,?)",
+                    (item_id, "t", my, bot, 20.0, now - 60))
+    con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                "VALUES ('l','t',18.0,1.0,5,?)", (now,))
+    header = _c.INVENTORY.read_text().splitlines()[0].split(",")
+    row = dict.fromkeys(header, "")
+    row.update(id="999", status="Won", price_paid="9.09", ebay_item_id="w")
+    with _c.INVENTORY.open("a") as fh:
+        fh.write(",".join(row[h] for h in header) + "\n")
+    got = reflect.snipe_results(con, picks, now - 3600, now + 1)
+    green = got["by_tier"]["green"]
+    assert (green["auctions"], green["sniped"], green["won"], green["lost"]) == (2, 2, 1, 1)
+    assert green["sniped_pct"] == 100 and green["avg_my_max_minus_bot_max"] == 0.0
+    assert got["by_tier"]["fire"]["sniped"] == 0
+    assert got["by_band"]["$10 to $50"]["won"] == 1
+    assert got["won_paid_vs_value_pct"] == -55
+
+
+def test_a_failed_claude_call_has_its_own_error_name():
+    from snipehunt import score
+    assert issubclass(score.ClaudeError, RuntimeError)

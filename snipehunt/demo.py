@@ -297,6 +297,8 @@ def build(now: datetime | None = None) -> dict:
                                       "seller": SELLERS[1]}]},
         "market": _market(now),
         "tuning": {"on": True, "log": [], "tunables": {}},
+        "calibration": {"on": True, "bands": {
+            "$10 to $50": {"factor": 1.12, "calls": 14, "bias_pct": 21}}},
         "rarest": _rarest(now),
         "rarest_census": {"one_of_one": 4, "to_10": 11, "to_50": 37},
         "moves": _moves(now),

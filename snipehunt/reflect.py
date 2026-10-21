@@ -29,7 +29,8 @@ from datetime import datetime, timedelta
 
 import requests
 
-from . import config, db, gitsync, notify, profile, rarity, sales, score, tune, usage
+from . import (calibrate, config, db, gitsync, inventory, notify, profile, rarity, sales,
+               score, tune, usage)
 
 WEEK = 7 * 86400
 LOOK_BACK = 4            # earlier reviews whose proposals are followed up
@@ -67,6 +68,18 @@ How to read the numbers:
 - A "call" is a pick whose auction then sold; under_max_rate is the share of \
 calls that closed at or under the max the bot gave, and value_gap_pct is how \
 far its going rate was from the real delivered price, typically.
+- value_bias_pct is (real delivered price - going rate) / going rate, as a \
+median. ABOVE zero means cards sold for MORE than the bot's going rate (its \
+values were too low); BELOW zero means they sold for LESS (its values were \
+too high). Read the sign carefully before building on it.
+- "calibration" shows the correction the bot already applies by itself to \
+guessed (not sales-backed) going rates in each price band, learned from \
+Claude's raw guesses. Don't propose a fix it is already making; say whether \
+the bias that is left looks like what it can't correct.
+- "snipes" breaks the collector's snipes on picks down by tier and price \
+band: sniped_pct, how far their max sat from the bot's, and won/lost (lost = \
+sold to someone else). won_paid_vs_value_pct is what won snipes cost against \
+the bot's going rate, as a median; below zero is a steal.
 - skipped_pct is the share of picks the collector hid with the Skip button, \
 and sniped_pct the share of auction picks the collector set a snipe on. \
 by_edge counts the picks the bot itself labelled as a price mistake \
@@ -169,6 +182,7 @@ def window(con, start: float, end: float) -> dict:
             "sniped_pct": _pct(len(sniped), len(auctions)),
             "snipes_on_picks": len(gaps),
             "avg_my_max_minus_bot_max": round(statistics.mean(gaps), 2) if gaps else None},
+        "snipes": snipe_results(con, picks, start, end),
         "feedback": feedback_counts(said),
         "alerts": {
             "sent": int(stats.get("alerts_sent", 0)), "held": int(stats.get("alerts_held", 0)),
@@ -190,6 +204,55 @@ def window(con, start: float, end: float) -> dict:
             "failures": {job: int(n) for job, n in per_job("failures").items()},
             "error_types": dict(errors),
             "gixen_sign_outs": int(stats.get("gixen_signed_out", 0))},
+    }
+
+
+def snipe_results(con, picks: list[dict], start: float, end: float) -> dict:
+    """The collector's snipes on picks logged in this stretch, by tier and price band:
+    how many auction picks got one, how far their max sat from the bot's, and how
+    they ended (won = in the inventory under that item id, lost = sold to someone else)."""
+    by_id = {p["item_id"]: p for p in picks if p.get("is_auction")}
+    snipes = [dict(r) for r in con.execute(
+        "SELECT * FROM snipe_log WHERE logged_at>=? AND logged_at<?", (start, end))]
+    owned = {r.get("ebay_item_id"): r for r in inventory.read()[1] if r.get("ebay_item_id")}
+    gone = {r[0] for r in con.execute("SELECT item_id FROM sales")}
+
+    def group(key) -> dict:
+        out: dict = {}
+        for p in by_id.values():
+            out.setdefault(key(p), {"auctions": 0, "sniped": 0, "won": 0, "lost": 0,
+                                    "_gaps": []})["auctions"] += 1
+        for s in snipes:
+            p = by_id.get(s["item_id"])
+            if p is None:
+                continue
+            g = out[key(p)]
+            g["sniped"] += 1
+            if s["my_max"] is not None and s["bot_max"] is not None:
+                g["_gaps"].append(s["my_max"] - s["bot_max"])
+            if s["item_id"] in owned:
+                g["won"] += 1
+            elif s["item_id"] in gone:
+                g["lost"] += 1
+        for g in out.values():
+            gaps = g.pop("_gaps")
+            g["sniped_pct"] = _pct(g["sniped"], g["auctions"])
+            g["avg_my_max_minus_bot_max"] = round(statistics.mean(gaps), 2) if gaps else None
+        return out
+
+    paid = []   # what a won snipe cost against the going rate the bot gave
+    for s in snipes:
+        row, value = owned.get(s["item_id"]), s["bot_value"]
+        try:
+            price = float(row["price_paid"]) if row else None
+        except (TypeError, ValueError):
+            price = None
+        if price and value:
+            paid.append((price - value) / value)
+    return {
+        "by_tier": group(lambda p: p.get("tier") or "none"),
+        "by_band": group(lambda p: sales.band(p["value"]) if p.get("value") else "no value"),
+        "won_paid_vs_value_pct": round(100 * statistics.median(paid)) if paid else None,
     }
 
 
@@ -245,6 +308,7 @@ def bundle(con, now: datetime) -> dict:
         "this_week": window(con, end - WEEK, end),
         "previous_4_weeks": window(con, end - 5 * WEEK, end - WEEK),
         "tunables": tune.current(con),
+        "calibration": calibrate.factors(con),
         "tuning_log": [{k: row[k] for k in ("name", "old", "new", "metric", "baseline",
                                              "result", "status")}
                        for row in tune.view(con, 8)],
@@ -399,7 +463,7 @@ ROWS = (   # label, then where the number is in a window
     ("Picked auctions that sold", ("scorecard", "calls")),
     ("…closed at or under the max (%)", ("scorecard", "under_max_rate")),
     ("Going rate off by, typically (%)", ("scorecard", "value_gap_pct")),
-    ("Going rate bias (%)", ("scorecard", "value_bias_pct")),
+    ("Going rate bias (%, + = sold above it)", ("scorecard", "value_bias_pct")),
     ("Missed steals", ("missed_steals", "count")),
     ("Picks", ("picks", "count")),
     ("Picks hidden (%)", ("picks", "skipped_pct")),
@@ -435,6 +499,8 @@ def render(review: dict) -> str:
     md += ["", "Per price band, picked auctions that sold this week:"]
     md += [f"- {b['band']}: {b['calls']} sold, going rate bias {_dig(b, ('value_bias_pct',))}%"
            for b in week["scorecard"]["bands"]]
+    md += ["", "Calibration (the bot's own correction of guessed going rates): "
+           + calibrate.summary(numbers.get("calibration") or {})]
     md += ["", f"## Proposals ({len(review['proposals'])})"]
     for p in review["proposals"]:
         md += ["", f"### {p['id']} ({p['kind']}): {p['problem']}",
