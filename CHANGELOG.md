@@ -6,6 +6,14 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Fresh bids near the end
+- `bids.py`: between hourly runs, every fire or green auction pick ending
+  within 3 hours is read again (this minute's bid, never the day's cache) at
+  most every 25 minutes, in the `lastcall` job at :30, which now also starts
+  when such a pick exists. Its own eBay lane `bids`, cut at 90% of the cap.
+- Picks carry `price_at` (when eBay last gave the price) and, for auctions,
+  `bids`; `seen` gained `bids` and `bid_at`.
+
 ### Fixed
 - Picks showed the price they were scored at: an auction could read $0.99 on
   the dashboard while eBay was at $42. Each pick now takes price and shipping

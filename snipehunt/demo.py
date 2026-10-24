@@ -249,6 +249,8 @@ def build(now: datetime | None = None) -> dict:
             "deal": stars, "deal_pct": max(pct, 0), "edge": EDGES.get(n), "fast": n == 4,
             "feedback": None, "unverified": False, "want": False,
             "seller_feedback": 1200 + 317 * n, "seller_pct": 99.8, "new_seller": False,
+            "price_at": (now - timedelta(minutes=12 + 7 * n)).isoformat(timespec="minutes"),
+            "bids": (n * 3) % 11 if hours else None,
             "win": sales.win_bid(float(value), ship, max_bid) if hours else None,
             "last_sold": {"total": round(value * 0.96, 2), "price": round(value * 0.96 - ship, 2),
                           "n": 2 + n % 3, "at": (now - timedelta(days=3 + n)).date().isoformat()}

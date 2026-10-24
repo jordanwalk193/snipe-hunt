@@ -44,6 +44,9 @@ def _slim(pick: dict) -> dict:
         "why": _short(pick.get("why"), 170), "url": pick.get("url"),
         "image": pick.get("image"), "snipe": pick.get("snipe"),
         "bid_now": pick.get("bid_now"), "value": pick.get("value"),
+        # when eBay last gave this price (a search, or bids.py near the end), and
+        # an auction's bid count then
+        "price_at": pick.get("price_at"), "bids": pick.get("bids"),
         "deal": pick.get("deal"), "deal_pct": pick.get("deal_pct"),
         "edge": pick.get("edge"), "fast": bool(pick.get("fast")),
         "feedback": pick.get("feedback"),
@@ -77,10 +80,20 @@ def skipped_ids(con) -> list[str]:
 def live_picks(con, now: datetime) -> list[dict]:
     """Picks whose listing is still up and, for auctions, still running."""
     rows = con.execute(
-        "SELECT p.data, s.price, s.shipping FROM picks p JOIN seen s USING (item_id) "
+        "SELECT p.data, s.price, s.shipping, s.bids, s.last_seen, s.bid_at "
+        "FROM picks p JOIN seen s USING (item_id) "
         "WHERE s.last_seen >= ?", (int(now.timestamp()) - LIVE_WINDOW,))
     skipped = set(skipped_ids(con))
-    picks = [current(json.loads(r["data"]), r["price"], r["shipping"]) for r in rows]
+    picks = []
+    for r in rows:
+        p = current(json.loads(r["data"]), r["price"], r["shipping"])
+        if p is not None:   # when eBay last told us this price, and the bids behind it
+            at = max(r["last_seen"] or 0, r["bid_at"] or 0)
+            p["price_at"] = datetime.fromtimestamp(at, config.TZ).isoformat(
+                timespec="minutes") if at else None
+            if p.get("is_auction"):
+                p["bids"] = r["bids"]
+        picks.append(p)
     picks = [p for p in picks if p and p["item_id"] not in skipped]
     return [p for p in picks if not (
         p.get("is_auction") and p.get("end_time")

@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from . import (aspects, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
+from . import (aspects, bids, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
                inventory_sync, limited_drops, lowball, midtier, notify, offers, ops, profile,
                rarity, reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
                usage, watch, wins)
@@ -263,13 +263,17 @@ def _warn_snipes(con, now: datetime | None = None) -> int:
 
 
 def lastcall(dry_run: bool = False) -> str:
-    """Lowball last call: the targets ending within a few hours, looked up again, and
+    """Between hourly runs: fresh bids on the good picks ending soon (bids.py), then
+    lowball last call: the targets ending within a few hours, looked up again, and
     the ones still far under their going rate sent to the phone. No Claude; one eBay
-    read per target due, none at all when nothing is due."""
+    read per listing due, none at all when nothing is due."""
     config.require("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET")
     con = db.connect()
-    hits = lowball.last_call(con, ebay_search.EbayClient(con), _sniped(con), send=not dry_run)
-    return f"{len(hits)} lowball last call{'s' if len(hits) != 1 else ''}"
+    client = ebay_search.EbayClient(con)
+    read = 0 if dry_run else bids.refresh(con, client)   # the picks ending soon, bid by bid
+    hits = lowball.last_call(con, client, _sniped(con), send=not dry_run)
+    return (f"{read} bids read again, "
+            f"{len(hits)} lowball last call{'s' if len(hits) != 1 else ''}")
 
 
 def _remember(con, listings: list) -> list[dict]:
@@ -282,6 +286,8 @@ def _remember(con, listings: list) -> list[dict]:
         db.touch(con, item.item_id, item.title, item.is_auction,
                  datetime.fromisoformat(item.end_time).timestamp() if item.end_time else None,
                  item.shipping, item.price, item.seller)
+        if item.is_auction:
+            db.note_bids(con, item.item_id, item.bid_count)
     return moves
 
 

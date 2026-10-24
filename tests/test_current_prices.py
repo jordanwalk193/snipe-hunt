@@ -37,3 +37,12 @@ def test_a_buy_it_now_cut_since_scoring_is_rated_again():
     seen(con, p, 30.0, 0.0)
     (got,) = snapshot.live_picks(con, NOW)
     assert got["price"] == 30.0 and got["deal_pct"] == 62 and got["deal"] >= 4
+
+
+def test_picks_say_when_their_price_was_read_and_how_many_bids():
+    con = db.connect()
+    seen(con, pick("5"), 12.0, 4.99)
+    db.note_bids(con, "5", 3)
+    (got,) = snapshot.live_picks(con, NOW)
+    assert got["bids"] == 3 and got["price_at"][:10] == NOW.date().isoformat()
+    assert snapshot._slim(got)["bids"] == 3

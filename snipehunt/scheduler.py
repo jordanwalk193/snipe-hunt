@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from . import config, db
 
 HOURLY_MINUTE = 0
-LAST_CALL_MINUTE = 30      # lowball last call, between hourly runs (no Claude)
+LAST_CALL_MINUTE = 30      # lowball last call and fresh bids, between hourly runs (no Claude)
 DAILY_AT = (9, 0)
 WEEKLY_AT = (6, 18, 45)    # weekday (Monday is 0), hour, minute: Sunday 6:45pm
 REFLECT_AT = (6, 19, 30)   # the self-review, once the weekly report is out: Sunday 7:30pm
@@ -85,6 +85,15 @@ def _last_call_wanted(con, now: datetime) -> bool:
                if t.get("end_time") and t.get("value", 0) >= lowball.CALL_MIN_VALUE)
 
 
+def _bids_wanted(con, now: datetime) -> bool:
+    """Is a good auction pick ending soon due a fresh bid read (bids.py)?"""
+    from . import bids
+    try:
+        return bids.wanted(con, now)
+    except Exception:   # a busy or half-built database: try again next tick
+        return False
+
+
 def due_jobs(con, now: datetime) -> list[str]:
     """Jobs whose scheduled time has passed since they last started."""
     out = []
@@ -95,7 +104,7 @@ def due_jobs(con, now: datetime) -> list[str]:
         late = LATE.get(job, fast_minutes() * 60)
         if job == "fast" and due.minute == HOURLY_MINUTE:
             continue   # the hourly run is searching anyway
-        if job == "lastcall" and not _last_call_wanted(con, now):
+        if job == "lastcall" and not (_last_call_wanted(con, now) or _bids_wanted(con, now)):
             continue
         if started < due.timestamp() and (now - due).total_seconds() <= late:
             out.append(job)

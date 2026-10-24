@@ -241,7 +241,7 @@ One process runs everything. Times are in `SNIPEHUNT_TZ`.
 | When | What |
 |---|---|
 | Every hour, on the hour | Search, score, alert; offers to send, lowball snipes, snipe warnings; the Google Sheet push, if set up |
-| Half past each hour | Lowball last call, only when a target ends within three hours (no Claude) |
+| Half past each hour | Fresh bids on good picks ending within three hours, and lowball last call; only when one of those is due (no Claude) |
 | 9:00am | Limited-drops check, inventory sync from email, win messages, combined-shipping reminders, the mid-tier summary |
 | Sunday 6:45pm | Weekly report (with the inventory check; the first Sunday adds a value check, duplicates and grading candidates), eBay field names refresh |
 | Sunday 7:30pm | Weekly self-review; see [How it improves itself](#how-it-improves-itself) |

@@ -114,7 +114,10 @@ PRICE_DROP = 0.20  # re-score / re-alert only when the price falls this much
 # sold price isn't worth an eBay call. NULL (every player-mode row) means tracked.
 SEEN_ADDED = {"is_auction": "INTEGER", "end_ts": "INTEGER", "shipping": "REAL",
               "closed_at": "INTEGER", "price": "REAL", "seller": "TEXT",
-              "checked_at": "INTEGER", "tracked": "INTEGER"}
+              "checked_at": "INTEGER", "tracked": "INTEGER",
+              # an auction's bid count from the latest search, and when bids.py last
+              # read the bid itself between searches
+              "bids": "INTEGER", "bid_at": "INTEGER"}
 UNTRACKED_KEEP_DAYS = 30   # team mode forgets passed-over listings after this
 # Added to `sales`: the photo, then whether it was an auction or a fixed-price sale,
 # then where the price came from: ebay (the bot looked it up), gixen or won (an
@@ -157,6 +160,17 @@ def touch(con, item_id: str, title: str, is_auction: bool | None = None,
         (item_id, title, now, now, None if is_auction is None else int(is_auction),
          None if end_ts is None else int(end_ts), shipping, price, seller),
     )
+
+
+def note_bids(con, item_id: str, bids: int | None) -> None:
+    """An auction's bid count, as the latest search gave it."""
+    con.execute("UPDATE seen SET bids=? WHERE item_id=?", (bids, item_id))
+
+
+def note_bid(con, item_id: str, price: float, bids: int | None, at: int) -> None:
+    """A fresh read of an auction's bid between searches (bids.py)."""
+    con.execute("UPDATE seen SET price=?, bids=?, bid_at=? WHERE item_id=?",
+                (price, bids, at, item_id))
 
 
 def note_snipe(con, item_id: str, title: str, end_ts: float | None,
