@@ -159,3 +159,13 @@ def test_a_tab_too_small_for_the_data_grows_first(sheet_env):
     collection = s.tabs.index("Collection")
     assert lengths[collection] > 0 and s.tabs.index("Lowball") not in lengths  # 2 rows fit
     assert grow is s.calls[1]   # before anything is written
+
+
+def test_an_api_that_is_off_is_not_blamed_on_sharing(sheet_env):
+    class Off(FakeSession):
+        def request(self, method, url, timeout=None, params=None, json=None):
+            return Resp({"error": {"message": "Google Sheets API has not been used in "
+                                   "project 1 before or it is disabled."}}, 403)
+    with pytest.raises(sheets.SheetsError) as err:
+        sheets.push(db.connect(), SNAP, session=Off(), now=NOW)
+    assert "has not been used" in str(err.value) and "share the sheet" not in str(err.value)

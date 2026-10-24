@@ -234,8 +234,10 @@ def _call(session, method: str, url: str, **kw) -> dict:
             msg = resp.json()["error"]["message"]
         except (ValueError, KeyError, TypeError):
             msg = resp.text[:200]
+        # a 403 is also what a project without the Sheets API turned on gets
+        api_off = "has not been used" in msg or "is disabled" in msg
         hint = (" (share the sheet with the service account's email as an editor)"
-                if resp.status_code in (403, 404) else "")
+                if resp.status_code in (403, 404) and not api_off else "")
         raise SheetsError(f"Google Sheets {resp.status_code}: {msg}{hint}")
     return resp.json() if resp.content else {}
 
