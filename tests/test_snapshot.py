@@ -269,7 +269,7 @@ def test_demo_mode_serves_made_up_data_and_changes_nothing(con, server, monkeypa
     assert set(real_pick) == set(fake["picks"][0])
     monkeypatch.setitem(config.load(), "SNIPEHUNT_DEMO", "1")
     code, snap = call(server + "/api/snapshot")
-    assert code == 200 and snap["demo"] is True and len(snap["picks"]) == 9
+    assert code == 200 and snap["demo"] is True and len(snap["picks"]) == 10   # 9 plus the demo jackpot
     code, out = call(server + "/api/action", {"action": "skip", "item_id": "111111111111"})
     assert out["ok"] and "Demo mode" in out["message"]
     assert snapshot.skipped_ids(con) == []

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import config, db, filters, pricing, profile, sales, score, settings
+from . import config, db, filters, jackpot, pricing, profile, sales, score, settings
 
 TIER_ICON = {"fire": "🔥", "green": "🟢", "yellow": "🟡", "drop": "⏰"}
 TIER_ORDER = {"drop": 0, "fire": 1, "green": 2, "yellow": 3}
@@ -32,8 +32,11 @@ def configured() -> bool:
 
 
 def send(title: str, message: str, url: str | None = None,
-         image: str | None = None) -> None:
-    """Send to Home Assistant if it is set up, and to ntfy if `NTFY_URL` is set."""
+         image: str | None = None, urgent: bool = False) -> None:
+    """Send to Home Assistant if it is set up, and to ntfy if `NTFY_URL` is set.
+
+    `urgent` (jackpots only) asks the phone to break through Focus / Do Not
+    Disturb: time-sensitive on iPhone, high priority on Android, urgent on ntfy."""
     ha_url, token, service = (config.get(k) for k in ("HA_URL", "HA_TOKEN", "HA_NOTIFY_SERVICE"))
     ntfy = config.get("NTFY_URL")
     if not (ha_url and token and service) and not ntfy:
@@ -46,6 +49,9 @@ def send(title: str, message: str, url: str | None = None,
             data["clickAction"] = url   # Android
         if image:
             data["image"] = image
+        if urgent:
+            data["push"] = {"interruption-level": "time-sensitive"}   # iOS
+            data.update(priority="high", ttl=0)                      # Android
         payload = {"title": title, "message": message}
         if data:
             payload["data"] = data
@@ -61,6 +67,8 @@ def send(title: str, message: str, url: str | None = None,
             headers["Click"] = url
         if image:
             headers["Attach"] = image
+        if urgent:
+            headers["Priority"] = "urgent"
         resp = requests.post(ntfy, data=message.encode("utf-8"), headers=headers, timeout=20)
         if resp.status_code >= 400:
             raise RuntimeError(f"ntfy {resp.status_code}: {resp.text[:200]}")
@@ -468,7 +476,9 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
     if current is not None:
         candidates = [p for p in (refresh(con, p, current, now) for p in candidates) if p]
     stale -= len(candidates)   # dropped because the price moved on or the listing is gone
-    candidates = [p for p in candidates if worth_alerting(p)]
+    # a card at a sliver of its value skips every alert setting and quiet hours
+    jackpots = {p["item_id"] for p in jackpot.alert(con, candidates, now, send=not dry_run)}
+    candidates = [p for p in candidates if p["item_id"] not in jackpots and worth_alerting(p)]
     candidates = [p for p in candidates if db.may_alert(con, p["item_id"], p["total"])]
     send_now, hold = split_for_quiet_hours(candidates, now)
     # Once a night, as quiet hours begin: the snipes to enter before going to bed.

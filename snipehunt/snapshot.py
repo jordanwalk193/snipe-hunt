@@ -12,8 +12,8 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import (config, db, gixen, inventory, lowball, offers, profile, rarity, report, sales,
-               scheduler, score, settings, shortlist, snipecheck, spending, tune, watch)
+from . import (config, db, gixen, inventory, jackpot, lowball, offers, profile, rarity, report,
+               sales, scheduler, score, settings, shortlist, snipecheck, spending, tune, watch)
 from . import calibrate, usage
 from .notify import TIER_ORDER
 
@@ -47,6 +47,7 @@ def _slim(pick: dict) -> dict:
         # when eBay last gave this price (a search, or bids.py near the end), and
         # an auction's bid count then
         "price_at": pick.get("price_at"), "bids": pick.get("bids"),
+        "jackpot": pick.get("jackpot"),   # "sales" or "guess" when it is one (jackpot.py)
         "deal": pick.get("deal"), "deal_pct": pick.get("deal_pct"),
         "edge": pick.get("edge"), "fast": bool(pick.get("fast")),
         "feedback": pick.get("feedback"),
@@ -389,6 +390,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
     for p in picks:   # a "good call" stays on the board; the dashboard marks it
         p["feedback"] = given.get(p["item_id"])
     picks = ranked(picks)
+    # a card at a sliver of its value: the dashboard's loudest banner
+    jackpots = jackpot.mark(picks, now)
     spend = spending.summary(rows, now.date(), cfg["monthly_budget"])
     for p in picks:   # "you usually pay" next to each pick, once there is a history
         usual = spending.usual_for(spend, p.get("title") or p.get("card") or "")
@@ -404,6 +407,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "status": state,
         "picks": _with_last_sold(con, [_slim(p) for p in picks[:MAX_PICKS]]),
         "gixen": gix,
+        # $20+ cards at a sliver of their value, the best first (also flagged in picks)
+        "jackpots": [_slim(p) for p in jackpots],
         "cards": cards(rows),
         "collection": collection(rows, now),
         "pipeline": pipeline(rows, picks),

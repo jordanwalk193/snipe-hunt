@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from . import config, lowball, offers, profile, sales, settings, snapshot, snipecheck, spending
+from . import config, jackpot, lowball, offers, profile, sales, settings, snapshot, snipecheck, spending
 
 # (tier, card, price, shipping, max, value, hours until it ends or None for Buy It Now,
 #  basis, snipe, why, colour)
@@ -284,6 +284,14 @@ def build(now: datetime | None = None) -> dict:
     for p in picks:
         usual = spending.usual_for(spend, p.get("card") or "")
         p["usual_paid"] = usual["usual"] if usual else None
+    # one jackpot, so the demo shows the banner: a $34 card listed at $1.25
+    bin_pick = next(p for p in picks if not p["is_auction"])
+    picks.insert(0, dict(bin_pick, item_id="410000900001", card="2022 Bowman Chrome Prospect Auto Refractor /499",
+                         tier="fire", price=1.25, shipping=1.00, total=2.25, value=34.0,
+                         max_basis="sales", deal=5, deal_pct=93, edge="mispriced",
+                         url="https://www.ebay.com/itm/410000900001",
+                         why="Priced at $1.25 with free returns: the seller almost certainly meant $125."))
+    jackpots = jackpot.mark(picks, now)
     return {
         "api": snapshot.VERSION, "demo": True, "profile": who.public(),
         "generated": now.isoformat(timespec="seconds"),
@@ -305,6 +313,7 @@ def build(now: datetime | None = None) -> dict:
                            and p["end_time"] <= (now + timedelta(hours=24)).isoformat()],
         },
         "picks": picks,
+        "jackpots": jackpots,
         "gixen": _checked({"available": True, "problem": None,
                   "read_at": (now - timedelta(minutes=6)).isoformat(timespec="seconds"),
                   "snipes": sorted(snipes, key=lambda s: s["end_time"]), "outbid_count": 1,

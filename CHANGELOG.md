@@ -6,6 +6,17 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Jackpots
+- `jackpot.py`: a card worth $20+ that costs 20% or less of its value delivered
+  (12% when the value is only an estimate): Buy It Now / Best Offer at once, an
+  auction in its last 2 hours at its current bid. Never a fake auto, an
+  unverified price, a new seller or a scam-guard pick. It skips the alert
+  settings, quiet hours and the bedtime bundle: one alert each, time-sensitive
+  on iPhone (`push.interruption-level`), high priority on Android, urgent on
+  ntfy (`notify.send(urgent=True)`), sent once. The half-hourly job checks
+  auctions ending soon at their fresh bid. Setting `jackpot_alerts` (default
+  on). Snapshot `jackpots` and `picks[].jackpot` ("sales" or "guess").
+
 ### Fresh bids near the end
 - `bids.py`: between hourly runs, every fire or green auction pick ending
   within 3 hours is read again (this minute's bid, never the day's cache) at

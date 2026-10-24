@@ -14,9 +14,9 @@ import time
 from datetime import datetime, timedelta
 
 from . import (aspects, bids, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
-               inventory_sync, limited_drops, lowball, midtier, notify, offers, ops, profile,
-               rarity, reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
-               usage, watch, wins)
+               inventory_sync, jackpot, limited_drops, lowball, midtier, notify, offers, ops,
+               profile, rarity, reflect, report, sales, score, settings, sheets, shortlist,
+               snipecheck, usage, watch, wins)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -271,6 +271,10 @@ def lastcall(dry_run: bool = False) -> str:
     con = db.connect()
     client = ebay_search.EbayClient(con)
     read = 0 if dry_run else bids.refresh(con, client)   # the picks ending soon, bid by bid
+    # an auction still at a sliver of its value in its last hours, at today's bid
+    if not dry_run and settings.load(con)["alerts_enabled"]:
+        from . import snapshot
+        jackpot.alert(con, snapshot.live_picks(con, datetime.now(config.TZ)))
     hits = lowball.last_call(con, client, _sniped(con), send=not dry_run)
     return (f"{read} bids read again, "
             f"{len(hits)} lowball last call{'s' if len(hits) != 1 else ''}")

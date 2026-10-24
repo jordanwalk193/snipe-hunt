@@ -1,6 +1,7 @@
 {
  "settings": {
   "alerts_enabled": true,
+  "jackpot_alerts": true,
   "alert_fire": true,
   "alert_green": true,
   "alert_cheap_yellow": true,
@@ -38,6 +39,7 @@
  },
  "visible": [
   "alerts_enabled",
+  "jackpot_alerts",
   "alert_fire",
   "alert_green",
   "alert_cheap_yellow",

@@ -20,6 +20,8 @@ MAX_LIST = 12   # each extra search costs eBay API calls every hour
 
 DEFAULTS: dict = {
     "alerts_enabled": True,          # master switch for phone alerts
+    # a $20+ card at a sliver of its value (jackpot.py): its own loud alert, even at night
+    "jackpot_alerts": True,
     "alert_fire": True,
     "alert_green": True,
     "alert_cheap_yellow": True,
