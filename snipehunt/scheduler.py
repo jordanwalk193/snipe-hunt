@@ -15,10 +15,11 @@ from datetime import datetime, timedelta
 from . import config, db
 
 HOURLY_MINUTE = 0
+LAST_CALL_MINUTE = 30      # lowball last call, between hourly runs (no Claude)
 DAILY_AT = (9, 0)
 WEEKLY_AT = (6, 18, 45)    # weekday (Monday is 0), hour, minute: Sunday 6:45pm
 REFLECT_AT = (6, 19, 30)   # the self-review, once the weekly report is out: Sunday 7:30pm
-LATE = {"hourly": 50 * 60, "daily": 6 * 3600, "weekly": 6 * 3600,
+LATE = {"hourly": 50 * 60, "lastcall": 20 * 60, "daily": 6 * 3600, "weekly": 6 * 3600,
         "reflect": 6 * 3600}   # still worth running
 TICK = 20
 
@@ -57,8 +58,9 @@ def last_due(job: str, now: datetime) -> datetime:
     if job == "fast":
         every = fast_minutes() or 60
         return now.replace(minute=now.minute - now.minute % every, second=0, microsecond=0)
-    if job == "hourly":
-        due = now.replace(minute=HOURLY_MINUTE, second=0, microsecond=0)
+    if job in ("hourly", "lastcall"):
+        minute = HOURLY_MINUTE if job == "hourly" else LAST_CALL_MINUTE
+        due = now.replace(minute=minute, second=0, microsecond=0)
         return due if due <= now else due - timedelta(hours=1)
     if job == "daily":
         due = now.replace(hour=DAILY_AT[0], minute=DAILY_AT[1], second=0, microsecond=0)
@@ -69,16 +71,32 @@ def last_due(job: str, now: datetime) -> datetime:
     return due if due <= now else due - timedelta(days=7)
 
 
+def _last_call_wanted(con, now: datetime) -> bool:
+    """Is any lowball target ending within last call's window? Otherwise there is
+    nothing to look up, and the job isn't started at all."""
+    import json
+    from . import lowball   # it imports the scoring side; kept out of the clock's imports
+    try:
+        targets = json.loads(db.kv_get(con, lowball.KEY, "{}") or "{}").get("targets") or []
+    except ValueError:
+        return False
+    soon = now + timedelta(hours=lowball.LAST_CALL_HOURS)
+    return any(now < datetime.fromisoformat(t["end_time"]) <= soon for t in targets
+               if t.get("end_time") and t.get("value", 0) >= lowball.CALL_MIN_VALUE)
+
+
 def due_jobs(con, now: datetime) -> list[str]:
     """Jobs whose scheduled time has passed since they last started."""
     out = []
-    for job in ("hourly", "daily", "weekly", "reflect") + (
+    for job in ("hourly", "daily", "weekly", "reflect", "lastcall") + (
             ("fast",) if fast_minutes() else ()):
         due = last_due(job, now)
         started = float(db.kv_get(con, f"started:{job}", "0") or 0)
         late = LATE.get(job, fast_minutes() * 60)
         if job == "fast" and due.minute == HOURLY_MINUTE:
             continue   # the hourly run is searching anyway
+        if job == "lastcall" and not _last_call_wanted(con, now):
+            continue
         if started < due.timestamp() and (now - due).total_seconds() <= late:
             out.append(job)
     return out

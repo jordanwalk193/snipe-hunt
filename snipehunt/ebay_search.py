@@ -134,6 +134,8 @@ class Listing:
     lane: str = ""                   # "midtier" for the mid-tier lane's listings
     flags: list[str] = field(default_factory=list)    # filters.py warnings (fake_auto, …)
     signals: list[dict] = field(default_factory=list)  # mislabel.py signals that fired
+    listed_at: str | None = None     # when the listing first went up (eBay itemOriginDate), ISO UTC
+    country: str | None = None       # where it ships from, e.g. "US", "CA"
 
     @property
     def graded(self) -> bool | None:
@@ -275,12 +277,13 @@ class EbayClient:
                                  "aspects")
         return (body.get("refinement") or {}).get("aspectDistributions", []) or []
 
-    def item(self, item_id: str, lane: str = "item") -> dict | None:
+    def item(self, item_id: str, lane: str = "item", fresh: bool = False) -> dict | None:
         """One listing by its item number, ended or not. None once eBay has dropped it.
 
-        A live listing read today is answered from the cache (item_cache.py) instead."""
+        A live listing read today is answered from the cache (item_cache.py) instead,
+        unless `fresh`: a read that needs this minute's bid and bid count."""
         from . import item_cache   # it opens the database; kept local
-        cached = item_cache.get(self.con, item_id)
+        cached = None if fresh else item_cache.get(self.con, item_id)
         if cached is not None:
             return cached
         self.calls += 1
@@ -348,6 +351,8 @@ def parse_item(raw: dict) -> Listing | None:
         image_count=image_count(raw),
         short_description=str(raw.get("shortDescription") or "")[:600],
         aspects=aspects_of(raw),
+        listed_at=raw.get("itemOriginDate") or raw.get("itemCreationDate"),
+        country=(raw.get("itemLocation") or {}).get("country"),
     )
 
 

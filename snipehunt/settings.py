@@ -48,6 +48,9 @@ DEFAULTS: dict = {
     "min_overlap": 0.5,              # share of title words a sold price must have in common
     "track_off": 10,                 # percent the going rates must be off before scoring is told
     "fast_min_price": 15.0,          # under this, a plain Buy It Now waits for the hourly run
+    # offers and lowball snipes may ask Claude to price up to 20 listings nothing has
+    # priced yet, at most twice an hour; each answer is kept 30 days
+    "deal_appraisals": True,
     "calibrate": True,               # correct guessed going rates from how past guesses sold
     "self_tuning": True,             # the weekly self-review may adjust one tunable a week
     # eBay Browse calls a day for the whole app (eBay's default allowance); past 80%

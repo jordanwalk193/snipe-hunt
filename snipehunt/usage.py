@@ -98,7 +98,8 @@ def summary(con, now: datetime | None = None) -> dict:
 # CUT_ORDER: each group stops at its own share of the cap, so the two main
 # searches and the sold-price look-ups are the last to stop.
 WARN_AT = 0.80
-CUT_ORDER = (("midtier", 0.80), ("extra", 0.80), ("hidden", 0.85), ("typo", 0.90),
+CUT_ORDER = (("midtier", 0.80), ("extra", 0.80), ("hidden", 0.85), ("lowball", 0.85),
+             ("typo", 0.90),
              ("keyword", 0.95))
 LANE_KEY = "ebay_lane"      # stats key prefix: ebay_lane:<lane>, per day
 _today: dict = {}            # what earlier runs used today: read once per process

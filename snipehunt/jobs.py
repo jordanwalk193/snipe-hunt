@@ -11,10 +11,10 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import (aspects, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
-               inventory_sync, limited_drops, midtier, notify, ops, profile, rarity,
+               inventory_sync, limited_drops, lowball, midtier, notify, offers, ops, profile, rarity,
                reflect, report, sales, score, settings, shortlist, snipecheck, usage, watch,
                wins)
 
@@ -69,6 +69,14 @@ def hourly(dry_run: bool = False) -> str:
         except Exception as exc:
             con.rollback()
             print(f"snipecheck: {exc}", file=sys.stderr)
+        try:   # a snipe that slipped through: wrong card, a dupe, over the going rate
+            _warn_snipes(con)
+        except Exception as exc:
+            con.rollback()
+            print(f"snipecheck: {exc}", file=sys.stderr)
+        if not first_run:   # these price from what earlier runs learned
+            _deals(con, listings)
+
     def save(batch, batch_picks) -> None:
         """Commit each scored batch so a later failure doesn't redo it."""
         if dry_run:
@@ -174,12 +182,87 @@ def _note_snipes(con, now: float | None = None) -> int:
 
 def _appraise_snipes(con) -> None:
     """Price the scheduled Gixen snipes the bot has no pick or sale for (cached reads only)."""
-    sniped = _gixen_list(con)
-    now = datetime.now(config.TZ).isoformat(timespec="minutes")
-    live = [s for s in sniped if s["status"] == "SCHEDULED" and s["end_time"]
-            and s["end_time"] > now]
-    if snipecheck.appraise(con, live):
+    if snipecheck.appraise(con, _live_snipes(con)):
         con.commit()
+
+
+def _deals(con, listings: list) -> None:
+    """Offers to send on stale Best Offer listings, and lowball snipes on cheap auctions
+    of good cards. Both only recommend; a failure in one never stops the hunt."""
+    rows = inventory.read()[1]
+    # a team bot's Claude money goes to its picks first
+    ask = settings.load(con)["deal_appraisals"] and not (
+        profile.get().mode == "team" and team_budget(con)["reached"])
+    try:   # Buy It Nows that have sat a month with Best Offer on
+        n = offers.save(con, listings, rows, appraise=ask)
+        con.commit()
+        print(f"offers: {n} worth an offer", file=sys.stderr)
+    except Exception as exc:
+        con.rollback()
+        print(f"offers: {exc}", file=sys.stderr)
+    try:   # cheap auctions of $15+ cards, each with a low snipe
+        n = lowball.save(con, listings, rows, _sniped(con), appraise=ask)
+        con.commit()
+        print(f"lowball: {n} targets", file=sys.stderr)
+    except Exception as exc:
+        con.rollback()
+        print(f"lowball: {exc}", file=sys.stderr)
+
+
+def _sniped(con) -> set[str]:
+    """Item numbers already in Gixen, so nothing suggests sniping them again."""
+    try:
+        return {s["item_id"] for s in _gixen_list(con)}
+    except Exception as exc:   # Gixen being down mustn't hide the list
+        print(f"gixen: {exc}", file=sys.stderr)
+        return set()
+
+
+def _live_snipes(con) -> list[dict]:
+    now = datetime.now(config.TZ).isoformat(timespec="minutes")
+    return [s for s in _gixen_list(con) if s["status"] == "SCHEDULED" and s["end_time"]
+            and s["end_time"] > now]
+
+
+def _warn_snipes(con, now: datetime | None = None) -> int:
+    """One phone alert for snipes with something wrong besides the price, or priced
+    over the going rate; each problem is sent once. In quiet hours only snipes
+    ending within the urgent window go out. Returns how many snipes it named."""
+    now = now or datetime.now(config.TZ)
+    live = _live_snipes(con)
+    cfg = settings.load(con)
+    if not live or not notify.configured() or not cfg["alerts_enabled"]:
+        return 0
+    _, rows = inventory.read()
+    checks, _ = snipecheck.check(con, live)
+    items = snipecheck.to_warn(con, live, checks, snipecheck.doubts(con, live, rows))
+    if notify.is_quiet(now):
+        soon = now + timedelta(hours=cfg["urgent_hours"])
+        items = [i for i in items if datetime.fromisoformat(i[0]["end_time"]) <= soon]
+    if not items:
+        return 0
+    blocks = []
+    for s, lines, _ in items:
+        ends = datetime.fromisoformat(s["end_time"])
+        blocks.append(f"{snipecheck.clean(s['title'])[:80]}\nItem {s['item_id']} · "
+                      f"your snipe {s['max_bid']} · ends "
+                      f"{ends.strftime('%a %I:%M %p').replace(' 0', ' ')}\n"
+                      + "\n".join("• " + line for line in lines))
+    notify.send(f"⚠️ Gixen: {len(items)} snipe{'s' if len(items) != 1 else ''} to check",
+                "\n\n".join(blocks), url="https://www.gixen.com/main/home_2.php")
+    snipecheck.mark_warned(con, set().union(*(keys for _, _, keys in items)))
+    con.commit()
+    return len(items)
+
+
+def lastcall(dry_run: bool = False) -> str:
+    """Lowball last call: the targets ending within a few hours, looked up again, and
+    the ones still far under their going rate sent to the phone. No Claude; one eBay
+    read per target due, none at all when nothing is due."""
+    config.require("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET")
+    con = db.connect()
+    hits = lowball.last_call(con, ebay_search.EbayClient(con), _sniped(con), send=not dry_run)
+    return f"{len(hits)} lowball last call{'s' if len(hits) != 1 else ''}"
 
 
 def _remember(con, listings: list) -> list[dict]:
@@ -395,7 +478,7 @@ def self_review(dry_run: bool = False) -> str:
 
 
 JOBS = {"hourly": hourly, "daily": daily, "weekly": weekly, "fast": fast,
-        "reflect": self_review}
+        "reflect": self_review, "lastcall": lastcall}
 
 
 def main() -> None:

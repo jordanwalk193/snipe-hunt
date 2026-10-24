@@ -33,6 +33,9 @@ Every hour it searches eBay (including misspelled listings), throws out everythi
 - **Has a fast lane for price mistakes** (off until you turn it on): every few minutes it checks brand-new Buy It Now listings and scores only the ones worth a look.
 - **Keeps a price history per card**: every card it has seen sell more than once, with the trend, and "same card last sold for" on each pick.
 - **Checks your Gixen amounts**: reads the snipes you set (never changes them) and says how each amount sits against the card's going rate: over it, a fair bid that should win, a real discount, or a long shot. A card it has no price for gets one Claude appraisal, kept so it is paid for once.
+- **Says what to offer on stale listings.** A Buy It Now with Best Offer that has sat 30 days or more usually takes well under its asking price. The bot lists those (cards you don't own, $3–$300) with an odd-cent amount to send: 70% of the ask, never over 80% of what the card goes for less shipping, and nothing when a fair offer would be under half the ask (it gets declined). You send it yourself; the bot never makes an offer.
+- **Lowball snipes.** Most cheap auctions of a good card end near its going rate; a few end far under it, mostly ones few bidders see. Every auction of a card worth $15 or more that is still under half its going rate and ends within two days gets one low snipe, marked when it ends at a dead hour (overnight, a holiday, the Super Bowl) or is easy to scroll past (shipping not stated, high shipping, ships from abroad, no photo). The snipe level starts at 35% of the going rate and is learned from how these auctions end, so about one in five would win. **Last call**: half past each hour, the targets ending within three hours that are still under 30% of the going rate with at most one bid go to your phone. That job never calls Claude and makes no eBay call when nothing is ending.
+- **Second-guesses your snipes.** Besides the price, each Gixen snipe is checked for the wrong player, a card already in your inventory (same year, number, parallel, print run and graded or not), the same card sniped twice, a CCG slab, an auction the bot looked at and passed on, and a new seller. The serious ones, and a snipe over the going rate by $3 or more, are sent to your phone once.
 - **Ranks the rarest cards for sale**: the ten lowest print runs on eBay right now (1/1s, then /5, /10 and so on), read from the listing titles on every search at no Claude cost.
 - **Writes a weekly report**: wins and losses, what to pay, what to file, best upcoming snipes, and what the week's auctions sold for.
 - **Knows your spending.** From what you paid and when (`price_paid`, `order_date` in the inventory): spend by month, this month's pace against your budget, what you usually pay for an auto, a graded card, a numbered card or a base card, and a forecast of next month's spend and the likely price of your next card. On the dashboard, in the weekly report, and as "you usually pay" next to each pick.
@@ -237,7 +240,8 @@ One process runs everything. Times are in `SNIPEHUNT_TZ`.
 
 | When | What |
 |---|---|
-| Every hour, on the hour | Search, score, alert |
+| Every hour, on the hour | Search, score, alert; offers to send, lowball snipes, snipe warnings |
+| Half past each hour | Lowball last call, only when a target ends within three hours (no Claude) |
 | 9:00am | Limited-drops check, inventory sync from email, win messages, combined-shipping reminders, the mid-tier summary |
 | Sunday 6:45pm | Weekly report (with the inventory check; the first Sunday adds a value check, duplicates and grading candidates), eBay field names refresh |
 | Sunday 7:30pm | Weekly self-review; see [How it improves itself](#how-it-improves-itself) |

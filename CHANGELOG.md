@@ -6,6 +6,29 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Deals the auctions miss
+- Offers to send (`offers.py`): Buy It Now listings with Best Offer up 30+
+  days, on cards you don't own, $3–$300, each with an odd-cent amount (70% of
+  the ask, at most 80% of the going rate less shipping, none under half the
+  ask). Snapshot key `offers`. Text only: the bot never makes an offer.
+- Lowball snipes (`lowball.py`): auctions of $15+ cards still under half the
+  going rate and ending within 48 hours, one low snipe each at a learned share
+  of the going rate (starts at 35%, held to 20–60%, set so about one in five
+  would win), dead-hour and easy-to-miss marks. Snapshot key `lowball`
+  (ended targets left out). New job `lastcall` at :30, scheduled only when a
+  target ends within three hours: a fresh eBay read (never the day's cache) and
+  one phone alert for the ones still under 30% with at most one bid. Its eBay
+  reads are their own lane, cut at 85% of the daily cap.
+- Both price from picks, recorded sales and kept appraisals. Up to 20 listings
+  nothing has priced get one Claude appraisal each (kept 30 days); setting
+  `deal_appraisals` (default on) turns that off, and a team bot skips it once
+  its daily budget is spent.
+- Gixen snipes are checked for more than price (`snipecheck.doubts`): wrong
+  player, already owned, sniped twice, CCG slab, passed on by the bot, new
+  seller. Snapshot `gixen.snipes[].doubts` and `gixen.analysis.flagged`.
+  Serious ones, and "over the going rate" by $3+, are pushed once each.
+- Listings carry `listed_at` and `country` from eBay.
+
 ### It corrects its own guesses
 - Guessed going rates are corrected per price band from how Claude's raw
   guesses sold (`calibrate.py`): shrunk toward 1 while results are few, only

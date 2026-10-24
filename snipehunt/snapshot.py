@@ -12,8 +12,8 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import (config, db, gixen, inventory, profile, rarity, report, sales, scheduler,
-               settings, shortlist, snipecheck, spending, tune, watch)
+from . import (config, db, gixen, inventory, lowball, offers, profile, rarity, report, sales,
+               scheduler, settings, shortlist, snipecheck, spending, tune, watch)
 from . import calibrate, usage
 from .notify import TIER_ORDER
 
@@ -321,6 +321,14 @@ def status(con, picks: list[dict], now: datetime) -> dict:
     }
 
 
+def lowball_view(con, now: datetime) -> dict:
+    found = lowball.load(con)
+    if found.get("targets"):
+        found["targets"] = [t for t in found["targets"]
+                            if datetime.fromisoformat(t["end_time"]) > now]
+    return found
+
+
 def snapshot(con=None, now: datetime | None = None) -> dict:
     now = now or datetime.now(config.TZ)
     con = con or db.connect()
@@ -337,8 +345,15 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         gix = gixen_view(sniped, problem, read_at, picks, now)
         # how each of your amounts sits against what the card goes for
         checks, gix["analysis"] = snipecheck.check(con, gix["snipes"])
-        for row, verdict in zip(gix["snipes"], checks):
-            row["check"] = verdict
+        # and anything else wrong with them: wrong card, a dupe, sniped twice...
+        # (from Gixen's own titles: the rows show the bot's short card name, which
+        # can leave out the player's name)
+        raw = {x["item_id"]: x for x in sniped}
+        found = snipecheck.doubts(con, [raw.get(r["item_id"], r) for r in gix["snipes"]], rows)
+        for row, verdict, doubt in zip(gix["snipes"], checks, found):
+            row["check"], row["doubts"] = verdict, doubt
+        gix["analysis"]["flagged"] = sum(
+            bool(d) or c["verdict"] == "over" for c, d in zip(checks, found))
     given = {f["item_id"]: f["reason"] for f in db.feedback(con)[::-1] if f["source"] == "you"}
     for p in picks:   # a "good call" stays on the board; the dashboard marks it
         p["feedback"] = given.get(p["item_id"])
@@ -366,6 +381,10 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "rarest": rarity.load(con, now.isoformat(timespec="minutes")),
         "rarest_census": rarity.census(con),
         "moves": watch.load(con, now.isoformat(timespec="minutes")),
+        # Buy It Nows up a month with Best Offer on, each with an amount to offer
+        "offers": offers.load(con),
+        # cheap auctions of good cards, each with one low snipe (ended ones left out)
+        "lowball": lowball_view(con, now),
         "wantlist": wantlist(),
         # what you have paid by month and kind of card, and what you will likely pay next
         "spending": spend,

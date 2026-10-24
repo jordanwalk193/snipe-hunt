@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from . import config, profile, sales, settings, snapshot, snipecheck, spending
+from . import config, lowball, offers, profile, sales, settings, snapshot, snipecheck, spending
 
 # (tier, card, price, shipping, max, value, hours until it ends or None for Buy It Now,
 #  basis, snipe, why, colour)
@@ -114,6 +114,18 @@ MOVES = [
     ("2021 Draft Chrome Sapphire Green /50", 48.00, 39.99, 4.99, False, 20, "#00897b"),
     ("2024 Heritage Real One Auto Red Ink /75", 60.00, 60.00, 4.99, True, 26, "#d2452f"),
 ]
+# offers: (card, asking, shipping, days up, going rate or None, colour)
+OFFERS = [
+    ("2023 Chrome Rookie Pink Refractor", 24.99, 1.25, 74, 18.50, "#e91e63"),
+    ("2022 Bowman Chrome Prospect Orange Wave /25", 95.00, 4.50, 41, 72.00, "#ef6c00"),
+    ("2024 Topps Now Rookie Card", 9.99, 0.99, 112, None, "#5c6bc0"),
+]
+# lowball targets: (card, bid now, shipping, bids, hours left, going rate, why, colour)
+LOWBALL = [
+    ("2023 Chrome Rookie Auto /199", 6.50, 1.50, 1, 3, 64.00, "ends overnight", "#c62828"),
+    ("2022 Bowman Chrome Prospect Green Refractor /99", 2.25, 4.99, 0, 9, 31.00, None, "#2e7d32"),
+    ("2021 Draft 1st Bowman Gold /50 PSA 9", 11.00, None, 2, 27, 85.00, None, "#f9a825"),
+]
 # (card, prices oldest first, colour)
 HISTORY = [
     ("2023 Chrome Rookie Refractor #45 PSA 10", [31.0, 29.5, 27.0, 28.5, 24.99, 23.5], "#1e63c9"),
@@ -136,6 +148,34 @@ def _moves(now: datetime) -> list[dict]:
             "image": _art(colour, "CUT" if not relist else "BACK"),
             "at": int((now - timedelta(hours=hours)).timestamp())})
     return out
+
+
+def _offers(now: datetime) -> list[dict]:
+    out = []
+    for n, (card, ask, ship, days, value, colour) in enumerate(OFFERS):
+        item_id = str(410000600007 + n * 2207)
+        offer = offers.suggest(ask, ship, value)
+        out.append({"item_id": item_id, "title": card, "url": f"https://www.ebay.com/itm/{item_id}",
+                    "image": _art(colour, "OFFER"), "price": ask, "shipping": ship, "days": days,
+                    "offer": offer, "value": value, "basis": "sold" if value else None,
+                    "seller": SELLERS[n % len(SELLERS)], "saved": round(ask - offer, 2)})
+    return out
+
+
+def _lowball(now: datetime) -> dict:
+    targets = []
+    for n, (card, bid, ship, bids, hours, value, dead, colour) in enumerate(LOWBALL):
+        item_id = str(410000700003 + n * 1931)
+        targets.append({
+            "item_id": item_id, "title": card, "url": f"https://www.ebay.com/itm/{item_id}",
+            "image": _art(colour, "LOW"), "price": bid, "shipping": ship, "bids": bids,
+            "end_time": (now + timedelta(hours=hours)).isoformat(timespec="minutes"),
+            "value": value, "basis": "sales", "snipe": lowball.snipe_for(value, ship, lowball.LEVEL),
+            "share": round(sales.delivered(bid, ship) / value, 2), "dead": dead,
+            "overlooked": ["shipping not stated"] if ship is None else [],
+            "sniped": n == 0, "seller": SELLERS[(n + 1) % len(SELLERS)]})
+    return {"targets": targets, "level": lowball.LEVEL, "learned": False,
+            "record": {"n": 12, "won": 3}, "hours": {}}
 
 
 def _history(now: datetime) -> list[dict]:
@@ -302,6 +342,8 @@ def build(now: datetime | None = None) -> dict:
         "rarest": _rarest(now),
         "rarest_census": {"one_of_one": 4, "to_10": 11, "to_50": 37},
         "moves": _moves(now),
+        "offers": _offers(now),
+        "lowball": _lowball(now),
         "wantlist": snapshot.wantlist(),
         "spending": spend,
         "settings": {key: cfg[key] for key in settings.visible()},
