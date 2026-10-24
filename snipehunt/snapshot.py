@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import (config, db, gixen, inventory, lowball, offers, profile, rarity, report, sales,
-               scheduler, settings, shortlist, snipecheck, spending, tune, watch)
+               scheduler, score, settings, shortlist, snipecheck, spending, tune, watch)
 from . import calibrate, usage
 from .notify import TIER_ORDER
 
@@ -77,14 +77,32 @@ def skipped_ids(con) -> list[str]:
 def live_picks(con, now: datetime) -> list[dict]:
     """Picks whose listing is still up and, for auctions, still running."""
     rows = con.execute(
-        "SELECT p.data FROM picks p JOIN seen s USING (item_id) "
+        "SELECT p.data, s.price, s.shipping FROM picks p JOIN seen s USING (item_id) "
         "WHERE s.last_seen >= ?", (int(now.timestamp()) - LIVE_WINDOW,))
     skipped = set(skipped_ids(con))
-    picks = [json.loads(r["data"]) for r in rows]
-    picks = [p for p in picks if p["item_id"] not in skipped]
+    picks = [current(json.loads(r["data"]), r["price"], r["shipping"]) for r in rows]
+    picks = [p for p in picks if p and p["item_id"] not in skipped]
     return [p for p in picks if not (
         p.get("is_auction") and p.get("end_time")
         and datetime.fromisoformat(p["end_time"]) <= now)]
+
+
+def current(pick: dict, price: float | None, shipping: float | None) -> dict | None:
+    """The pick at the latest search's price, or None once it is no longer a pick.
+
+    A pick is saved when it is scored, but bids keep rising and Buy It Nows get
+    cut: the dashboard must show what eBay shows now. An auction already bid up
+    to the bot's max can't be won at that max, so it leaves the list."""
+    if price is None or (price == pick.get("price") and shipping in (None, pick.get("shipping"))):
+        return pick
+    pick = dict(pick, price=price)
+    if shipping is not None:
+        pick["shipping"] = shipping
+    ship = 0.0 if pick.get("combined_ship") else (pick.get("shipping") or 0.0)
+    pick["total"] = round(price + ship, 2)
+    if pick.get("is_auction") and pick.get("max") is not None and price >= pick["max"]:
+        return None
+    return score.rerate(pick)
 
 
 def ranked(picks: list[dict]) -> list[dict]:

@@ -6,6 +6,21 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Fixed
+- Picks showed the price they were scored at: an auction could read $0.99 on
+  the dashboard while eBay was at $42. Each pick now takes price and shipping
+  from the newest search, its deal is rated again, and an auction bid up to the
+  bot's max leaves the list (`snapshot.current`).
+
+### Google Sheet
+- `sheets.py`: optional push of the hunt to a Google Sheet after every hourly
+  run (and `python -m snipehunt sheets`). Tabs Collection, Picks, Sold, Offers,
+  Lowball, Snipes and Data Sources are rewritten each time with RAW values (a
+  title can't become a formula); Summary is written once, as formulas with a
+  spending-by-month chart, and then left to you. A tab is grown before it
+  overflows. Needs `GOOGLE_SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_FILE` and
+  `google-auth` (now in requirements.txt). A failed push never stops the hunt.
+
 ### Deals the auctions miss
 - Offers to send (`offers.py`): Buy It Now listings with Best Offer up 30+
   days, on cards you don't own, $3–$300, each with an odd-cent amount (70% of

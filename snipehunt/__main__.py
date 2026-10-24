@@ -12,6 +12,8 @@
                                add a sold price you saw yourself (ship may be "?")
   python -m snipehunt inventory check
                                list problems in inventory.csv; changes nothing
+  python -m snipehunt sheets   push the hunt to your Google Sheet now
+                               (GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_FILE)
 
 Set SNIPEHUNT_DEMO=1 to serve made-up data instead: a way to see the dashboard
 before you have eBay or Claude keys.
@@ -102,6 +104,9 @@ def main() -> None:
         return sale_add(rest)
     if name == "inventory" and rest == ["check"]:
         return inventory_check()
+    if name == "sheets" and not rest:
+        from . import sheets
+        return sheets.main()
     if name == "init" and rest == ["--team"]:
         rest, commands["init"] = [], lambda: init(team=True)
     if name not in (*commands, "sold") or (rest and name != "sold"):

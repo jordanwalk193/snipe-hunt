@@ -14,9 +14,9 @@ import time
 from datetime import datetime, timedelta
 
 from . import (aspects, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
-               inventory_sync, limited_drops, lowball, midtier, notify, offers, ops, profile, rarity,
-               reflect, report, sales, score, settings, shortlist, snipecheck, usage, watch,
-               wins)
+               inventory_sync, limited_drops, lowball, midtier, notify, offers, ops, profile,
+               rarity, reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
+               usage, watch, wins)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -110,6 +110,13 @@ def hourly(dry_run: bool = False) -> str:
     # held and left-over picks are checked against this run's prices before they go out
     sent = notify.deliver(con, picks, dry_run=dry_run,
                           current={i.item_id: i for i in listings})
+    if sheets.configured() and not dry_run:
+        try:   # the Google Sheet copy of the hunt (optional)
+            counts = sheets.push(con)
+            print(f"sheets: pushed {sum(counts.values())} rows", file=sys.stderr)
+        except Exception as exc:   # a spreadsheet must never stop the hunt
+            con.rollback()
+            print(f"sheets: {exc}", file=sys.stderr)
     return (f"{len(listings)} listings, {len(fresh)} new, {len(scored)} scored, "
             f"{len(picks)} picks, {sent} alerted")
 

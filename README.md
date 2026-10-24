@@ -240,7 +240,7 @@ One process runs everything. Times are in `SNIPEHUNT_TZ`.
 
 | When | What |
 |---|---|
-| Every hour, on the hour | Search, score, alert; offers to send, lowball snipes, snipe warnings |
+| Every hour, on the hour | Search, score, alert; offers to send, lowball snipes, snipe warnings; the Google Sheet push, if set up |
 | Half past each hour | Lowball last call, only when a target ends within three hours (no Claude) |
 | 9:00am | Limited-drops check, inventory sync from email, win messages, combined-shipping reminders, the mid-tier summary |
 | Sunday 6:45pm | Weekly report (with the inventory check; the first Sunday adds a value check, duplicates and grading candidates), eBay field names refresh |
@@ -316,6 +316,10 @@ docker compose exec snipe-hunt python -m snipehunt.jobs reflect --dry-run
 Install the [Snipe Hunt integration](https://github.com/jordanwalk193/ha-snipe-hunt) through HACS: add that address as a custom repository of type Integration, download it, restart Home Assistant, then add the **Snipe Hunt** integration. Give it the bot's address, `http://<bot machine>:8766`, and your `API_TOKEN`.
 
 You get a five-tab dashboard, about fifty entities, an auctions calendar, and every setting as a switch or number: which tiers alert, the minimum deal rating worth an alert, quiet hours, the bedtime bundle, the cheap-card limit, a monthly budget, watched sellers, sellers who combine shipping and extra searches.
+
+## Google Sheet
+
+Optional: every hourly run can also write your hunt to a Google Sheet you own, for sorting, filtering and sharing. Tabs: **Summary** (cards kept, what you paid, spending by month with a chart, live picks, offers, lowball targets, Gixen totals, the median sold price), **Collection**, **Picks**, **Sold**, **Offers**, **Lowball**, **Snipes** and **Data Sources** (what each tab came from and when). The Summary is written once as formulas over the other tabs, so you can change it; the data tabs are rewritten on every push. Titles go in as plain text, so a listing title can never turn into a formula. Setup takes about five minutes: [docs/SHEETS.md](docs/SHEETS.md). Push by hand with `python -m snipehunt sheets`.
 
 ## Without Docker
 
