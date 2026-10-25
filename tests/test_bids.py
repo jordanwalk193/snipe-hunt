@@ -42,4 +42,6 @@ def test_the_half_hour_job_runs_when_a_good_pick_ends_soon():
     at = NOW.replace(minute=35)
     assert "lastcall" not in scheduler.due_jobs(con, at)
     auction(con, "1", 2)
+    # searched 40 minutes before `at`, not before the real clock: past :50 the two differ
+    con.execute("UPDATE seen SET last_seen=? WHERE item_id='1'", (int(at.timestamp()) - 2400,))
     assert "lastcall" in scheduler.due_jobs(con, at)
