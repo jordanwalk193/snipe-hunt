@@ -386,6 +386,9 @@ def test_the_track_record_is_kept_per_price_band():
         ("under $10", 8, -29), ("$10 to $50", 8, 2), ("over $50", 7, 50)]
     sale(con, "37", "dear 7", 90.0, value=60.0, max_bid=35.35)
     assert "over $50, final prices ran 50% more" in sales.track_record(con)
+    # a band calibrate.py corrects itself is left out, so it isn't corrected twice
+    line = sales.track_record(con, {"over $50": {"factor": 1.4}})
+    assert "over $50" not in line and "under $10" in line
     assert sales.scorecard([])["bands"][0] == {
         "band": "under $10", "calls": 0, "value_gap_pct": None, "value_bias_pct": None}
 

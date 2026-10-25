@@ -11,6 +11,8 @@ appear in any release; renaming or removing one needs a new API version.
   held picks and pushes the Google Sheet before it reports the failure; the
   unscored listings are scored next hour. The failure message now gives
   Claude's reason instead of a cut-off usage block.
+- The scoring prompt no longer tells Claude its track record for a price band
+  that calibration already corrects, so a guess isn't corrected twice.
 
 ### Jackpots
 - `jackpot.py`: a card worth $20+ that costs 20% or less of its value delivered

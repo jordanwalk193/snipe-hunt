@@ -20,6 +20,7 @@ import re
 import statistics
 import sys
 import time
+from collections.abc import Collection
 from datetime import datetime, timezone
 
 from . import config, db, profile, settings, usage
@@ -436,17 +437,19 @@ def scorecard(rows: list[dict]) -> dict:
     }
 
 
-def track_record(con) -> str:
+def track_record(con, corrected: Collection[str] = ()) -> str:
     """One line for the scoring prompt when the going rates have been running off.
 
     Each price band is judged on its own: a band is mentioned once it has
     TRACK_MIN calls and its going rates are track_off percent out or more.
+    `corrected` are bands calibrate.py already corrects after Claude answers;
+    they are left out, or Claude would add the same correction on top.
     """
     off = [f"for cards valued {b['band']}, final prices ran {abs(b['value_bias_pct'])}% "
            f"{'more' if b['value_bias_pct'] > 0 else 'less'} than your \"value\" "
            f"(last {b['calls']} picks)"
            for b in by_band(with_calls(con), TRACK_CALLS)
-           if b["calls"] >= TRACK_MIN
+           if b["calls"] >= TRACK_MIN and b["band"] not in corrected
            and abs(b["value_bias_pct"]) >= settings.load(con)["track_off"]]
     if not off:
         return ""
