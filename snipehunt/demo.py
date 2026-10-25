@@ -162,6 +162,46 @@ def _offers(now: datetime) -> list[dict]:
     return out
 
 
+# (card, why, going rate, owned status or None, copies for sale, cheapest)
+MUST_HAVE = {
+    "2022": [("Draft Chrome 1st Bowman", "The key prospect card", "~$4", "In binder", 31, 3.49),
+             ("Draft Chrome 1st Refractor", "Its classic parallel", "~$10", None, 6, 8.75),
+             ("Draft Chrome 1st Auto", "The first autograph", "$150–300", None, 2, 189.00)],
+    "2023": [("Chrome Rookie #200", "The flagship Chrome rookie", "~$3", "Delivered", 44, 2.25),
+             ("Chrome Rookie Refractor", "Its refractor", "~$6", None, 12, 4.99)],
+}
+# (parallel, print run, owned status or None, copies for sale, cheapest)
+RAINBOW = [("Base", None, "In binder", 40, 1.50), ("Refractor", None, "In binder", 12, 4.99),
+           ("Prism Refractor", None, None, 3, 7.25), ("Aqua Refractor", 199, None, 1, 14.00),
+           ("Green Refractor", 99, "Delivered", 2, 18.50), ("Gold Refractor", 50, None, 0, None),
+           ("Red Refractor", 5, None, 0, None), ("Superfractor", 1, None, 0, None)]
+
+
+def _search(words: str) -> str:
+    return "https://www.ebay.com/sch/i.html?_nkw=" + quote(words)
+
+
+def _must_have() -> dict:
+    years = [{"year": year, "cards": [
+        {"card": card, "why": why, "rate": rate, "url": _search(card),
+         "owned": {"id": str(10 + n), "status": status} if status else None,
+         "for_sale": selling, "cheapest": cheapest, "pick": None}
+        for n, (card, why, rate, status, selling, cheapest) in enumerate(cards)],
+        "owned": sum(c[3] is not None for c in cards)} for year, cards in MUST_HAVE.items()]
+    return {"years": years, "owned": sum(y["owned"] for y in years),
+            "total": sum(len(y["cards"]) for y in years)}
+
+
+def _rainbows() -> list[dict]:
+    parallels = [{"name": name, "run": run, "where": "",
+                  "owned": {"id": str(30 + n), "status": status} if status else None,
+                  "for_sale": selling, "cheapest": cheapest, "pick": None,
+                  "url": _search(f"2023 Chrome Rookie #200 {name}")}
+                 for n, (name, run, status, selling, cheapest) in enumerate(RAINBOW)]
+    return [{"card": "2023 Chrome Rookie #200", "parallels": parallels,
+             "owned": sum(p["owned"] is not None for p in parallels)}]
+
+
 def _lowball(now: datetime) -> dict:
     targets = []
     for n, (card, bid, ship, bids, hours, value, dead, colour) in enumerate(LOWBALL):
@@ -356,6 +396,8 @@ def build(now: datetime | None = None) -> dict:
         "offers": _offers(now),
         "lowball": _lowball(now),
         "wantlist": snapshot.wantlist(),
+        "must_have": _must_have(),
+        "rainbows": _rainbows(),
         "spending": spend,
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": None,

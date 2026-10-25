@@ -6,6 +6,16 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Must-haves and rainbows
+- Optional `data/musthave.md` (the defining cards of each year) and
+  `data/rainbow.md` (every parallel of a card you chase): the snapshot's new
+  `must_have` and `rainbows` keys say which you own (by each list's "Owned
+  when" rule against `inventory.csv`), how many are for sale now, the cheapest
+  delivered, and which are live picks. Read from files, no Claude calls.
+  Examples in `examples/`. The Home Assistant dashboard's What's missing tab
+  already shows both.
+- Make an offer names a must-have (`offers[].must_have`) and lists it first.
+
 ### Claude outages
 - When Claude is out (a usage limit, an outage), the hourly run still sends
   held picks and pushes the Google Sheet before it reports the failure; the

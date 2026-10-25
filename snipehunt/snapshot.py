@@ -12,8 +12,9 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import (config, db, gixen, inventory, jackpot, lowball, offers, profile, rarity, report,
-               sales, scheduler, score, settings, shortlist, snipecheck, spending, tune, watch)
+from . import (config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
+               rainbow, rarity, report, sales, scheduler, score, settings, shortlist,
+               snipecheck, spending, tune, watch)
 from . import calibrate, usage
 from .notify import TIER_ORDER
 
@@ -353,6 +354,14 @@ def status(con, picks: list[dict], now: datetime) -> dict:
     }
 
 
+def live_listings(con, now: datetime) -> list[dict]:
+    """Every listing from the recent searches: its title and delivered price."""
+    since = int(now.timestamp()) - LIVE_WINDOW
+    return [{"title": r["title"], "total": sales.delivered(r["price"] or 0, r["shipping"])}
+            for r in con.execute("SELECT title, price, shipping FROM seen "
+                                 "WHERE last_seen >= ? AND price IS NOT NULL", (since,))]
+
+
 def lowball_view(con, now: datetime) -> dict:
     found = lowball.load(con)
     if found.get("targets"):
@@ -422,6 +431,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         # cheap auctions of good cards, each with one low snipe (ended ones left out)
         "lowball": lowball_view(con, now),
         "wantlist": wantlist(),
+        # the must-have list and rainbows (optional files): owned, for sale now, live picks
+        **_chase_lists(con, rows, picks, now),
         # what you have paid by month and kind of card, and what you will likely pay next
         "spending": spend,
         # what the weekly self-review changed on its own, and how each change turned out
@@ -433,6 +444,15 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),
         **({"team": team_view(con, picks, cfg)} if profile.get().mode == "team" else {}),
     }
+
+
+def _chase_lists(con, rows: list[dict], picks: list[dict], now: datetime) -> dict:
+    """"must_have" and "rainbows", read only when their files exist (most bots have neither)."""
+    if not (musthave.FILE.exists() or rainbow.FILE.exists()):
+        return {"must_have": musthave.view(rows, [], []), "rainbows": []}
+    listing_rows = live_listings(con, now)
+    return {"must_have": musthave.view(rows, listing_rows, picks),
+            "rainbows": rainbow.view(rows, listing_rows, picks)}
 
 
 def main() -> None:

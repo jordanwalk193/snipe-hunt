@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from . import db, pricing, sales, snipecheck
+from . import db, musthave, pricing, sales, snipecheck
 from .ebay_search import Listing
 
 KEY = "offers"
@@ -56,9 +56,11 @@ def rejected(con) -> set[str]:
 
 def find(con, listings: list[Listing], inventory: list[dict],
          now: datetime | None = None) -> list[dict]:
-    """The stale Best Offer listings on cards not already owned, the best priced first."""
+    """The stale Best Offer listings on cards not already owned, the best priced
+    first, must-haves (data/musthave.md) ahead of the rest at each level."""
     now = now or datetime.now(timezone.utc)
     rows, cache, skip, out = sales.with_calls(con), snipecheck._cache(con), rejected(con), []
+    wanted = musthave.read()
     for item in listings:
         days = days_up(item.listed_at, now)
         if (item.is_auction or "BEST_OFFER" not in item.buying_options
@@ -73,14 +75,16 @@ def find(con, listings: list[Listing], inventory: list[dict],
         offer = suggest(item.price, item.shipping, value)
         if offer is None:
             continue
+        must = next((c["card"] for c in wanted if c["year"] in item.title
+                     and musthave.matches(c["search"], item.title)), None)
         out.append({
             "item_id": item.item_id, "title": item.title, "url": item.url, "image": item.image,
             "price": item.price, "shipping": item.shipping, "days": days, "offer": offer,
             "value": value, "basis": rate.get("basis") if value else None,
-            "seller": item.seller, "saved": round(item.price - offer, 2)})
+            "must_have": must, "seller": item.seller, "saved": round(item.price - offer, 2)})
     # priced ones first, by how far under the going rate the offer is; then the
-    # ones nothing has priced yet, cheapest first
-    out.sort(key=lambda o: (o["value"] is None,
+    # ones nothing has priced yet, cheapest first; must-haves ahead in each group
+    out.sort(key=lambda o: (o["value"] is None, o["must_have"] is None,
                             o["offer"] / o["value"] if o["value"] else o["price"]))
     return out
 

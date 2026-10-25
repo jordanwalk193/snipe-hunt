@@ -43,3 +43,13 @@ def test_a_listing_with_no_start_date_or_a_bad_one_is_skipped():
     now = NOW
     assert offers.days_up(None, now) is None and offers.days_up("soon", now) is None
     assert offers.days_up("2026-09-01T00:00:00.000Z", now) == 46
+
+
+def test_a_must_have_is_named_and_comes_first(monkeypatch):
+    monkeypatch.setattr(offers.musthave, "read", lambda: [{
+        "year": "2021", "card": "Bowman BP-146", "search": "jordan walker 2021 bowman bp-146"}])
+    items = [listing("1", "2022 Bowman Jordan Walker #BP-12", 9.99, 60),
+             listing("2", "2021 Bowman Prospects Jordan Walker #BP-146", 12.99, 60)]
+    found = offers.find(db.connect(), items, [], now=NOW)
+    assert [(o["item_id"], o["must_have"]) for o in found] == [
+        ("2", "Bowman BP-146"), ("1", None)]
