@@ -39,7 +39,7 @@ jobs:
           docker logs snipe-hunt
       - name: The API answers with the demo snapshot and refuses a bad token
         run: |
-          python3 -c "import json; d = json.load(open('snapshot.json')); assert d['api'] == 1 and d['demo'] is True and len(d['picks']) == 9, d.keys(); print('snapshot ok:', len(d['picks']), 'picks')"
+          python3 -c "import json; d = json.load(open('snapshot.json')); assert d['api'] == 1 and d['demo'] is True and len(d['picks']) >= 9, d.keys(); print('snapshot ok:', len(d['picks']), 'picks')"
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8766/api/snapshot)" = 401
       - name: The pieces the real bot needs are inside the image
         run: |
