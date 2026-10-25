@@ -6,6 +6,12 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Claude outages
+- When Claude is out (a usage limit, an outage), the hourly run still sends
+  held picks and pushes the Google Sheet before it reports the failure; the
+  unscored listings are scored next hour. The failure message now gives
+  Claude's reason instead of a cut-off usage block.
+
 ### Jackpots
 - `jackpot.py`: a card worth $20+ that costs 20% or less of its value delivered
   (12% when the value is only an estimate): Buy It Now / Best Offer at once, an

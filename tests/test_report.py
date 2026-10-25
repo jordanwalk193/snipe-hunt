@@ -2,7 +2,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from snipehunt import config, db, jobs, notify, ops, report
+from snipehunt import config, db, jobs, notify, ops, report, score
+from snipehunt.ebay_search import Listing
 
 NOW = datetime(2026, 10, 11, 18, 45, tzinfo=config.TZ)
 
@@ -203,3 +204,22 @@ def test_the_weekly_report_has_this_weeks_feedback(con):
             " · you: signed base, worth $25") in section
     old = report.feedback_section(con, now + timedelta(days=1))     # nothing since tomorrow
     assert old[-1].startswith("- None")
+
+
+def test_scoring_down_still_delivers_held_picks_then_fails(con, monkeypatch):
+    item = Listing("296000000009", "2023 Topps Sam Example #1", 5.0, "USD", 1.0,
+                   ["FIXED_PRICE"], None, None, "s", "u", None)
+    monkeypatch.setattr(jobs.ebay_search, "search_all", lambda verbose=False: [item])
+    monkeypatch.setattr(jobs.hidden, "search", lambda *a, **k: [])
+    monkeypatch.setitem(config._cache, "EBAY_CLIENT_ID", "id")
+    monkeypatch.setitem(config._cache, "EBAY_CLIENT_SECRET", "secret")
+    db.touch(con, "1", "t")   # not the first run
+    con.commit()
+    monkeypatch.setattr(score, "score", lambda *a, **k: (_ for _ in ()).throw(
+        score.ClaudeError("claude -p exit 1: usage limit")))
+    delivered = []
+    monkeypatch.setattr(notify, "deliver", lambda con, picks, **k: delivered.append(picks) or 0)
+    with pytest.raises(score.ClaudeError):
+        jobs.hourly()
+    assert delivered == [[]]   # held picks still went out before the failure
+    assert db.needs_scoring(db.connect(), item.item_id, item.total)   # retried next hour

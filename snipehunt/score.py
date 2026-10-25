@@ -603,6 +603,17 @@ class ClaudeError(RuntimeError):
     not a bug in the bot). Its own name, so the weekly numbers can tell them apart."""
 
 
+def _failure(proc: subprocess.CompletedProcess) -> str:
+    """Why a failed call failed. With --output-format json the reason (a usage
+    limit, say) is the reply's "result", after a long usage block that would
+    otherwise fill the whole message."""
+    try:
+        outer = json.loads(proc.stdout)
+    except ValueError:
+        return proc.stderr or proc.stdout
+    return str(outer.get("result") or proc.stderr or proc.stdout)
+
+
 def ask_claude(prompt: str, tools: str = WEB_TOOLS,
                timeout: int = TIMEOUT) -> str:
     """Run `claude -p` in the state directory, away from any project files.
@@ -633,8 +644,7 @@ def ask_claude(prompt: str, tools: str = WEB_TOOLS,
             f"The Claude CLI ({cmd[0]!r}) wasn't found. Install it with `npm install -g "
             "@anthropic-ai/claude-code`, or set CLAUDE_BIN to its full path") from None
     if proc.returncode != 0:
-        raise ClaudeError(f"claude -p exit {proc.returncode}: "
-                           f"{(proc.stderr or proc.stdout)[:300]}")
+        raise ClaudeError(f"claude -p exit {proc.returncode}: {_failure(proc)[:300]}")
     outer = json.loads(proc.stdout)
     usage.record(outer.get("total_cost_usd") or 0)
     if outer.get("is_error"):

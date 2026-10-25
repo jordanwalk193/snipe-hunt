@@ -103,8 +103,15 @@ def hourly(dry_run: bool = False) -> str:
         fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)
                  and i.item_id not in lane_ids]
 
-    picks, scored = (score.score(fresh, verbose=True, on_batch=save, con=con)
-                     if fresh else ([], []))
+    failed = None
+    try:
+        picks, scored = (score.score(fresh, verbose=True, on_batch=save, con=con)
+                         if fresh else ([], []))
+    except score.ClaudeError as exc:   # a usage limit: unscored listings wait an hour,
+        if first_run:                  # but held picks and the sheet still go out
+            raise
+        con.rollback()
+        picks, scored, failed = [], [], exc
     if first_run and not dry_run:
         return _welcome(con, listings, picks)
     # held and left-over picks are checked against this run's prices before they go out
@@ -117,6 +124,8 @@ def hourly(dry_run: bool = False) -> str:
         except Exception as exc:   # a spreadsheet must never stop the hunt
             con.rollback()
             print(f"sheets: {exc}", file=sys.stderr)
+    if failed:
+        raise failed
     return (f"{len(listings)} listings, {len(fresh)} new, {len(scored)} scored, "
             f"{len(picks)} picks, {sent} alerted")
 

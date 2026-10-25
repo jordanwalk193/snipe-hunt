@@ -176,3 +176,16 @@ def test_the_example_preferences_carry_the_caution_lines():
                  "Be skeptical of sellers under about 100 feedback on anything over $30."):
         assert line in text and line in readme
     assert "Never tier one \"fire\"" in score.build_prompt([])   # a new setup starts with them
+
+
+def test_a_failed_call_says_why_not_how_many_tokens(monkeypatch):
+    reply = {"usage": {"input_tokens": 0, "server_tool_use": {"web_search_requests": 0}},
+             "total_cost_usd": 0, "is_error": True, "result": "Claude usage limit reached"}
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
+        cmd, 1, json.dumps({"duration_api_ms": 0, **reply}), ""))
+    try:
+        score.ask_claude("hello")
+    except score.ClaudeError as exc:
+        assert "usage limit reached" in str(exc)
+    else:
+        raise AssertionError("no ClaudeError")
