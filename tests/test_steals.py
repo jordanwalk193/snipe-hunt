@@ -262,3 +262,27 @@ def test_snapshot_has_the_steals_lists(con):
         assert key in snap
     assert snap["steals"] == {"on": False, "max_share": 1.0}
     assert [p["item_id"] for p in snap["bid_now"]] == ["1"]
+
+
+def test_owned_and_already_bought_cards_stay_off_every_steals_list(monkeypatch, con):
+    """Cross-referenced with inventory.csv: the example inventory owns a 2023 Topps
+    Chrome Refractor #209; another copy, and a listing already bought, never show."""
+    from snipehunt import inventory
+    add(con, "copy", title="2023 Topps Chrome Jordan Walker Refractor #209 RC",
+        card="2023 Topps Chrome Refractor #209", seller="combineshop")
+    add(con, "won", title="2024 Bowman Chrome Jordan Walker #50", seller="combineshop")
+    add(con, "fresh", title="2024 Topps Heritage Jordan Walker #77", seller="combineshop")
+    fields, rows = inventory.read()
+    rows.append(dict.fromkeys(fields, "") | {"id": "99", "status": "Won", "ebay_item_id": "won"})
+    inventory.write(fields, rows)
+    assert [p["item_id"] for p in bidnow.find(con, NOW)] == ["fresh"]
+    assert [r["item_id"] for r in steals.radar(con, NOW)] == ["fresh"]
+    live = snapshot.live_picks(con, NOW)
+    assert steals.bundles(live, []) == []            # only one unowned pick from the seller
+    db.kv_set(con, "moves", json.dumps([{"item_id": i, "old": 30.0, "at": int(NOW.timestamp())}
+                                        for i in ("copy", "won", "fresh")]))
+    bins = [dict(p, is_auction=False) for p in live]
+    assert [p["item_id"] for p in steals.dropped_into_range(con, bins, NOW)] == ["fresh"]
+    # a graded copy of a raw card is an upgrade, so it still shows
+    add(con, "slab", title="2023 Topps Chrome Jordan Walker Refractor #209 PSA 10")
+    assert "slab" in [p["item_id"] for p in bidnow.find(con, NOW)]

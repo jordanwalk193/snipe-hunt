@@ -156,8 +156,9 @@ def radar(con, now: datetime | None = None, picks: list[dict] | None = None) -> 
     from . import snapshot   # snapshot imports this module; kept local
     now = now or datetime.now(config.TZ)
     live = picks if picks is not None else snapshot.live_picks(con, now)
-    pool = {p["item_id"]: p for p in bidnow.candidates(con, now)}
-    pool.update({p["item_id"]: p for p in live if not p.get("is_auction")})
+    pool = {p["item_id"]: p for p in bidnow.candidates(con, now)}   # owned ones left out
+    pool.update({p["item_id"]: p for p in bidnow.unowned(
+        [p for p in live if not p.get("is_auction")])})
     out = []
     for p in pool.values():
         if not p.get("value") or not bidnow._trusted(p):
@@ -193,7 +194,7 @@ def bundles(picks: list[dict], combined_sellers: list[str]) -> list[dict]:
     where the seller combines it. The most saved first."""
     combined = {s.lower() for s in combined_sellers}
     by_seller: dict[str, list[dict]] = {}
-    for p in picks:
+    for p in bidnow.unowned(picks):   # nothing already bought or owned
         if p.get("seller") and p.get("value"):
             by_seller.setdefault(p["seller"], []).append(p)
     out = []
@@ -292,7 +293,7 @@ def dropped_into_range(con, picks: list[dict], now: datetime | None = None) -> l
     share = settings.load(con)["max_share"]
     share = DEFAULTS["max_share"] if share >= 1.0 else share
     found = []
-    for p in picks:
+    for p in bidnow.unowned(picks):   # nothing already bought or owned
         m = moves.get(p["item_id"])
         if (m and not p.get("is_auction") and p.get("value") and bidnow._trusted(p)
                 and jackpot.pay(p) <= share * float(p["value"])):

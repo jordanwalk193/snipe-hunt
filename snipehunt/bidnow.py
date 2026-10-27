@@ -46,6 +46,17 @@ def _trusted(p: dict) -> bool:
                 or (p.get("slab") or {}).get("problem"))
 
 
+def unowned(picks: list[dict], rows: list[dict] | None = None) -> list[dict]:
+    """Picks still worth buying: not a listing already bought (its eBay item number
+    is in inventory.csv) and not a copy of a card already owned (the careful match
+    lowball and offers use; a graded copy of a raw card is an upgrade, so kept)."""
+    from . import inventory, snipecheck   # both import the scoring side; kept local
+    rows = inventory.read()[1] if rows is None else rows
+    bought = {(r.get("ebay_item_id") or "").strip() for r in rows} - {""}
+    return [p for p in picks if p["item_id"] not in bought
+            and not snipecheck.owned_copy(str(p.get("title") or p.get("card") or ""), rows)]
+
+
 def qualifies(p: dict, now: datetime) -> bool:
     end = p.get("end_time")
     if not (p.get("is_auction") and end and p.get("value") and _trusted(p)):
@@ -68,7 +79,7 @@ def candidates(con, now: datetime) -> list[dict]:
             if row and row["price"] is not None and row["price"] > p["price"]:
                 p["price"], p["bids"] = row["price"], row["bids"]   # a later read
             out[p["item_id"]] = p
-    return list(out.values())
+    return unowned(list(out.values()))
 
 
 def find(con, now: datetime | None = None) -> list[dict]:

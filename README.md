@@ -239,6 +239,8 @@ Item 900000000001
 
 - **Just dropped.** A Buy It Now a seller cuts into steal range within the last day gets one push ("📉 JUST DROPPED: $30 card now $8.00 delivered").
 
+Everything here is cross-referenced with `inventory.csv`: a listing you already bought (its eBay item number is in the inventory) or another copy of a card you own never shows in these lists or alerts, using the same careful match as lowball snipes and offers (same year, card number, parallel and print run; a graded copy of a raw card counts as an upgrade and still shows).
+
 Every bot also gets these dashboard lists, steals mode or not (read-only, nothing is sent):
 
 | Snapshot key | What it is |
