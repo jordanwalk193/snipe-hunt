@@ -434,7 +434,31 @@ def scorecard(rows: list[dict]) -> dict:
         "valued": len(off),
         # the same two numbers for cheap, mid-priced and dear cards apart
         "bands": by_band(made),
+        # and by where the going rate came from, so it shows which of them is off
+        "by_source": {name: {**_accuracy(group), "bands": by_band(group)}
+                      for name in SOURCES
+                      if (group := [r for r in made if value_source(r["call"]) == name])},
     }
+
+
+SOURCES = ("sales", "guessed", "calibrated")
+
+
+def value_source(call: dict) -> str:
+    """Where a call's going rate came from: real sales, Claude's guess, or the
+    guess as calibrate.py corrected it."""
+    if call.get("basis") == "sales":
+        return "sales"
+    raw = call.get("value_raw")
+    return "calibrated" if raw is not None and raw != call.get("value") else "guessed"
+
+
+def _accuracy(made: list[dict]) -> dict:
+    off = [r["off"] for r in made if r["off"] is not None]
+    return {
+        "calls": len(made), "under_max": sum(r["call"]["under_max"] for r in made),
+        "value_gap_pct": round(100 * statistics.median(abs(o) for o in off)) if off else None,
+        "value_bias_pct": round(100 * statistics.median(off)) if off else None}
 
 
 def track_record(con, corrected: Collection[str] = ()) -> str:

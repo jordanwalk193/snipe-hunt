@@ -314,3 +314,47 @@ def test_snipes_on_picks_are_counted_by_tier_and_how_they_ended():
 def test_a_failed_claude_call_has_its_own_error_name():
     from snipehunt import score
     assert issubclass(score.ClaudeError, RuntimeError)
+
+
+def test_every_snipe_on_a_pick_is_counted_even_from_last_weeks_pick_and_still_running():
+    import time as _t
+    from snipehunt import db as _db, reflect
+    con = _db.connect()
+    now = _t.time()
+    # "old" was picked last week and sniped this week; it closed under the snipe's max
+    for item_id, value, made in (("new", 20.0, now - 600), ("old", 30.0, now - 9 * DAY),
+                                 ("run", 20.0, now - 600), ("gone", 20.0, now - 600)):
+        _db.save_pick(con, {"item_id": item_id, "title": "t", "card": "t", "tier": "green",
+                            "max": 10.10, "value": value, "is_auction": True})
+        con.execute("UPDATE picks SET created_at=? WHERE item_id=?", (made, item_id))
+    for item_id in ("new", "old", "run", "gone", "nopick"):
+        con.execute("INSERT INTO snipe_log VALUES (?,?,?,?,?,?)",
+                    (item_id, "t", 12.12, 10.10, 20.0, now - 60))
+    for item_id, end in (("run", now + 3600), ("gone", now - 3600)):
+        con.execute("INSERT INTO seen (item_id, title, first_seen, last_seen, end_ts) "
+                    "VALUES (?,?,?,?,?)", (item_id, "t", now, now, end))
+    con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                "VALUES ('old','t',11.0,1.0,3,?), ('new','t',14.0,1.0,6,?)", (now, now))
+    picks = [json.loads(r["data"]) for r in con.execute(
+        "SELECT data FROM picks WHERE created_at>=?", (now - 3600,))]
+    got = reflect.snipe_results(con, picks, now - 3600, now + 1, now)
+    assert (got["logged"], got["on_picks"], got["unattributed"]) == (5, 4, 1)
+    assert got["outcomes"] == {"won": 1, "lost": 1, "pending": 1, "unknown": 1}
+    assert got["won_not_in_inventory"] == 1
+    green = got["by_tier"]["green"]
+    # the groups add up to every snipe on a pick; the share is of this week's picks only
+    assert green["sniped"] == 4 and green["auctions"] == 3 and green["sniped_pct"] == 100
+    assert sum(g["sniped"] for g in got["by_band"].values()) == 4
+
+
+def test_counts_kept_per_day_are_cut_to_the_week_so_eight_days_are_not_added_up():
+    from datetime import timedelta
+    from snipehunt import db as _db, reflect
+    con = _db.connect()
+    start = NOW - timedelta(days=7)
+    day = start.date()
+    for n in range(8):   # a Sunday evening to a Sunday evening touches eight days
+        _db.bump(con, "runs:hourly", 24, (day + timedelta(days=n)).isoformat())
+    con.commit()
+    got = reflect.stat_totals(con, start.timestamp(), TS)
+    assert round(got["runs:hourly"]) == 168

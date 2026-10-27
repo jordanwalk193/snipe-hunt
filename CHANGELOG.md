@@ -6,6 +6,18 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Self-review numbers you can trust
+- Runs, cost and eBay calls in the weekly self-review are cut to its seven
+  days. A Sunday-to-Sunday week used to add up eight calendar days, so it
+  showed more hourly runs than the week has hours and overstated cost per pick.
+- Every snipe logged in the week counts against its pick, even when the pick
+  was made the week before, and ends as won, lost, pending or unknown. A win
+  is read off the sold price when the inventory hasn't caught up yet. Snipes
+  that aren't on any pick are counted as unattributed, so the tier and band
+  breakdowns add up.
+- The scorecard splits its calls by where the going rate came from (`sales`,
+  `guessed`, `calibrated`), overall and per price band.
+
 ### Steals mode and the brag board
 - `[steals]` in the profile turns on steals mode: picks held to `max_share`
   (default 50%) of value with shipping, auction maxes cut to fit, a cheap-only

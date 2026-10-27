@@ -75,11 +75,16 @@ too high). Read the sign carefully before building on it.
 - "calibration" shows the correction the bot already applies by itself to \
 guessed (not sales-backed) going rates in each price band, learned from \
 Claude's raw guesses. Don't propose a fix it is already making; say whether \
-the bias that is left looks like what it can't correct.
+the bias that is left looks like what it can't correct. The scorecard's \
+"by_source" splits the calls by where the going rate came from: "sales" \
+(backed by real sold prices), "guessed" (Claude's estimate, not corrected) \
+and "calibrated" (an estimate the calibration then corrected).
 - "snipes" breaks the collector's snipes on picks down by tier and price \
 band: sniped_pct, how far their max sat from the bot's, and won/lost (lost = \
-sold to someone else). won_paid_vs_value_pct is what won snipes cost against \
-the bot's going rate, as a median; below zero is a steal.
+sold to someone else; pending = still running; unknown = over, no result yet). \
+"outcomes" adds them all up, "unattributed" are snipes not on any pick. \
+won_paid_vs_value_pct is what won snipes cost against the bot's going rate, \
+as a median; below zero is a steal.
 - skipped_pct is the share of picks the collector hid with the Skip button, \
 and sniped_pct the share of auction picks the collector set a snipe on. \
 by_edge counts the picks the bot itself labelled as a price mistake \
@@ -157,7 +162,7 @@ def window(con, start: float, end: float) -> dict:
             if start <= s["logged_at"] < end and s["bot_max"] is not None
             and s["my_max"] is not None]
     said = [f for f in db.feedback(con, since=int(start)) if f["created_at"] < end]
-    stats = db.stat_totals(con, _day(start), _day(end - 1))
+    stats = stat_totals(con, start, end)
     per_job = lambda prefix: {job: round(stats[f"{prefix}:{job}"], 2)   # noqa: E731
                               for job in JOBS if stats.get(f"{prefix}:{job}")}
     cost, runs, calls = per_job("cost"), per_job("runs"), per_job("ebay_calls")
@@ -207,49 +212,118 @@ def window(con, start: float, end: float) -> dict:
     }
 
 
-def snipe_results(con, picks: list[dict], start: float, end: float) -> dict:
-    """The collector's snipes on picks logged in this stretch, by tier and price band:
-    how many auction picks got one, how far their max sat from the bot's, and how
-    they ended (won = in the inventory under that item id, lost = sold to someone else)."""
+def stat_totals(con, start: float, end: float) -> dict[str, float]:
+    """The daily counts added up over exactly this stretch of time.
+
+    Counts are kept per local day, and a week that starts and ends on a Sunday
+    evening touches eight days. Adding all eight whole showed eight days of
+    runs and cost against seven of picks, so the days at either end count only
+    for the share of them that falls inside the stretch.
+    """
+    first, last = _day(start), _day(end - 1)
+    out: dict[str, float] = {}
+    for row in con.execute("SELECT day, key, n FROM stats WHERE day>=? AND day<=?",
+                           (first, last)):
+        day = datetime.fromisoformat(row["day"]).replace(tzinfo=config.TZ)
+        day_end = day + timedelta(days=1)
+        inside = (min(end, day_end.timestamp()) - max(start, day.timestamp())) / (
+            day_end.timestamp() - day.timestamp())
+        out[row["key"]] = out.get(row["key"], 0) + row["n"] * max(0.0, min(1.0, inside))
+    return out
+
+
+OUTCOMES = ("won", "lost", "pending", "unknown")
+
+
+def snipe_outcome(item_id: str, my_max: float | None, owned: set[str],
+                  sold: dict[str, float], ends: dict[str, float | None], now: float) -> str:
+    """How one snipe turned out.
+
+    won: in the inventory under that item id, or the auction sold at or under
+    the snipe's max (Gixen bids at the very end, so the highest max wins; the
+    inventory just hasn't caught up yet). lost: sold for more than the max.
+    pending: still running. unknown: over, but the result isn't in yet.
+    """
+    if item_id in owned:
+        return "won"
+    if item_id in sold:
+        return "won" if my_max is not None and sold[item_id] <= my_max else "lost"
+    end = ends.get(item_id)
+    return "pending" if end is None or end > now else "unknown"
+
+
+def snipe_results(con, picks: list[dict], start: float, end: float,
+                  now: float | None = None) -> dict:
+    """The collector's snipes logged in this stretch, by tier and price band: how
+    many auction picks got one, how far their max sat from the bot's, and how they
+    ended (see snipe_outcome).
+
+    A snipe belongs to its pick even when the pick was made the week before, so
+    the groups add up to every snipe on a pick. sniped_pct only counts snipes on
+    this stretch's own picks, so it stays a share of them."""
+    now = time.time() if now is None else now
     by_id = {p["item_id"]: p for p in picks if p.get("is_auction")}
     snipes = [dict(r) for r in con.execute(
         "SELECT * FROM snipe_log WHERE logged_at>=? AND logged_at<?", (start, end))]
-    owned = {r.get("ebay_item_id"): r for r in inventory.read()[1] if r.get("ebay_item_id")}
-    gone = {r[0] for r in con.execute("SELECT item_id FROM sales")}
+    earlier = {}
+    for s in snipes:
+        if s["item_id"] not in by_id:
+            row = con.execute("SELECT data FROM picks WHERE item_id=?",
+                              (s["item_id"],)).fetchone()
+            if row:
+                earlier[s["item_id"]] = json.loads(row["data"])
+    owned_rows = {r.get("ebay_item_id"): r for r in inventory.read()[1]
+                  if r.get("ebay_item_id")}
+    sold = {r["item_id"]: r["price"] for r in con.execute("SELECT item_id, price FROM sales")}
+    ends = {r["item_id"]: r["end_ts"] for r in con.execute(
+        "SELECT item_id, end_ts FROM seen WHERE item_id IN (%s)" % ",".join("?" * len(snipes)),
+        [s["item_id"] for s in snipes])} if snipes else {}
+    outcome = {s["item_id"]: snipe_outcome(s["item_id"], s["my_max"], set(owned_rows),
+                                           sold, ends, now) for s in snipes}
 
     def group(key) -> dict:
         out: dict = {}
+
+        def slot(p):
+            return out.setdefault(key(p), {"auctions": 0, "sniped": 0, "_own": 0,
+                                           **dict.fromkeys(OUTCOMES, 0), "_gaps": []})
         for p in by_id.values():
-            out.setdefault(key(p), {"auctions": 0, "sniped": 0, "won": 0, "lost": 0,
-                                    "_gaps": []})["auctions"] += 1
+            slot(p)["auctions"] += 1
         for s in snipes:
-            p = by_id.get(s["item_id"])
+            p = by_id.get(s["item_id"]) or earlier.get(s["item_id"])
             if p is None:
                 continue
-            g = out[key(p)]
+            g = slot(p)
             g["sniped"] += 1
+            g["_own"] += s["item_id"] in by_id
             if s["my_max"] is not None and s["bot_max"] is not None:
                 g["_gaps"].append(s["my_max"] - s["bot_max"])
-            if s["item_id"] in owned:
-                g["won"] += 1
-            elif s["item_id"] in gone:
-                g["lost"] += 1
+            g[outcome[s["item_id"]]] += 1
         for g in out.values():
             gaps = g.pop("_gaps")
-            g["sniped_pct"] = _pct(g["sniped"], g["auctions"])
+            g["sniped_pct"] = _pct(g.pop("_own"), g["auctions"])
             g["avg_my_max_minus_bot_max"] = round(statistics.mean(gaps), 2) if gaps else None
         return out
 
     paid = []   # what a won snipe cost against the going rate the bot gave
     for s in snipes:
-        row, value = owned.get(s["item_id"]), s["bot_value"]
+        row, value = owned_rows.get(s["item_id"]), s["bot_value"]
         try:
             price = float(row["price_paid"]) if row else None
         except (TypeError, ValueError):
             price = None
         if price and value:
             paid.append((price - value) / value)
+    on_picks = [s for s in snipes if s["item_id"] in by_id or s["item_id"] in earlier]
     return {
+        "logged": len(snipes),
+        "on_picks": len(on_picks),
+        # snipes whose pick is gone, or that were never on a pick
+        "unattributed": len(snipes) - len(on_picks),
+        "outcomes": {o: sum(outcome[s["item_id"]] == o for s in on_picks) for o in OUTCOMES},
+        # wins the inventory doesn't show yet, read off the sold price instead
+        "won_not_in_inventory": sum(outcome[s["item_id"]] == "won"
+                                    and s["item_id"] not in owned_rows for s in on_picks),
         "by_tier": group(lambda p: p.get("tier") or "none"),
         "by_band": group(lambda p: sales.band(p["value"]) if p.get("value") else "no value"),
         "won_paid_vs_value_pct": round(100 * statistics.median(paid)) if paid else None,
@@ -499,6 +573,15 @@ def render(review: dict) -> str:
     md += ["", "Per price band, picked auctions that sold this week:"]
     md += [f"- {b['band']}: {b['calls']} sold, going rate bias {_dig(b, ('value_bias_pct',))}%"
            for b in week["scorecard"]["bands"]]
+    md += ["", "By where the going rate came from:"]
+    md += [f"- {name}: {s['calls']} sold, gap {_dig(s, ('value_gap_pct',))}%, "
+           f"bias {_dig(s, ('value_bias_pct',))}%"
+           for name, s in (week["scorecard"].get("by_source") or {}).items()]
+    snipes = week.get("snipes") or {}
+    if snipes.get("outcomes"):
+        md += ["", f"Snipes on picks ({snipes['on_picks']}, {snipes['unattributed']} "
+               "not on a pick): " + ", ".join(f"{n} {o}" for o, n in
+                                                snipes["outcomes"].items())]
     md += ["", "Calibration (the bot's own correction of guessed going rates): "
            + calibrate.summary(numbers.get("calibration") or {})]
     md += ["", f"## Proposals ({len(review['proposals'])})"]

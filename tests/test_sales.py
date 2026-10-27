@@ -429,3 +429,20 @@ def test_sold_prices_are_kept_for_a_year():
     sales.collect(con, FakeEbay({"1": ended(12.5)}), now=NOW)
     assert sales.KEEP_DAYS == 365
     assert {r[0] for r in con.execute("SELECT item_id FROM sales")} == {"1", "half"}
+
+
+def test_the_scorecard_splits_the_calls_by_where_the_going_rate_came_from():
+    from snipehunt import sales
+
+    def row(basis, value, raw, total):
+        return {"call": {"basis": basis, "value": value, "value_raw": raw, "under_max": False,
+                         "under_win": False},
+                "off": (total - value) / value}
+    rows = [row("sales", 20.0, 20.0, 22.0), row("estimate", 20.0, 20.0, 30.0),
+            row("estimate", 25.6, 20.0, 25.6), row("estimate", 5.0, 5.0, 5.0)]
+    got = sales.scorecard(rows)["by_source"]
+    assert set(got) == {"sales", "guessed", "calibrated"}
+    assert got["sales"]["value_bias_pct"] == 10
+    assert got["guessed"]["calls"] == 2 and got["calibrated"]["value_bias_pct"] == 0
+    assert sum(g["calls"] for g in got.values()) == 4
+    assert [b["calls"] for b in got["guessed"]["bands"]] == [1, 1, 0]
