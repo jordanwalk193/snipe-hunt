@@ -466,6 +466,8 @@ def backfill_search(client: EbayClient | None = None, pages: int = BACKFILL_PAGE
         kept = seen = 0
         for page in range(pages):
             got = client.search(q, ALL_FORMATS, None, limit=TEAM_PAGE, offset=page * TEAM_PAGE)
+            if not got:   # past the end. A short page isn't: eBay sometimes sends 199
+                break
             seen += len(got)
             for raw in got:
                 item = parse_item(raw)
@@ -483,8 +485,6 @@ def backfill_search(client: EbayClient | None = None, pages: int = BACKFILL_PAGE
                 if label not in existing.queries:
                     existing.queries.append(label)
                 kept += 1
-            if len(got) < TEAM_PAGE:
-                break
         if verbose:
             print(f"  {label:16} {seen:5} results, {kept:5} kept", file=sys.stderr)
     if verbose:

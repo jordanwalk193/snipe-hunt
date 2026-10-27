@@ -62,7 +62,8 @@ def test_the_backfill_pages_through_everything_and_can_skip_the_cards(monkeypatc
     got = ebay_search.backfill_search(fake, pages=5, skip_category="261328")
     ids = {i.item_id for i in got}
     assert len(ids) == 121 and "f" in ids and not ids & {i["legacyItemId"] for i in cards}
-    assert [o for lane, q, o in fake.asked if q == "rick monday"] == [0, 200]   # stops when short
+    # a short page doesn't end it (eBay sometimes sends 199); an empty one does
+    assert [o for lane, q, o in fake.asked if q == "rick monday"] == [0, 200, 400]
     assert len(ebay_search.backfill_search(fake, pages=1)) == 201   # first 200, plus the flag photo
 
 
