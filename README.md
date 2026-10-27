@@ -146,6 +146,20 @@ How a title is judged:
 
 `examples/profile.example.toml` is a complete, commented profile.
 
+**Memorabilia and listings without the name.** Every search keeps only titles that name the player, so a team-signed ball or a photo of a famous moment that never names them is dropped. List searches for those under `[search] loose`. A result whose title leaves the name out is handed to Claude to judge instead of being dropped, though `wrong_words` still rule it out:
+
+```toml
+[search]
+category_id = ""     # every eBay category, not just card singles
+loose = ["1976 flag dodger stadium", "1981 dodgers team signed"]
+```
+
+**Everything already listed.** The hourly searches read the first 100 results of each search: everything new in an hour, but not what was listed before the bot started. A one-off backfill pages through it all (eBay allows up to 10,000 per search) and scores what isn't scored yet. Its picks go to the dashboard and the sheet with one note, not an alert each:
+
+```
+python -m snipehunt.jobs backfill --pages 50 --skip-category 261328   # only what isn't a card single
+```
+
 ## Team mode
 
 Follow a team instead of a player: every card of the St. Louis Cardinals, whoever is on it, cheapest steals first.

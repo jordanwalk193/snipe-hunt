@@ -6,6 +6,13 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Memorabilia and the backlog
+- `[search] loose`: searches whose results needn't name the player. A title
+  without the name goes to Claude as "unclear" instead of being dropped.
+- `python -m snipehunt.jobs backfill`: a one-off sweep of everything already
+  listed, paged (`--pages`, 200 a page), optionally leaving out one category
+  (`--skip-category 261328` for memorabilia only). One note, no alert per pick.
+
 ### Self-review numbers you can trust
 - Runs, cost and eBay calls in the weekly self-review are cut to its seven
   days. A Sunday-to-Sunday week used to add up eight calendar days, so it
