@@ -67,6 +67,7 @@ class Profile:
     junk_words: list[str] | None = None   # titles to drop unscored; None = filters.JUNK_WORDS
     lots: bool = True                 # false: drop "lot of" listings before scoring
     midtier: dict | None = None       # [search.midtier]; None = the mid-tier lane is off
+    steals: dict | None = None        # [steals]; None = steals mode is off (steals.py)
 
     def __post_init__(self) -> None:
         names = self.player.split()
@@ -208,6 +209,7 @@ class TeamProfile:
     junk_words: list[str] | None = None
     lots: bool = True
     midtier = None                    # the mid-tier lane is player mode only
+    steals: dict | None = None        # [steals]; None = steals mode is off (steals.py)
 
     mode = "team"
 
@@ -381,6 +383,8 @@ def _parse_team(raw: dict) -> TeamProfile:
     }
     if "keywords" in search:
         known["keyword_searches"] = search["keywords"]
+    if isinstance(raw.get("steals"), dict):
+        known["steals"] = dict(raw["steals"])
     return TeamProfile(**known)
 
 
@@ -429,6 +433,8 @@ def parse(text: str) -> Profile | TeamProfile:
     }
     if isinstance(search.get("midtier"), dict):
         known["midtier"] = dict(search["midtier"])
+    if isinstance(raw.get("steals"), dict):
+        known["steals"] = dict(raw["steals"])
     if "card_words" in player:
         known["card_words"] = player["card_words"]
     if "keywords" in search:

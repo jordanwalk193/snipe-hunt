@@ -21,9 +21,7 @@
   "gixen_relogin_minutes": 120,
   "sellers": [],
   "extra_searches": [],
-  "combined_ship_sellers": [
-   "dcsports87"
-  ],
+  "combined_ship_sellers": [],
   "edge_min_pct": 25,
   "min_overlap": 0.5,
   "track_off": 10,
@@ -33,6 +31,9 @@
   "self_tuning": true,
   "ebay_daily_cap": 5000,
   "aspect_refresh": true,
+  "max_share": 1.0,
+  "bid_now_alerts": false,
+  "drop_alerts": false,
   "midtier_enabled": true,
   "midtier_deal_ratio": 0.6,
   "midtier_max_pay": 80.0
@@ -69,6 +70,9 @@
   "self_tuning",
   "ebay_daily_cap",
   "aspect_refresh",
+  "max_share",
+  "bid_now_alerts",
+  "drop_alerts",
   "midtier_enabled",
   "midtier_deal_ratio",
   "midtier_max_pay"

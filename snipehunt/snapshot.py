@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from . import (config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
                rainbow, rarity, report, sales, scheduler, score, settings, shortlist,
                snipecheck, spending, tune, watch)
-from . import calibrate, usage
+from . import bidnow, brag, calibrate, steals, usage
 from .notify import TIER_ORDER
 
 VERSION = 1
@@ -88,7 +88,7 @@ def live_picks(con, now: datetime) -> list[dict]:
     skipped = set(skipped_ids(con))
     picks = []
     for r in rows:
-        p = current(json.loads(r["data"]), r["price"], r["shipping"])
+        p = held_to_steals(current(json.loads(r["data"]), r["price"], r["shipping"]))
         if p is not None:   # when eBay last told us this price, and the bids behind it
             at = max(r["last_seen"] or 0, r["bid_at"] or 0)
             p["price_at"] = datetime.fromtimestamp(at, config.TZ).isoformat(
@@ -118,6 +118,17 @@ def current(pick: dict, price: float | None, shipping: float | None) -> dict | N
     if pick.get("is_auction") and pick.get("max") is not None and price >= pick["max"]:
         return None
     return score.rerate(pick)
+
+
+def held_to_steals(pick: dict | None) -> dict | None:
+    """Steals mode: a saved pick held to max_share at today's price (picks saved before
+    the setting changed too). Unchanged with max_share at 1.0."""
+    if pick is None:
+        return None
+    fitted = steals.fit(pick)
+    if fitted is None:
+        return None
+    return score.rerate(fitted) if fitted is not pick else pick
 
 
 def ranked(picks: list[dict]) -> list[dict]:
@@ -443,7 +454,33 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),
         **({"team": team_view(con, picks, cfg)} if profile.get().mode == "team" else {}),
+        **steals_view(con, picks, now, cfg),
     }
+
+
+def steals_view(con, picks: list[dict], now: datetime, cfg: dict) -> dict:
+    """Steals mode and the "don't think, just buy" lists. Read-only; a failure here
+    leaves these keys out rather than taking the whole snapshot down."""
+    try:
+        return {
+            "steals": {"on": steals.on(), "max_share": cfg["max_share"]},
+            # auctions ending within the hour at 10% of value or less, soonest first
+            "bid_now": [dict(_slim(p), pay=p["pay"], off_pct=p["off_pct"])
+                        for p in bidnow.find(con, now)],
+            # the listings closest to a jackpot or a bid-now, soonest ending first
+            "radar": steals.radar(con, now, picks),
+            # 2+ picks from one seller, shipping paid once where it combines
+            "bundles": steals.bundles(picks, cfg["combined_ship_sellers"]),
+            "savings": steals.savings(con, now),
+            # Buy It Nows cut into steal range in the last day
+            "dropped": [dict(_slim(p), was=p["was"], cut_pct=p.get("cut_pct"))
+                        for p in steals.dropped_into_range(con, picks, now)],
+            "brag": brag.board(con, now),
+        }
+    except Exception as exc:
+        import sys
+        print(f"snapshot: steals views: {exc}", file=sys.stderr)
+        return {}
 
 
 def _chase_lists(con, rows: list[dict], picks: list[dict], now: datetime) -> dict:

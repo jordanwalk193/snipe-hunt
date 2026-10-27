@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from . import config, jackpot, lowball, offers, profile, sales, settings, snapshot, snipecheck, spending
+from . import brag, config, jackpot, lowball, offers, profile, sales, settings, snapshot, snipecheck, spending
 
 # (tier, card, price, shipping, max, value, hours until it ends or None for Buy It Now,
 #  basis, snipe, why, colour)
@@ -268,6 +268,74 @@ def _checked(gixen: dict, picks: list[dict]) -> dict:
     return gixen
 
 
+# made-up bought steals for the brag board: (card, paid, value, days ago)
+BOUGHT = [("2023 Topps Chrome RC Refractor #209", 2.02, 24.0, 2),
+          ("2024 Bowman Chrome Prospect Auto /250", 9.09, 60.0, 9),
+          ("2023 Topps Heritage RC", 0.99, 11.0, 16),
+          ("2022 Panini Prizm Draft Silver", 6.06, 18.0, 23),
+          ("2023 Topps Update Gold /2023", 4.04, 16.0, 30)]
+
+
+def _steals(now: datetime, picks: list[dict]) -> dict:
+    """Made-up steals-mode lists: bid now, radar, bundles, savings, a drop, the brag board."""
+    from . import bidnow, steals
+    radar = []
+    for p in picks:
+        pay = round(p["price"] + p["shipping"], 2)
+        line = bidnow.SHARE if p["is_auction"] else jackpot.SHARE_SALES
+        radar.append({"item_id": p["item_id"], "card": p["card"], "url": p["url"],
+                      "image": p["image"], "pay": pay, "value": p["value"],
+                      "share_pct": round(100 * pay / p["value"]), "line_pct": round(100 * line),
+                      "kind": "bid_now" if p["is_auction"] else "jackpot",
+                      "hot": pay <= line * p["value"], "gap": max(0.0, round(pay - line * p["value"], 2)),
+                      "in_range": False, "opens_at": None, "is_auction": p["is_auction"],
+                      "end_time": p["end_time"], "max": p["max"], "max_basis": p["max_basis"],
+                      "best_offer": p["best_offer"]})
+    radar = sorted(radar, key=steals.ending_order)[:steals.RADAR_SIZE]
+    auctions = [p for p in picks if p["is_auction"]]
+    soon = dict(auctions[0], end_time=(now + timedelta(minutes=25)).isoformat(timespec="minutes"),
+                price=1.25) if auctions else None
+    bid_now = ([dict(soon, pay=round(1.25 + soon["shipping"], 2),
+                     off_pct=round(100 * (1 - (1.25 + soon["shipping"]) / soon["value"])))]
+               if soon and (1.25 + soon["shipping"]) <= bidnow.SHARE * soon["value"] else [])
+    bins = [p for p in picks if not p["is_auction"]]
+    dropped = [dict(bins[0], was=round(bins[0]["price"] * 1.6, 2), cut_pct=38)] if bins else []
+    rows = [{"item_id": str(420000000001 + n), "card": card, "paid": paid, "value": value,
+             "saved": round(value - paid, 2), "pct": round(100 * paid / value), "image": None,
+             "date": (now - timedelta(days=days)).date().isoformat()}
+            for n, (card, paid, value, days) in enumerate(BOUGHT)]
+    paid, worth = sum(r["paid"] for r in rows), sum(r["value"] for r in rows)
+    month = [r for r in rows if r["date"].startswith(now.strftime("%Y-%m"))]
+    totals = {"all": {"n": len(rows), "paid": round(paid, 2), "value": round(worth, 2),
+                      "saved": round(worth - paid, 2), "pct": round(100 * paid / worth)},
+              "month": {"n": len(month), "paid": round(sum(r["paid"] for r in month), 2),
+                        "value": round(sum(r["value"] for r in month), 2),
+                        "saved": round(sum(r["saved"] for r in month), 2),
+                        "pct": round(100 * sum(r["paid"] for r in month)
+                                     / sum(r["value"] for r in month)) if month else None}}
+    best = min(rows, key=lambda r: r["pct"])
+    week_start = (now.date() - timedelta(days=now.weekday())).isoformat()
+    in_week = [r for r in rows if r["date"] >= week_start]
+    return {
+        "steals": {"on": True, "max_share": 0.5},
+        "bid_now": bid_now,
+        "radar": radar,
+        "bundles": steals.bundles(picks, [SELLERS[0]]),
+        "savings": {**totals, "best": {k: best[k] for k in ("card", "paid", "value", "saved",
+                                                              "pct", "image", "date")}},
+        "dropped": dropped,
+        "brag": {"totals": totals,
+                 "top": [brag._slim(r) for r in sorted(rows, key=lambda r: r["pct"])[:brag.TOP]],
+                 "steal_of_month": brag._slim(min(month, key=lambda r: r["pct"])) if month else None,
+                 "this_week": {"n": len(in_week), "saved": round(sum(r["saved"] for r in in_week), 2)},
+                 "badges": [{"key": k, "name": name, "rule": rule,
+                             "count": sum(1 for r in rows if k in brag._badges(r))}
+                            for k, name, rule in brag.BADGES],
+                 "streak_weeks": brag.streak(rows, now.date()),
+                 "card": brag.card(rows, totals, now)},
+    }
+
+
 def build(now: datetime | None = None) -> dict:
     now = now or datetime.now(config.TZ)
     who = profile.get()
@@ -401,4 +469,5 @@ def build(now: datetime | None = None) -> dict:
         "spending": spend,
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": None,
+        **_steals(now, picks),
     }

@@ -13,10 +13,10 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from . import (aspects, bids, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
+from . import (aspects, bidnow, bids, brag, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
                inventory_sync, jackpot, limited_drops, lowball, midtier, notify, offers, ops,
                profile, rarity, reflect, report, sales, score, settings, sheets, shortlist,
-               snipecheck, usage, watch, wins)
+               snipecheck, steals, usage, watch, wins)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -46,6 +46,11 @@ def hourly(dry_run: bool = False) -> str:
     if not dry_run:
         # the lowest print runs for sale, for the dashboard
         rarity.save(con, listings, inventory.read()[1])
+    # steals mode: over the delivered ceiling or high-end noise never reaches Claude
+    # (still noted as seen above, so price drops are tracked); a no-op otherwise
+    listings, dear = steals.keep(listings)
+    if dear:
+        print(f"steals: dropped {dear} over the ceiling or high-end", file=sys.stderr)
     # Save now: if scoring fails, an open write here would block the failure
     # from being recorded, and these listings are still on eBay either way.
     con.commit()
@@ -284,9 +289,25 @@ def lastcall(dry_run: bool = False) -> str:
     if not dry_run and settings.load(con)["alerts_enabled"]:
         from . import snapshot
         jackpot.alert(con, snapshot.live_picks(con, datetime.now(config.TZ)))
+        steal_alerts(con, client)
     hits = lowball.last_call(con, client, _sniped(con), send=not dry_run)
     return (f"{read} bids read again, "
             f"{len(hits)} lowball last call{'s' if len(hits) != 1 else ''}")
+
+
+def steal_alerts(con, client) -> None:
+    """Bid now, think later (bidnow.py) and Buy It Nows just cut into steal range
+    (steals.drop_alert). Each is off unless its setting is on (steals mode turns
+    both on); one failing doesn't stop the other."""
+    from . import snapshot
+    try:
+        bidnow.alert(con, client)
+    except Exception as exc:
+        print(f"bidnow: {exc}", file=sys.stderr)
+    try:
+        steals.drop_alert(con, snapshot.live_picks(con, datetime.now(config.TZ)))
+    except Exception as exc:
+        print(f"drops: {exc}", file=sys.stderr)
 
 
 def _remember(con, listings: list) -> list[dict]:
@@ -317,6 +338,8 @@ def fast(dry_run: bool = False) -> str:
         return "waiting for the first hourly run"
     client = ebay_search.EbayClient()
     client.lane = "fast"
+    if not dry_run and settings.load(con)["alerts_enabled"]:
+        steal_alerts(con, client)   # an auction's last hour can fall between hourly runs
     found = []
     if not usage.ebay_allowed("keyword"):
         return "daily eBay call budget reached"
@@ -332,6 +355,7 @@ def fast(dry_run: bool = False) -> str:
         if item.match != "no" and not item.is_auction:
             found.append(item)
     found, _ = filters.prefilter(found)
+    found, _ = steals.keep(found)   # steals mode's ceiling; a no-op otherwise
     new = [i for i in found if con.execute(
         "SELECT 1 FROM seen WHERE item_id=?", (i.item_id,)).fetchone() is None]
     if profile.get().mode == "team":   # the same free ranking as the hourly run, a higher bar

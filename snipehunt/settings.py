@@ -44,7 +44,7 @@ DEFAULTS: dict = {
     "sellers": [],                   # eBay sellers whose listings get their own search
     "extra_searches": [],
     # sellers who combine shipping: with an order already open, another card ships for $0
-    "combined_ship_sellers": ["dcsports87"],
+    "combined_ship_sellers": [],
     # The four below are tuning knobs more than preferences; see TUNABLES.
     "edge_min_pct": 25,              # an edge has to be this far under the going rate
     "min_overlap": 0.5,              # share of title words a sold price must have in common
@@ -59,6 +59,11 @@ DEFAULTS: dict = {
     # the least useful lanes stop first (usage.CUT_ORDER)
     "ebay_daily_cap": 5000,
     "aspect_refresh": True,          # one eBay call a week for eBay's item-specifics names
+    # Steals mode (steals.py). Off here so player mode is unchanged; a profile with
+    # [steals] turns them on (steals.settings_defaults) and Home Assistant may override.
+    "max_share": 1.0,                # an auction max or Buy It Now keeps to this share of value
+    "bid_now_alerts": False,         # auctions ending within the hour at 10% of value or less
+    "drop_alerts": False,            # a Buy It Now just cut into steal range
 }
 
 # What the weekly self-review may adjust on its own, and how far (tune.py).
@@ -123,6 +128,7 @@ RANGES = {
     "ebay_daily_cap": (100, 1000000),
     "midtier_deal_ratio": (0.2, 0.95),
     "midtier_max_pay": (20, 1000),
+    "max_share": (0.3, 1.0),
 }
 ITEM = {
     "sellers": re.compile(r"[A-Za-z0-9._*\-]{1,64}"),
@@ -146,8 +152,17 @@ def team_mode() -> bool:
 def defaults() -> dict:
     """The defaults for this bot: player mode's, or a team's with its own extras."""
     if not team_mode():
-        return {**DEFAULTS, **midtier_defaults()}
-    return {**DEFAULTS, **TEAM_OVERRIDES, **TEAM_DEFAULTS}
+        return {**DEFAULTS, **midtier_defaults(), **steals_defaults()}
+    return {**DEFAULTS, **TEAM_OVERRIDES, **TEAM_DEFAULTS, **steals_defaults()}
+
+
+def steals_defaults() -> dict:
+    """Steals mode's switches as the profile's [steals] sets them; none without it."""
+    try:
+        from . import steals   # it reads settings; kept local
+        return steals.settings_defaults()
+    except (profile.ProfileError, OSError, ValueError):
+        return {}
 
 
 def midtier_defaults() -> dict:

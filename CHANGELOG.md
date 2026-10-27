@@ -6,6 +6,22 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Steals mode and the brag board
+- `[steals]` in the profile turns on steals mode: picks held to `max_share`
+  (default 50%) of value with shipping, auction maxes cut to fit, a cheap-only
+  filter before scoring (`max_landed`, 1/1s, superfractors and plates
+  dropped), bid-now pushes (auctions ending within the hour at 10% of value or
+  less) and price-drop pushes. Without it the bot behaves exactly as before.
+- New settings `max_share` (1.0), `bid_now_alerts` and `drop_alerts` (off);
+  steals mode sets 0.5, on and on. Home Assistant can override each.
+- New snapshot keys for every bot: `steals`, `bid_now` and `radar` (both
+  soonest ending first), `bundles`, `savings`, `dropped` and `brag`. Demo mode
+  serves made-up data for each.
+- The brag board: savings, the biggest steals, badges (90% Club, Dollar Store,
+  Half-Off Hero), a weekly steal streak, and a share-safe brag card, also in
+  the weekly report.
+- `combined_ship_sellers` now defaults to empty (it named a real seller).
+
 ### Must-haves and rainbows
 - Optional `data/musthave.md` (the defining cards of each year) and
   `data/rainbow.md` (every parallel of a card you chase): the snapshot's new

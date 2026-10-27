@@ -94,6 +94,15 @@ def _bids_wanted(con, now: datetime) -> bool:
         return False
 
 
+def _bid_now_wanted(con, now: datetime) -> bool:
+    """With bid-now alerts on, is any auction already on the bid-now list (bidnow.py)?"""
+    from . import bidnow, settings
+    try:
+        return bool(settings.load(con)["bid_now_alerts"] and bidnow.find(con, now))
+    except Exception:   # a busy or half-built database: try again next tick
+        return False
+
+
 def due_jobs(con, now: datetime) -> list[str]:
     """Jobs whose scheduled time has passed since they last started."""
     out = []
@@ -104,7 +113,8 @@ def due_jobs(con, now: datetime) -> list[str]:
         late = LATE.get(job, fast_minutes() * 60)
         if job == "fast" and due.minute == HOURLY_MINUTE:
             continue   # the hourly run is searching anyway
-        if job == "lastcall" and not (_last_call_wanted(con, now) or _bids_wanted(con, now)):
+        if job == "lastcall" and not (_last_call_wanted(con, now) or _bids_wanted(con, now)
+                                      or _bid_now_wanted(con, now)):
             continue
         if started < due.timestamp() and (now - due).total_seconds() <= late:
             out.append(job)

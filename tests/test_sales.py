@@ -212,7 +212,7 @@ def test_a_gixen_snipe_the_search_never_found_still_gets_its_sold_price(monkeypa
              1.25, 3.0, "searchseller")
     snipes = [
         {"item_id": "1", "title": "2023 Bowman Chrome Jordan Walker Blue /150", "seller":
-         "dcsports87", "end_time": ends, "max_bid": 6.06, "current_bid": 1.0,
+         "combineshop", "end_time": ends, "max_bid": 6.06, "current_bid": 1.0,
          "status": "SCHEDULED"},
         {"item_id": "2", "title": "2023 Topps Chrome Jordan Walker Refr...", "seller": "x",
          "end_time": ends, "max_bid": 3.03, "current_bid": 1.0, "status": "SCHEDULED"},
@@ -224,7 +224,7 @@ def test_a_gixen_snipe_the_search_never_found_still_gets_its_sold_price(monkeypa
     rows = {r["item_id"]: dict(r) for r in con.execute("SELECT * FROM seen")}
     assert set(rows) == {"1", "2"}
     assert (rows["1"]["is_auction"], rows["1"]["end_ts"], rows["1"]["seller"]) == (
-        1, int(NOW + 1800), "dcsports87")
+        1, int(NOW + 1800), "combineshop")
     # what the search recorded is better than Gixen's copy and is kept
     assert (rows["2"]["title"], rows["2"]["end_ts"], rows["2"]["seller"], rows["2"]["price"]) == (
         "2023 Topps Chrome Jordan Walker Refractor #45 RC", int(NOW + 900), "searchseller", 3.0)

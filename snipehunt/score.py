@@ -573,8 +573,10 @@ def build_prompt(items: list[Listing], lookups: int = 8,
         extra["habits"] = habits_line(who.collector)
         extra["logo_rule"] = (LOGO_ONLY_RULE if who.logo_only else LOGO_RULE).format(
             name=who.player, collector=who.collector)
+    from . import steals   # steals imports jackpot and pricing; kept local
     lane_rules = (MIDTIER_RULE if any(i.lane == "midtier" for i in items) else "") + (
-        FAKE_AUTO_RULE if any("fake_auto" in i.flags for i in items) else "")
+        FAKE_AUTO_RULE if any("fake_auto" in i.flags for i in items) else "") + (
+        steals.prompt_rule())   # nothing unless steals mode is on
     return template.format(
         **extra,
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],
@@ -749,7 +751,11 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
     if item.lane:
         pick["lane"] = item.lane
         pick["identity"] = "unsure" if str(raw.get("identity")).lower() == "unsure" else "sure"
-    return apply_caps(pick)
+    from . import steals   # steals imports jackpot and pricing; kept local
+    fitted = steals.fit(pick)   # steals mode: max_share of value at most; else unchanged
+    if fitted is None:
+        return None
+    return rerate(fitted) if fitted is not pick else apply_caps(pick)
 
 
 def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None

@@ -57,6 +57,16 @@ lots = true                   # false drops "lot of" listings before scoring
 # name, autograph or parallel only in the item specifics, wrong year). Delete
 # this block to turn it off. Recommend only, like everything else. The card
 # numbers and years it checks titles against are in data/known_cards.toml.
+# Steals mode (README "Steals mode and the brag board"): only cards at half their
+# value or less, cheap cards only, bid-now and price-drop pushes. Uncomment to use.
+# [steals]
+# max_share = 0.50            # an auction max or Buy It Now keeps to this share of value
+# max_landed = 25.0           # skip anything costing more than this delivered
+# max_landed_auto = 75.0      # the same for an autograph
+# bid_now_alerts = true       # auctions ending within the hour at 10% of value or less
+# drop_alerts = true          # a Buy It Now just cut into steal range
+# skip_words = ["1/1", "1 of 1", "one of one", "superfractor", "printing plate"]
+
 [search.midtier]
 enabled = true
 min_pay = 20.0                # the band is on what you'd pay (max + shipping)

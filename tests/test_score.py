@@ -126,7 +126,7 @@ def test_a_seller_with_an_open_order_who_combines_shipping_costs_nothing_to_add_
     con = db.connect()
     assert score.open_order_sellers(con) == set() and "open orders" not in score.learned(con)[1]
     fields, rows = inventory.read()
-    rows.append(dict.fromkeys(fields, "") | {"id": "90", "status": "Won", "seller": "DCSports87"})
+    rows.append(dict.fromkeys(fields, "") | {"id": "90", "status": "Won", "seller": "CombineShop"})
     rows.append(dict.fromkeys(fields, "") | {"id": "91", "status": "In transit",
                                              "seller": "shippedalready"})
     inventory.write(fields, rows)
@@ -135,13 +135,14 @@ def test_a_seller_with_an_open_order_who_combines_shipping_costs_nothing_to_add_
         {"date": today, "type": "won", "is_player": True, "item_id": "1", "seller": "slowpay"},
         {"date": today, "type": "won", "is_player": True, "item_id": "2", "seller": "paidup"},
         {"date": today, "type": "paid", "is_player": True, "item_id": "2", "seller": "paidup"}])
-    assert score.open_order_sellers(con) == {"dcsports87", "slowpay"}
-    assert ("treat added shipping as about $0 if the seller combines): dcsports87, slowpay"
+    assert score.open_order_sellers(con) == {"combineshop", "slowpay"}
+    assert ("treat added shipping as about $0 if the seller combines): combineshop, slowpay"
             in score.learned(con)[1])
     # only a seller named in the setting gets the $0, whatever orders are open
-    assert score.combined_sellers(con) == {"dcsports87"}
+    settings.update(con, {"combined_ship_sellers": ["combineshop"]})   # none by default
+    assert score.combined_sellers(con) == {"combineshop"}
     raw = {"tier": "green", "max": 6.06, "value": 20}
-    card = Listing("1", "t", 0.99, "USD", 4.0, ["AUCTION"], 0, None, "dcsports87", "u", None)
+    card = Listing("1", "t", 0.99, "USD", 4.0, ["AUCTION"], 0, None, "combineshop", "u", None)
     plain = score._pick_dict(card, raw)
     riding = score._pick_dict(card, raw, score.combined_sellers(con))
     assert (plain["deal_pct"], plain["combined_ship"]) == (50, False)      # 10.06 against 20
@@ -151,8 +152,8 @@ def test_a_seller_with_an_open_order_who_combines_shipping_costs_nothing_to_add_
     assert score._pick_dict(other, raw, score.combined_sellers(con))["combined_ship"] is False
     line = notify.format_pick(dict(riding, card="c", url="u")).split("\n")[1]
     assert line.startswith("$0.99 + $4.00 ship (combined ship w/ open order)")
-    settings.update(con, {"combined_ship_sellers": "slowpay, dcsports87"})
-    assert score.combined_sellers(con) == {"dcsports87", "slowpay"}
+    settings.update(con, {"combined_ship_sellers": "slowpay, combineshop"})
+    assert score.combined_sellers(con) == {"combineshop", "slowpay"}
 
 
 def test_the_prompt_knows_a_slabbed_signature_is_not_a_pack_auto():

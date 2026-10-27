@@ -218,6 +218,58 @@ Turn it on with `[search.midtier]` in the profile (the example profile has it, w
 
 **Known limits.** The Browse API has no sold prices, so values come from the bot's own ledger (which fills up over weeks) or Claude's estimate, and a guess is capped at three stars. The odd-end-time signal is weak and only ever tips a close call. Item specifics are written by sellers and can be wrong too.
 
+## Steals mode and the brag board
+
+For the frugal collector: only cards you can get for half their value or less, and a board to brag about how cheaply you got them. Steals mode is **recommend only**, like the rest of the bot: it reads listings and sends alerts, and never bids, buys or touches Gixen.
+
+Turn it on with a `[steals]` table in the profile (the example profile has it, commented out); without it the bot works exactly as before. With it:
+
+- **Half of value at most.** Every pick is held to `max_share` of its going rate, shipping counted: an auction's max is cut to an odd-cent snipe that wins at that share, and a Buy It Now over it is no pick. Claude is told the rule too. Want-list cards keep their own ceilings.
+- **Cheap cards only.** Listings costing more than `max_landed` delivered ($75 for an autograph), and the high-end noise a frugal collector never wins cheap (1/1s, superfractors, printing plates), are dropped before anything is scored, so Claude's time goes where steals are.
+- **Bid now, think later.** An auction ending within the hour whose current bid plus shipping is 10% of its value or less gets one time-sensitive push, after a fresh read of its bid. The fast lane checks every run, and the between-hours job runs whenever an auction is on the list.
+
+```
+⏱️ BID NOW: $40 card for $2.25, ends in 18 min
+2023 Topps Chrome RC Refractor #209
+94% under its value. Bid now $1.25 · 2 bids · ends 9:42 PM.
+Worth about $40.00 going by recorded sales.
+Bid up to 18.18. Bid now, think later.
+Item 900000000001
+```
+
+- **Just dropped.** A Buy It Now a seller cuts into steal range within the last day gets one push ("📉 JUST DROPPED: $30 card now $8.00 delivered").
+
+Every bot also gets these dashboard lists, steals mode or not (read-only, nothing is sent):
+
+| Snapshot key | What it is |
+|---|---|
+| `bid_now` | auctions ending within the hour at 10% of value or less, **soonest ending first** |
+| `radar` | the ten listings closest to a jackpot or bid-now line, **soonest ending first** (Buy It Nows after), with how far each is from the line and when its alert window opens |
+| `bundles` | two or more picks from one seller, added up with shipping paid once where the seller combines it, and the Gixen lines for a group snipe |
+| `savings` | bought picks (inventory rows with an eBay item number): paid against value, this month and in all, and the best buy |
+| `dropped` | Buy It Nows cut into steal range in the last day |
+| `brag` | the brag board, below |
+
+**The brag board.** From the cards you bought: total saved, the five biggest steals, a steal of the month, a weekly streak (weeks in a row with a buy at half price or better), and badges: **90% Club** (paid 10% of value or less), **Dollar Store** (a $10+ card for a dollar or less) and **Half-Off Hero** (half price or less). It ends in the weekly report too, with a brag card ready to paste on a forum:
+
+```
+🏆 Snipe Hunt brag board, October 2026
+Saved $106.80 on 5 cards (paid 17% of value)
+Best steal: 2023 Topps Chrome RC Refractor #209: paid $2.02, worth $24.00 (92% off)
+90% Club ×2 · Dollar Store ×1 · Half-Off Hero ×5
+Steal streak: 5 weeks
+```
+
+The brag card holds card names, prices and percentages only: no seller, item number, order date or anything from your settings.
+
+| Key | Default | |
+|---|---|---|
+| `enabled` | true | `false` keeps the table but turns steals mode off |
+| `max_share` | 0.50 | 0.3–1.0; Home Assistant can change it (setting `max_share`) |
+| `bid_now_alerts`, `drop_alerts` | true | Home Assistant can switch each off |
+| `max_landed`, `max_landed_auto` | 25, 75 | the delivered ceiling, and an autograph's |
+| `skip_words` | 1/1, superfractor, printing plate… | titles with these are dropped |
+
 ## All-lane improvements
 
 These apply to every search, not just the mid-tier lane.

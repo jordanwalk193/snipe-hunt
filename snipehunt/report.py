@@ -276,6 +276,10 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
     md += sold_section(con, since)
     md += feedback_section(con, since)
     md += missed_section(con, now)
+    from . import brag   # brag reads the picks table through steals; kept local
+    bragged = brag.report_lines(con, now)
+    if bragged:
+        md += ["", *bragged]
 
     checked = inventory.check(rows, known_cards.load(with_inventory=False), now.date())
     md += ["", "## Inventory check", "Nothing here was changed; fix what needs it in "
