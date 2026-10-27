@@ -51,6 +51,9 @@ def price_filter(low: float | None = None, high: float | None = None) -> str:
     return f"price:[{lo}..{hi}],priceCurrency:USD"
 
 
+LOOSE = "loose-"   # label prefix of a search whose results needn't name the player
+
+
 def queries() -> list[tuple[str, str, str, str | None]]:
     """Every search to run, as (label, q, filter, sort).
 
@@ -70,6 +73,7 @@ def queries() -> list[tuple[str, str, str, str | None]]:
     cfg = settings.load()
     out += [("extra-" + slug(q), q, ALL_FORMATS, "newlyListed")
             for q in dict.fromkeys(who.extra_searches + cfg["extra_searches"])]
+    out += [(LOOSE + slug(q), q, ALL_FORMATS, "newlyListed") for q in who.loose_searches]
     if cfg["sellers"]:
         out.append(("sellers", name, ALL_FORMATS + ",sellers:{"
                     + "|".join(cfg["sellers"]) + "}", "endingSoonest"))
@@ -417,6 +421,8 @@ def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[
                 verdict, item.via, item.player = who.match(item.title)
             else:
                 verdict = classify(item.title)
+                if verdict == "no" and label.startswith(LOOSE) and not who.wrong(item.title):
+                    verdict = "unclear"   # no name in the title: Claude judges it
             if verdict == "no":
                 dropped += 1
                 continue
@@ -434,6 +440,55 @@ def search_all(client: EbayClient | None = None, verbose: bool = False) -> list[
     if verbose:
         print(f"  {client.calls} API calls, {len(found)} unique listings, "
               f"{dropped} dropped as someone or something else", file=sys.stderr)
+    return list(found.values())
+
+
+BACKFILL_PAGES = 10   # pages of TEAM_PAGE listings: 2,000 a search at most
+
+
+def backfill_search(client: EbayClient | None = None, pages: int = BACKFILL_PAGES,
+                    skip_category: str | None = None,
+                    verbose: bool = False) -> list[Listing]:
+    """Everything already for sale, not just the newest: the player's name and each
+    loose search, a page at a time. The hourly searches read only the first 100
+    results each, which is all that's new in an hour, but not what was listed
+    before the bot started. `skip_category` leaves out one eBay category, for
+    example 261328 to sweep only the memorabilia. Player mode only."""
+    client = client or EbayClient()
+    who = profile.get()
+    if who.mode == "team":
+        raise ValueError("backfill is for player mode; a team lists far too much")
+    slug = lambda text: re.sub(r"\W+", "-", text.lower()).strip("-")   # noqa: E731
+    todo = [("backfill", who.search_name)] + [(LOOSE + slug(q), q) for q in who.loose_searches]
+    found: dict[str, Listing] = {}
+    for label, q in todo:
+        client.lane = label
+        kept = seen = 0
+        for page in range(pages):
+            got = client.search(q, ALL_FORMATS, None, limit=TEAM_PAGE, offset=page * TEAM_PAGE)
+            seen += len(got)
+            for raw in got:
+                item = parse_item(raw)
+                if item is None or item.currency != "USD":
+                    continue
+                if skip_category and item.category_id == skip_category:
+                    continue
+                verdict = classify(item.title)
+                if verdict == "no" and label.startswith(LOOSE) and not who.wrong(item.title):
+                    verdict = "unclear"
+                if verdict == "no":
+                    continue
+                item.match = verdict
+                existing = found.setdefault(item.item_id, item)
+                if label not in existing.queries:
+                    existing.queries.append(label)
+                kept += 1
+            if len(got) < TEAM_PAGE:
+                break
+        if verbose:
+            print(f"  {label:16} {seen:5} results, {kept:5} kept", file=sys.stderr)
+    if verbose:
+        print(f"  {client.calls} API calls, {len(found)} unique listings", file=sys.stderr)
     return list(found.values())
 
 

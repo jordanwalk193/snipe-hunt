@@ -60,6 +60,9 @@ class Profile:
     keyword_searches: list[str] = field(default_factory=lambda: ["auto", "patch", "relic", "/"])
     typo_searches: list[str] | None = None     # None = pick some automatically
     extra_searches: list[str] = field(default_factory=list)
+    # Searches whose results needn't name the player (a team-signed ball, a photo
+    # of a famous moment): those are handed to Claude to judge, not dropped.
+    loose_searches: list[str] = field(default_factory=list)
     products: str = ""                # products to check for new releases
     binder_pages: dict[str, str] = field(default_factory=dict)   # card year -> page
     binder_spare: str = "unsorted"
@@ -145,6 +148,10 @@ class Profile:
         if self.team_words and self._bare_last_re.search(title) and self._team_re.search(title):
             return "no" if self._other_re.search(title) else "unclear"
         return "no"
+
+    def wrong(self, title: str) -> bool:
+        """The title has one of wrong_words: someone or something else for sure."""
+        return bool(self.wrong_words) and bool(self._wrong_re.search(title))
 
     def binder_page(self, year: str | None) -> str:
         return self.binder_pages.get(str(year or ""), self.binder_spare)
@@ -426,6 +433,7 @@ def parse(text: str) -> Profile | TeamProfile:
         "other_first_names": player.get("other_first_names", []),
         "typo_searches": search.get("typos"),
         "extra_searches": search.get("extra", []),
+        "loose_searches": [str(q) for q in search.get("loose", [])],
         "products": search.get("products", ""),
         "binder_pages": {str(k): str(v) for k, v in (binder.get("pages") or {}).items()},
         "binder_spare": binder.get("spare", "unsorted"),

@@ -111,9 +111,10 @@ def lane_of(label: str) -> str:
     if label in ("auctions-ending", "newly-listed"):
         return "core"
     for prefix, lane in (("midtier-item", "midtier-item"), ("midtier", "midtier"),
-                         ("typo-", "typo"), ("extra-", "extra"), ("sellers", "extra"),
-                         ("no-name", "hidden"), ("hidden", "hidden"), ("item", "item"),
-                         ("aspects", "aspects"), ("other", "other")):
+                         ("typo-", "typo"), ("extra-", "extra"), ("loose-", "extra"),
+                         ("sellers", "extra"), ("no-name", "hidden"), ("hidden", "hidden"),
+                         ("item", "item"), ("aspects", "aspects"), ("backfill", "other"),
+                         ("other", "other")):
         if label.startswith(prefix):
             return lane
     return "keyword"   # "<name> auto", roster and "ending-" searches

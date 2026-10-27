@@ -416,6 +416,52 @@ def _fast_calls_today(con) -> int:
     return used if day == time.strftime("%Y-%m-%d") else 0
 
 
+def backfill(dry_run: bool = False, pages: int = ebay_search.BACKFILL_PAGES,
+             skip_category: str | None = None) -> str:
+    """A one-off sweep of everything already listed, scored like an hourly run.
+
+    The picks go to the dashboard and the sheet with one note to say so, not one
+    alert each: most have been listed for weeks and none of them is news."""
+    config.require("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET")
+    con = db.connect()
+    listings = ebay_search.backfill_search(pages=pages, skip_category=skip_category,
+                                           verbose=True)
+    listings, junked = filters.prefilter(listings)
+    if junked:
+        print(f"filters: dropped {sum(junked.values())}", file=sys.stderr)
+    fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
+    print(f"backfill: {len(listings)} listings, {len(fresh)} not scored yet", file=sys.stderr)
+    if dry_run:
+        return f"{len(listings)} listings, {len(fresh)} would be scored (dry run)"
+    _remember(con, listings)
+    con.commit()
+
+    def save(batch, batch_picks) -> None:
+        tiers = {p["item_id"]: p["tier"] for p in batch_picks}
+        for item in batch:
+            db.mark_scored(con, item.item_id, item.total, tiers.get(item.item_id))
+        for p in batch_picks:
+            db.save_pick(con, p)
+            db.mark_alerted(con, p["item_id"], p["total"])   # on the dashboard, no push
+        con.commit()
+
+    picks, scored = (score.score(fresh, verbose=True, on_batch=save, con=con)
+                     if fresh else ([], []))
+    who = profile.get()
+    if picks and notify.configured():
+        notify.send(f"{who.app_name}: {len(picks)} more picks",
+                    f"A sweep of everything already listed found {len(picks)} more "
+                    f"{who.player} picks in {len(listings)} listings. They're on the "
+                    "dashboard" + (" and the sheet" if sheets.configured() else "") + ".")
+    if sheets.configured():
+        try:
+            sheets.push(con)
+        except Exception as exc:   # the picks are saved either way
+            con.rollback()
+            print(f"sheets: {exc}", file=sys.stderr)
+    return f"backfill: {len(listings)} listings, {len(scored)} scored, {len(picks)} picks"
+
+
 def _welcome(con, listings: list, picks: list[dict]) -> str:
     """The very first run finds everything at once. Send one note, not a flood."""
     for p in picks:
@@ -528,7 +574,7 @@ def self_review(dry_run: bool = False) -> str:
 
 
 JOBS = {"hourly": hourly, "daily": daily, "weekly": weekly, "fast": fast,
-        "reflect": self_review, "lastcall": lastcall}
+        "reflect": self_review, "lastcall": lastcall, "backfill": backfill}
 
 
 def main() -> None:
@@ -536,9 +582,15 @@ def main() -> None:
     ap.add_argument("job", choices=sorted(JOBS))
     ap.add_argument("--dry-run", action="store_true",
                     help="print what would happen; send, write and push nothing")
+    ap.add_argument("--pages", type=int, default=ebay_search.BACKFILL_PAGES,
+                    help="backfill: pages of 200 listings per search")
+    ap.add_argument("--skip-category", default=None,
+                    help="backfill: leave out this eBay category (261328 = card singles)")
     args = ap.parse_args()
     os.environ[usage.JOB_ENV] = args.job   # so each Claude call's cost is filed under its job
-    sys.exit(ops.guarded(args.job, lambda: JOBS[args.job](args.dry_run), args.dry_run))
+    run = (lambda: backfill(args.dry_run, args.pages, args.skip_category)
+           if args.job == "backfill" else JOBS[args.job](args.dry_run))
+    sys.exit(ops.guarded(args.job, run, args.dry_run))
 
 
 if __name__ == "__main__":
