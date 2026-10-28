@@ -11,6 +11,8 @@ appear in any release; renaming or removing one needs a new API version.
   listing that was bought. On one real collection 16 of 24 "missed steals" in
   30 days were exactly that, and they reached the dashboard, the weekly report,
   the self-review and the scoring prompt.
+- Status `last_report` only counts dated weekly reports (`YYYY-MM-DD.md`); any
+  other file in the reports folder could sort after them and show instead.
 
 ### Memorabilia and the backlog
 - `[search] loose`: searches whose results needn't name the player. A title

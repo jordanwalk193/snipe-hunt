@@ -321,6 +321,17 @@ def wantlist() -> list[dict]:
     return targets
 
 
+
+WEEKLY_REPORT = re.compile(r"\d{4}-\d{2}-\d{2}\.md")   # reports/YYYY-MM-DD.md
+
+
+def latest_report() -> str | None:
+    """The newest weekly report. Only dated names count: any other .md file in
+    the reports folder could sort after every date and hide the real ones."""
+    return max((p.name for p in config.REPORTS_DIR.glob("*.md")
+                if WEEKLY_REPORT.fullmatch(p.name)), default=None)
+
+
 def status(con, picks: list[dict], now: datetime) -> dict:
     ts = int(now.timestamp())
     one = lambda sql, *a: con.execute(sql, a).fetchone()[0]   # noqa: E731
@@ -358,8 +369,7 @@ def status(con, picks: list[dict], now: datetime) -> dict:
         "searching": scheduler.running("hourly"),
         "skipped": len(skipped_ids(con)),
         "feedback": one("SELECT count(*) FROM feedback WHERE source='you'"),
-        "last_report": max((p.name for p in config.REPORTS_DIR.glob("*.md")
-                            if not p.name.startswith("reflect-")), default=None),
+        "last_report": latest_report(),
         "last_self_review": max((p.name for p in config.REPORTS_DIR.glob("reflect-*.md")),
                                 default=None),
     }

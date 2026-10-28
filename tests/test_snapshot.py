@@ -273,3 +273,14 @@ def test_demo_mode_serves_made_up_data_and_changes_nothing(con, server, monkeypa
     code, out = call(server + "/api/action", {"action": "skip", "item_id": "111111111111"})
     assert out["ok"] and "Demo mode" in out["message"]
     assert snapshot.skipped_ids(con) == []
+
+
+def test_last_report_is_the_newest_dated_weekly_report(tmp_path, monkeypatch):
+    for name in ("2026-10-18.md", "2026-10-25.md", "reflect-2026-10-26.md",
+                 "notes-2026-10-11.md"):
+        (tmp_path / name).write_text("x")
+    monkeypatch.setattr(config, "REPORTS_DIR", tmp_path)
+    assert snapshot.latest_report() == "2026-10-25.md"
+    for p in tmp_path.glob("2026-*.md"):
+        p.unlink()
+    assert snapshot.latest_report() is None
