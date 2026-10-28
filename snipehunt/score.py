@@ -707,6 +707,15 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
                 return None
     if ledger:   # recorded sales of this exact card come first
         value = ledger["value"]
+    # The going rate as it applies to this listing's own shipping (cards under $50).
+    value_typical, value = value, pricing.for_listing(value, item.shipping)
+    if item.is_auction and value is not None and value != value_typical:
+        # never a max that pays more than this listing should cost delivered
+        cap = pricing.odd_cents(value - ship) if value - ship > 0 else 0
+        if cap < max_bid:
+            max_bid = cap
+            if item.price > max_bid:
+                return None
     # What you would really pay: the asking price, or the snipe if it wins at its max.
     combined_ship = bool(ship) and (item.seller or "").lower() in combined
     if combined_ship:
@@ -725,6 +734,9 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
         if item.is_auction else None,
         "max_basis": "sales" if raw.get("max_basis") == "sales" else "estimate",
         **({"value_raw": value_raw, "calibrated": factor} if factor != 1.0 else {}),
+        # Claude's number before this listing's shipping moved it (cards under $50)
+        **({"value_typical": value_typical, "value_raw": value_raw}
+           if value != value_typical else {}),
         "comps": str(raw.get("comps", ""))[:300], "why": str(raw.get("why", ""))[:140],
         "title": item.title, "price": item.price, "shipping": item.shipping,
         "total": item.total, "is_auction": item.is_auction,

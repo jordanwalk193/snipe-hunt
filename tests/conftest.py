@@ -51,3 +51,18 @@ def fresh_call_counts(monkeypatch):
     monkeypatch.setattr(ebay_search, "LANE_CALLS", Counter())
     monkeypatch.setattr(usage, "_today", {})
     monkeypatch.setattr(usage, "_warned", [])
+
+
+@pytest.fixture(autouse=True)
+def shipping_neutral(request, monkeypatch):
+    """A listing's own shipping moves a cheap card's value (pricing.for_listing). Tests of
+    other maths are written at the typical shipping, so it is off unless a test asks for
+    the `shipping_aware` fixture."""
+    if "shipping_aware" not in request.fixturenames:
+        from snipehunt import pricing
+        monkeypatch.setattr(pricing, "SHIPPING_MATTERS_UNDER", 0.0)
+
+
+@pytest.fixture
+def shipping_aware():
+    """Leave pricing.for_listing switched on (see shipping_neutral)."""

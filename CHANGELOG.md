@@ -6,6 +6,19 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Cheap cards priced for the listing's own shipping
+- A card under $50 is valued for the listing in front of you: Claude's going
+  rate, moved by how far this listing's shipping is from the usual $2. Buyers
+  of cheap cards bid on the price and pay most of a high shipping charge on
+  top, so free shipping sells for less delivered and $5 shipping for more.
+  On 160 picked auctions that sold, this cut the typical gap to the real
+  delivered price from 46% to 26% under $10 and from 34% to 28% for $10–$50.
+  Deal stars, the "to win" bid and the auction max (never above what the
+  listing should cost delivered) use it. Claude's own number stays in the
+  pick as `value_typical`, and calibration keeps learning from it.
+- The backfill stops paging when a page brings nothing new (eBay repeats its
+  last page past the end): a real sweep went from 451 eBay calls to 67.
+
 ### Fixed
 - Missed steals no longer count a card already in the collection, or the very
   listing that was bought. On one real collection 16 of 24 "missed steals" in

@@ -383,6 +383,9 @@ def with_calls(con, since: float = 0) -> list[dict]:
             raw = pick.get("value_raw", value)
             row["call"] = {"tier": pick.get("tier"), "max": pick["max"], "value": value,
                            "value_raw": raw, "basis": pick.get("max_basis"),
+                           # whether calibration moved it, when something did
+                           **({"calibrated": pick.get("calibrated")}
+                              if "value_raw" in pick else {}),
                            "under_max": row["price"] <= pick["max"], "win": win,
                            # a snipe at the win bid would have been in the running
                            "under_win": row["price"] <= (win or pick["max"])}
@@ -449,6 +452,8 @@ def value_source(call: dict) -> str:
     guess as calibrate.py corrected it."""
     if call.get("basis") == "sales":
         return "sales"
+    if "calibrated" in call:   # set when the pick says whether calibration moved it
+        return "calibrated" if call["calibrated"] else "guessed"
     raw = call.get("value_raw")
     return "calibrated" if raw is not None and raw != call.get("value") else "guessed"
 
