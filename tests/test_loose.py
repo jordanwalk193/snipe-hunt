@@ -93,3 +93,17 @@ def test_a_backfill_saves_its_picks_with_one_note_and_no_alert_each(monkeypatch)
     assert {r[0] for r in con.execute("SELECT item_id FROM seen WHERE alerted_at IS NOT NULL")
             } >= {"c0", "c1"}
     assert jobs.backfill(dry_run=True).startswith("3 listings, 0 would be scored")
+
+
+def test_the_backfill_stops_when_ebay_sends_the_last_page_again(monkeypatch):
+    use(monkeypatch)
+    cans = [raw(f"c{n}", f"Rick Monday RC Cola can {n}", category="13597") for n in range(250)]
+
+    class Repeats(Fake):   # past the end, eBay answers with its last page again
+        def search(self, q, flt, sort, limit=100, offset=0):
+            self.asked.append((self.lane, q, offset))
+            return self.results.get(q, [])[min(offset, 200):min(offset, 200) + limit]
+    fake = Repeats({"rick monday": cans})
+    got = ebay_search.backfill_search(fake, pages=50)
+    assert len(got) == 250
+    assert [o for lane, q, o in fake.asked if q == "rick monday"] == [0, 200, 400]

@@ -464,10 +464,15 @@ def backfill_search(client: EbayClient | None = None, pages: int = BACKFILL_PAGE
     for label, q in todo:
         client.lane = label
         kept = seen = 0
+        ids: set[str] = set()
         for page in range(pages):
             got = client.search(q, ALL_FORMATS, None, limit=TEAM_PAGE, offset=page * TEAM_PAGE)
-            if not got:   # past the end. A short page isn't: eBay sometimes sends 199
+            # Past the end eBay sends nothing, or the last page again; a short page
+            # alone isn't the end (it sometimes sends 199).
+            new = {r.get("itemId") or r.get("legacyItemId") for r in got} - ids
+            if not new:
                 break
+            ids |= new
             seen += len(got)
             for raw in got:
                 item = parse_item(raw)
