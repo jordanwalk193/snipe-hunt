@@ -393,6 +393,22 @@ def test_the_track_record_is_kept_per_price_band():
         "band": "under $10", "calls": 0, "value_gap_pct": None, "value_bias_pct": None}
 
 
+def test_a_card_already_owned_or_bought_is_not_a_missed_steal():
+    con = db.connect()
+    blue = "2023 Topps Chrome Example Player Blue Refractor /150 #45"
+    for item_id, ago in (("1", 5), ("2", 4), ("3", 3)):
+        sale(con, item_id, blue, 22.0, ago=ago * 86400)
+    sale(con, "4", blue, 12.0, ago=3600)                                # 45% under: a miss
+    assert [m["item_id"] for m in sales.find_missed(con, NOW, owned=[])] == ["4"]
+    owned = [{"year": "2023", "set": "Topps Chrome", "card": "Base", "parallel": "Blue Refractor",
+              "card_no": "45", "serial": "88/150", "graded": "", "status": "In binder"}]
+    assert sales.find_missed(con, NOW, owned=owned) == []              # skipping it was right
+    owned[0]["status"] = "Sold-Traded"                                  # gone again: a miss again
+    assert [m["item_id"] for m in sales.find_missed(con, NOW, owned=owned)] == ["4"]
+    bought = [{"ebay_item_id": "4", "year": "2023", "card_no": "", "status": "Won"}]
+    assert sales.find_missed(con, NOW, owned=bought) == []             # that one was bought
+
+
 def test_a_cheap_sale_nobody_picked_is_a_missed_steal():
     from datetime import datetime
     con = db.connect()

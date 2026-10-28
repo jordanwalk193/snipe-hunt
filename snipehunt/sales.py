@@ -577,14 +577,22 @@ def history(con, limit: int = 12) -> list[dict]:
     return out[:limit]
 
 
-def find_missed(con, now: float | None = None, days: int = MISSED_DAYS) -> list[dict]:
+def find_missed(con, now: float | None = None, days: int = MISSED_DAYS,
+                owned: list[dict] | None = None) -> list[dict]:
     """Steals the bot passed on: sales it made no pick for that went cheap.
 
     Cheap means MISSED_UNDER percent or more below the typical price of the
     same card's earlier sales, shipping counted, with at least MISSED_PRIOR of
     those to go by. Biggest discount first.
+
+    A card already in the collection (or the very listing that was bought) is
+    not a miss: skipping it was right. `owned` is the inventory's rows, read
+    when not given.
     """
+    from . import inventory, snipecheck   # both import the scoring side; kept local
     now = now or time.time()
+    owned = inventory.read()[1] if owned is None else owned
+    bought = {(r.get("ebay_item_id") or "").strip() for r in owned} - {""}
     rows = with_calls(con)                       # newest first
     by_traits: dict[tuple, list] = {}            # only the same grade and print run can match
     for row in rows:
@@ -603,7 +611,8 @@ def find_missed(con, now: float | None = None, days: int = MISSED_DAYS) -> list[
             continue
         typical = statistics.median(earlier)
         pct = round(100 * (1 - row["total"] / typical))
-        if pct >= MISSED_UNDER:
+        if pct >= MISSED_UNDER and row["item_id"] not in bought \
+                and not snipecheck.owned_copy(row["title"], owned):
             out.append({"item_id": row["item_id"], "title": row["title"], "total": row["total"],
                         "typical": round(typical, 2), "pct": pct, "n": len(earlier),
                         "kind": row["kind"] or "auction", "sold_at": row["sold_at"],

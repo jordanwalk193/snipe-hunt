@@ -6,6 +6,12 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Fixed
+- Missed steals no longer count a card already in the collection, or the very
+  listing that was bought. On one real collection 16 of 24 "missed steals" in
+  30 days were exactly that, and they reached the dashboard, the weekly report,
+  the self-review and the scoring prompt.
+
 ### Memorabilia and the backlog
 - `[search] loose`: searches whose results needn't name the player. A title
   without the name goes to Claude as "unclear" instead of being dropped.
