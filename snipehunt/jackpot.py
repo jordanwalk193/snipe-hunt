@@ -32,10 +32,22 @@ KEEP_SENT = 300
 
 
 def pay(pick: dict) -> float:
-    """What it costs delivered right now: the price (an auction's current bid) plus shipping."""
+    """What it costs delivered right now: the price (an auction's current bid) plus
+    shipping, or the Buy It Now when the pick is a jackpot through that."""
     ship = 0.0 if pick.get("combined_ship") else (
         sales.UNKNOWN_SHIPPING if pick.get("shipping") is None else float(pick["shipping"]))
+    if pick.get("jackpot_bin") and pick.get("bin_price"):
+        return round(float(pick["bin_price"]) + ship, 2)
     return round(float(pick.get("bid_now") or pick.get("price") or 0) + ship, 2)
+
+
+def bin_pay(pick: dict) -> float | None:
+    """An auction's Buy It Now delivered, while it still has one."""
+    if not pick.get("is_auction") or not pick.get("bin_price"):
+        return None
+    ship = 0.0 if pick.get("combined_ship") else (
+        sales.UNKNOWN_SHIPPING if pick.get("shipping") is None else float(pick["shipping"]))
+    return round(float(pick["bin_price"]) + ship, 2)
 
 
 def check(pick: dict, now: datetime | None = None) -> str | None:
@@ -47,14 +59,21 @@ def check(pick: dict, now: datetime | None = None) -> str | None:
             or pick.get("fake_auto") or "fake_auto" in (pick.get("flags") or [])
             or (pick.get("slab") or {}).get("problem")):
         return None
+    basis = "sales" if pick.get("max_basis") == "sales" else "guess"
+    share = SHARE_SALES if basis == "sales" else SHARE_GUESS
     if pick.get("is_auction"):
+        # An auction's Buy It Now is a plain Buy It Now until someone bids: no
+        # need to wait for the last hours, and every minute counts.
+        via_bin = bin_pay(pick)
+        if via_bin is not None and via_bin <= value * share and not pick.get("bids"):
+            pick["jackpot_bin"] = True
+            return basis
+        pick.pop("jackpot_bin", None)
         end = pick.get("end_time")
         if not end or not now < datetime.fromisoformat(end) <= now + timedelta(hours=AUCTION_HOURS):
             return None
         if pick.get("max") is not None and float(pick.get("price") or 0) >= pick["max"]:
             return None   # already bid past what the bot would pay
-    basis = "sales" if pick.get("max_basis") == "sales" else "guess"
-    share = SHARE_SALES if basis == "sales" else SHARE_GUESS
     return basis if pay(pick) <= value * share else None
 
 
@@ -75,7 +94,10 @@ def message(pick: dict) -> tuple[str, str]:
     value, cost = float(pick["value"]), pay(pick)
     off = round(100 * (1 - cost / value))
     title = f"🚨 JACKPOT: ${value:.0f} card for ${cost:.2f}"
-    if pick.get("is_auction"):
+    if pick.get("jackpot_bin"):
+        act = (f"It's an auction with a Buy It Now of ${float(pick['bin_price']):.2f}: "
+               "buy it now, before the first bid removes that option.")
+    elif pick.get("is_auction"):
         ends = datetime.fromisoformat(pick["end_time"]).strftime("%I:%M %p").lstrip("0")
         act = (f"Auction ends {ends}, bid now ${float(pick.get('bid_now') or pick['price']):.2f}."
                + (f" Snipe {pick['max']:.2f} now." if pick.get("max") else " Snipe it now."))

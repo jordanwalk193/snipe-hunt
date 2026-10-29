@@ -456,6 +456,12 @@ def build(now: datetime | None = None) -> dict:
                                       "seller": SELLERS[1]}]},
         "market": _market(now),
         "tuning": {"on": True, "log": [], "tunables": {}},
+        # where steals happen: made-up but shaped like closes.summary
+        "closes": {"calls": 175, "trusted": True,
+                   "groups": {"small": {"n": 100, "share": 0.86}, "consignor": {"n": 75, "share": 1.36}},
+                   "hours": {"day": {"n": 42, "share": 0.77}, "evening": {"n": 58, "share": 0.94}},
+                   "quiet": [{"seller": "attic-finds", "n": 5, "share": 0.71}],
+                   "hot": [{"seller": "bigconsign", "n": 40, "share": 1.41}]},
         "calibration": {"on": True, "bands": {
             "$10 to $50": {"factor": 1.12, "calls": 14, "bias_pct": 21}}},
         "rarest": _rarest(now),

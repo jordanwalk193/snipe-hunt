@@ -44,6 +44,30 @@ def skip(con, data: dict) -> str:
     return "Hidden. It won't come back unless you restore skipped picks."
 
 
+def mark_sniped(con, data: dict) -> str:
+    """"Added to Gixen": the pick shows as covered until Gixen's own list confirms it.
+
+    Gixen's list is read once a run, so a snipe set a minute ago isn't on the
+    dashboard yet, and a pick can be sniped twice. `undo` takes a mark back."""
+    item = _item_id(data)
+    now = time.time()
+    marks = {k: v for k, v in snapshot.marked(con).items()
+             if now - float(v.get("at") or 0) < snapshot.MARK_DAYS * 86400}
+    if data.get("undo"):
+        marks.pop(item, None)
+        message = "Unmarked: it shows as needing a snipe again."
+    else:
+        try:
+            amount = round(float(data["max"]), 2) if data.get("max") not in (None, "") else None
+        except (TypeError, ValueError):
+            amount = None
+        marks[item] = {"at": int(now), **({"max": amount} if amount else {})}
+        message = "Marked as in Gixen. The mark stays until Gixen's list shows the snipe."
+    db.kv_set(con, snapshot.MARKED_KEY, json.dumps(marks))
+    con.commit()
+    return message
+
+
 def feedback(con, data: dict) -> str:
     """"Bad pick" with a reason, which also hides it, or "good call", which doesn't."""
     item = _item_id(data)
@@ -121,7 +145,7 @@ def test_alert(con, data: dict) -> str:
     return "Test alert sent to your phone."
 
 
-ACTIONS = {"skip": skip, "feedback": feedback, "unskip_all": unskip_all, "filed": filed, "refresh": refresh,
+ACTIONS = {"skip": skip, "feedback": feedback, "sniped": mark_sniped, "unskip_all": unskip_all, "filed": filed, "refresh": refresh,
            "search": search, "gixen_refresh": gixen_refresh, "test_alert": test_alert}
 
 

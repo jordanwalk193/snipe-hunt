@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import config, db, filters, jackpot, pricing, profile, sales, score, settings
+from . import closes, config, db, filters, jackpot, pricing, profile, sales, score, settings
 
 TIER_ICON = {"fire": "🔥", "green": "🟢", "yellow": "🟡", "drop": "⏰"}
 TIER_ORDER = {"drop": 0, "fire": 1, "green": 2, "yellow": 3}
@@ -245,6 +245,11 @@ def ends_text(end: datetime, zones: bool = True) -> str:
 def bin_line(pick: dict) -> str:
     """BIN ok ≤ $12.12 · offer idea: $10.10. The offer is a number to type yourself."""
     most = pick.get("max")
+    if pick.get("is_auction") and pick.get("bin_price") and most is not None:
+        ok = float(pick["bin_price"]) <= most * 1.1
+        return (f"Or Buy It Now ${float(pick['bin_price']):.2f}"
+                + (" (about the max: buy it, the first bid removes that option)" if ok
+                   else " (over the max; the first bid removes it)"))
     if pick.get("is_auction") or most is None or pick.get("tier") == "drop":
         return ""
     line = f"BIN ok ≤ ${most:.2f}"
@@ -350,6 +355,8 @@ def format_pick(pick: dict) -> str:
         lines.append(pick["why"])
     if seller_line(pick):
         lines.append(seller_line(pick))
+    if closes.line(pick):
+        lines.append(closes.line(pick))
     if pick.get("tier") != "drop":
         lines.append(watch_outs(pick))
     lines.append(str(pick["item_id"]))

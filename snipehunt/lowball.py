@@ -23,7 +23,7 @@ import json
 import statistics
 from datetime import date, datetime, timedelta, timezone
 
-from . import config, db, pricing, rarity, sales, settings, snipecheck
+from . import closes, config, db, pricing, rarity, sales, settings, snipecheck
 from .ebay_search import Listing, _money
 from .offers import rejected
 
@@ -177,10 +177,13 @@ def find(con, listings: list[Listing], inventory: list[dict], sniped: set[str] =
     rows, cache, skip = sales.with_calls(con), snipecheck._cache(con), rejected(con)
     results = outcomes(con)
     share, blocks = level(results), hours(results)
+    closing = closes.learn(con)
     targets = []
     for item in _auctions(listings, now):
         if item.item_id in skip or snipecheck.owned_copy(item.title, inventory):
             continue
+        if (closes.seller(closing, item.seller) or {}).get("kind") == "hot":
+            continue   # a consignor's following bids these past any lowball
         rate = snipecheck.going_rate(con, {"item_id": item.item_id, "title": item.title},
                                      rows, cache)
         value = float(rate["value"]) if rate and rate.get("value") else None
@@ -197,8 +200,14 @@ def find(con, listings: list[Listing], inventory: list[dict], sniped: set[str] =
             "snipe": snipe, "share": round(item.total / value, 2),
             "dead": dead_hour(end, blocks), "overlooked": overlooked(item),
             "sniped": item.item_id in sniped, "seller": item.seller})
-    # the deepest discounts first; a dead hour or a listing others skip breaks ties
-    targets.sort(key=lambda t: (t["share"] - 0.1 * bool(t["dead"]) - 0.05 * bool(t["overlooked"]),
+        tagged = closes.annotate(dict(targets[-1], is_auction=True), closing)
+        if tagged.get("closes"):   # the seller's heat and the ending block
+            targets[-1]["closes"] = tagged["closes"]
+    # the deepest discounts first; a dead hour, a listing others skip, a quiet seller
+    # or a daytime ending breaks ties
+    targets.sort(key=lambda t: (t["share"] - 0.1 * bool(t["dead"]) - 0.05 * bool(t["overlooked"])
+                                - 0.05 * ((t.get("closes") or {}).get("seller") == "cold")
+                                - 0.05 * ((t.get("closes") or {}).get("ending") == "day"),
                                 t["end_time"]))
     won = sum(r["share"] <= share for r in results)
     return {"targets": targets, "level": share, "learned": len(results) >= MIN_RECORD,

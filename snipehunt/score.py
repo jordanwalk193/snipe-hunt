@@ -18,7 +18,7 @@ import unicodedata
 
 from datetime import datetime, timedelta
 
-from . import (calibrate, config, db, filters, inventory, pricing, profile, sales, settings,
+from . import (calibrate, closes, config, db, filters, inventory, pricing, profile, sales, settings,
                usage)
 from .ebay_search import Listing
 
@@ -655,8 +655,8 @@ def ask_claude(prompt: str, tools: str = WEB_TOOLS,
 
 
 def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
-               comps: list[dict] | None = None, learned: dict | None = None
-               ) -> dict | None:
+               comps: list[dict] | None = None, learned: dict | None = None,
+               closing: dict | None = None) -> dict | None:
     """One of Claude's picks as the bot keeps it, or None when it doesn't hold up.
 
     `combined` are sellers (lower case) with an open order who combine
@@ -665,7 +665,8 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
     Claude's value, and how many there are caps the stars (thin_comps).
     `learned` are calibrate.factors: a guessed value (and an auction's max with
     it) is corrected by its band's factor, and Claude's own number is kept as
-    "value_raw".
+    "value_raw". `closing` is closes.learn: an auction pick is told how its
+    seller's auctions close and what this ending hour does to the price.
     """
     tier = str(raw.get("tier", "")).lower()
     try:
@@ -745,7 +746,10 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
         "url": item.url, "image": item.image, "want": raw.get("want") is True,
         "seller_feedback": item.seller_feedback_score,
         "seller_pct": item.seller_feedback_pct,
+        # an auction that also has a Buy It Now: the first bid removes it
+        **({"bin_price": item.bin_price} if item.is_auction and item.bin_price else {}),
     }
+    closes.annotate(pick, closing)
     if team:   # who is on it, for the dashboard's per-player view
         pick["player"] = _plain(raw.get("player"), 60) or item.player or "unknown"
     if ledger:
@@ -788,6 +792,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
     batches = [items[i:i + BATCH] for i in range(0, len(items), BATCH)][:MAX_BATCHES]
     combined = combined_sellers(con) if con is not None else frozenset()
     learned_factors = calibrate.factors(con) if con is not None else {}
+    closing = closes.learn(con) if con is not None else None
     if verbose and learned_factors:
         print(f"score: calibrating guesses: {calibrate.summary(learned_factors)}",
               file=sys.stderr)
@@ -815,7 +820,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
         for raw in reply.get("picks", []) or []:
             item = by_id.get(str(raw.get("item_id")))
             comps = sales.ledger_comps(con, item) if item and con is not None else None
-            pick = _pick_dict(item, raw, combined, comps, learned_factors) if item else None
+            pick = _pick_dict(item, raw, combined, comps, learned_factors, closing) if item else None
             if pick:
                 batch_picks.append(pick)
         picks.extend(batch_picks)

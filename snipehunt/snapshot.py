@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from . import (config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
                rainbow, rarity, report, sales, scheduler, score, settings, shortlist,
                snipecheck, spending, tune, watch)
-from . import bidnow, brag, calibrate, steals, usage
+from . import bidnow, brag, calibrate, closes, steals, usage
 from .notify import TIER_ORDER
 
 VERSION = 1
@@ -23,6 +23,8 @@ LIVE_WINDOW = 2 * 3600   # a pick is live if its listing was in a recent search
 RECORD_DAYS = 30
 MAX_PICKS = 300
 SKIPPED_KEY = "skipped_picks"
+MARKED_KEY = "marked_sniped"   # auctions you said you put a snipe on, until Gixen shows it
+MARK_DAYS = 14                 # a mark older than this is forgotten (actions.mark_sniped)
 LAST_ACTION_KEY = "last_action"
 GOOD = ("fire", "green")
 
@@ -44,6 +46,8 @@ def _slim(pick: dict) -> dict:
         "end_time": pick.get("end_time"), "seller": pick.get("seller"),
         "why": _short(pick.get("why"), 170), "url": pick.get("url"),
         "image": pick.get("image"), "snipe": pick.get("snipe"),
+        # only when there is something to say, so most picks stay as they were
+        **{k: pick[k] for k in ("marked", "bin_price", "closes") if pick.get(k)},
         "bid_now": pick.get("bid_now"), "value": pick.get("value"),
         # when eBay last gave this price (a search, or bids.py near the end), and
         # an auction's bid count then
@@ -72,6 +76,11 @@ def _with_last_sold(con, picks: list[dict]) -> list[dict]:
                                             pick["item_id"]) if rows else None
         pick.pop("title", None)
     return picks
+
+
+def marked(con) -> dict[str, dict]:
+    """The "Added to Gixen" marks: item id -> {"at": epoch, "max": amount}."""
+    return json.loads(db.kv_get(con, MARKED_KEY, "{}") or "{}")
 
 
 def skipped_ids(con) -> list[str]:
@@ -186,7 +195,8 @@ def need_snipe(picks: list[dict], now: datetime, hours: float,
     soon = (now + timedelta(hours=hours)).isoformat()
     return [p["item_id"] for p in sorted(picks, key=lambda p: p.get("end_time") or "9")
             if p.get("is_auction") and p.get("end_time") and p.get("tier") in GOOD
-            and p["end_time"] <= soon and not (gixen_on and p.get("snipe") is not None)]
+            and p["end_time"] <= soon and not (gixen_on and p.get("snipe") is not None)
+            and not p.get("marked")]
 
 
 def _price(row: dict) -> float:
@@ -416,6 +426,12 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
             row["check"], row["doubts"] = verdict, doubt
         gix["analysis"]["flagged"] = sum(
             bool(d) or c["verdict"] == "over" for c, d in zip(checks, found))
+    # "Added to Gixen" marks: shown until Gixen's list confirms the snipe, so a pick
+    # isn't sniped twice while the list is minutes old
+    marks = marked(con)
+    for p in picks:
+        if p["item_id"] in marks and p.get("snipe") is None:
+            p["marked"] = marks[p["item_id"]]
     given = {f["item_id"]: f["reason"] for f in db.feedback(con)[::-1] if f["source"] == "you"}
     for p in picks:   # a "good call" stays on the board; the dashboard marks it
         p["feedback"] = given.get(p["item_id"])
@@ -461,6 +477,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
                    "tunables": tune.current(con)},
         # how the bot corrects its own guessed going rates, per price band
         "calibration": {"on": cfg["calibrate"], "bands": calibrate.factors(con)},
+        # where steals happen: how auctions close by seller and by ending hour
+        "closes": closes.summary(closes.learn(con)),
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),
         **({"team": team_view(con, picks, cfg)} if profile.get().mode == "team" else {}),

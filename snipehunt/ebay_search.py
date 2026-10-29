@@ -140,6 +140,7 @@ class Listing:
     signals: list[dict] = field(default_factory=list)  # mislabel.py signals that fired
     listed_at: str | None = None     # when the listing first went up (eBay itemOriginDate), ISO UTC
     country: str | None = None       # where it ships from, e.g. "US", "CA"
+    bin_price: float | None = None  # an auction's Buy It Now price, until the first bid
 
     @property
     def graded(self) -> bool | None:
@@ -319,6 +320,9 @@ def parse_item(raw: dict) -> Listing | None:
     options = raw.get("buyingOptions", [])
     # For auctions the live price is currentBidPrice; `price` is the BIN price.
     price, currency = _money(raw.get("currentBidPrice") if "AUCTION" in options else None)
+    # An auction listed with a Buy It Now too: `price` is that BIN, gone at the first bid.
+    bin_price = (_money(raw.get("price"))[0]
+                 if price is not None and "FIXED_PRICE" in options else None)
     if price is None:
         price, currency = _money(raw.get("price"))
     if price is None:
@@ -357,6 +361,7 @@ def parse_item(raw: dict) -> Listing | None:
         aspects=aspects_of(raw),
         listed_at=raw.get("itemOriginDate") or raw.get("itemCreationDate"),
         country=(raw.get("itemLocation") or {}).get("country"),
+        bin_price=bin_price if bin_price and bin_price > price else None,
     )
 
 

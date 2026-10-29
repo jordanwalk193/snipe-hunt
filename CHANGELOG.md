@@ -6,6 +6,26 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Where steals happen, and two more ways in
+- **Who sells it and when it ends.** The bot learns from its own ledger how
+  auctions close: by seller (a consignor with ten or more sales on record
+  against a one-off seller) and by ending hour (daytime against evening).
+  Measured on one bot, consignors closed at 136% of the going rate and the
+  max won 15% of the time; one-off sellers closed at 82% and it won 44%;
+  daytime endings at small sellers closed at 77% with half the bids. Each
+  auction pick now says so (`closes`: quiet or hot seller, daytime ending,
+  the price it is likely to close at), alerts carry a 🧊/🔥 line, lowball
+  snipes skip hot sellers and favour quiet ones, and the snapshot's `closes`
+  key sums it up for the dashboard.
+- **An auction's Buy It Now.** Some auctions are listed with a Buy It Now
+  that vanishes at the first bid. The bot now reads it (`bin_price`), names
+  it in the alert, and a cheap one is a jackpot at once rather than only in
+  the auction's last two hours.
+- **"Added to Gixen."** A new action, `sniped`, marks a pick as sniped the
+  moment you set it, so it stops showing as needing a snipe while Gixen's
+  list is still minutes old; the mark gives way to the real snipe once Gixen
+  shows it, and `undo` takes it back. Picks carry `marked`.
+
 ### Cheap cards priced for the listing's own shipping
 - A card under $50 is valued for the listing in front of you: Claude's going
   rate, moved by how far this listing's shipping is from the usual $2. Buyers
