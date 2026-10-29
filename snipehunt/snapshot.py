@@ -429,9 +429,12 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
     # "Added to Gixen" marks: shown until Gixen's list confirms the snipe, so a pick
     # isn't sniped twice while the list is minutes old
     marks = marked(con)
+    closing = closes.learn(con)
     for p in picks:
         if p["item_id"] in marks and p.get("snipe") is None:
             p["marked"] = marks[p["item_id"]]
+        if p.get("is_auction") and not p.get("closes"):   # picks scored before this was learned
+            closes.annotate(p, closing)
     given = {f["item_id"]: f["reason"] for f in db.feedback(con)[::-1] if f["source"] == "you"}
     for p in picks:   # a "good call" stays on the board; the dashboard marks it
         p["feedback"] = given.get(p["item_id"])
@@ -478,7 +481,7 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         # how the bot corrects its own guessed going rates, per price band
         "calibration": {"on": cfg["calibrate"], "bands": calibrate.factors(con)},
         # where steals happen: how auctions close by seller and by ending hour
-        "closes": closes.summary(closes.learn(con)),
+        "closes": closes.summary(closing),
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),
         **({"team": team_view(con, picks, cfg)} if profile.get().mode == "team" else {}),
