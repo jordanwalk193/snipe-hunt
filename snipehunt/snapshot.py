@@ -47,7 +47,7 @@ def _slim(pick: dict) -> dict:
         "why": _short(pick.get("why"), 170), "url": pick.get("url"),
         "image": pick.get("image"), "snipe": pick.get("snipe"),
         # only when there is something to say, so most picks stay as they were
-        **{k: pick[k] for k in ("marked", "bin_price", "closes") if pick.get(k)},
+        **{k: pick[k] for k in ("marked", "bin_price", "closes", "jackpot_bin") if pick.get(k)},
         "bid_now": pick.get("bid_now"), "value": pick.get("value"),
         # when eBay last gave this price (a search, or bids.py near the end), and
         # an auction's bid count then
