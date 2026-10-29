@@ -284,3 +284,26 @@ def test_last_report_is_the_newest_dated_weekly_report(tmp_path, monkeypatch):
     for p in tmp_path.glob("2026-*.md"):
         p.unlink()
     assert snapshot.latest_report() is None
+
+
+def test_snapshot_says_whether_the_bot_has_a_gixen_account(con, monkeypatch):
+    assert snapshot.snapshot(con, NOW)["gixen_account"] is False   # the fixture blanks it
+    monkeypatch.setitem(config.load(), "GIXEN_USER", "someone")
+    monkeypatch.setattr(gixen, "snipes", lambda con: ([], None, NOW.timestamp()))
+    snap = snapshot.snapshot(con, NOW)
+    assert snap["gixen_account"] is True and snap["gixen"]["available"] is True
+
+
+def test_api_server_keeps_quiet_when_a_client_hangs_up(capsys):
+    """Home Assistant restarting mid-answer is a broken pipe, not an error worth a traceback."""
+    server = api.QuietServer.__new__(api.QuietServer)   # no socket needed for handle_error
+    try:
+        raise BrokenPipeError(32, "Broken pipe")
+    except BrokenPipeError:
+        server.handle_error(None, ("127.0.0.1", 1))
+    try:
+        raise ValueError("a real bug")
+    except ValueError:
+        server.handle_error(None, ("127.0.0.1", 1))
+    err = capsys.readouterr().err
+    assert "Broken pipe" not in err and "a real bug" in err

@@ -427,6 +427,7 @@ def build(now: datetime | None = None) -> dict:
                   "snipes": sorted(snipes, key=lambda s: s["end_time"]), "outbid_count": 1,
                   "committed": round(sum(s["max_bid"] for s in snipes if not s["outbid"]), 2)},
                          picks),
+        "gixen_account": True,
         "cards": cards,
         "collection": {
             "cards": len(cards), "spent": spent, "avg_paid": round(spent / len(cards), 2),

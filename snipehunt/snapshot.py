@@ -456,6 +456,9 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "status": state,
         "picks": _with_last_sold(con, [_slim(p) for p in picks[:MAX_PICKS]]),
         "gixen": gix,
+        # Whether this bot has a Gixen account at all: without one the dashboard
+        # leaves the snipe panels out instead of asking to turn Gixen on.
+        "gixen_account": bool(config.get("GIXEN_USER")),
         # $20+ cards at a sliver of their value, the best first (also flagged in picks)
         "jackpots": [_slim(p) for p in jackpots],
         "cards": cards(rows),

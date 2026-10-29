@@ -14,6 +14,16 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+
+class QuietServer(ThreadingHTTPServer):
+    """A client that hangs up mid-answer (Home Assistant restarting) isn't an error worth a traceback."""
+
+    def handle_error(self, request, client_address) -> None:
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
+
 from . import actions, config, db, demo, settings, snapshot
 
 MAX_BODY = 64 * 1024
@@ -138,7 +148,7 @@ class Handler(BaseHTTPRequestHandler):
 def serve() -> None:
     (Handler.token,) = config.require("API_TOKEN")
     bind, port = config.get("API_BIND"), int(config.get("API_PORT"))
-    server = ThreadingHTTPServer((bind, port), Handler)
+    server = QuietServer((bind, port), Handler)
     server.daemon_threads = True
     print(f"api: serving the Home Assistant integration on {bind}:{port}", file=sys.stderr)
     server.serve_forever()

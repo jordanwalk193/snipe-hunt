@@ -6,6 +6,13 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Small things
+- The snapshot says whether the bot has a Gixen account (`gixen_account`), so
+  the Home Assistant dashboard of a bot without one leaves the snipe panels
+  out instead of asking to turn Gixen reading on.
+- A client that hangs up mid-answer (Home Assistant restarting) no longer
+  leaves a broken-pipe traceback in the API's log.
+
 ### Where steals happen, and two more ways in
 - **Who sells it and when it ends.** The bot learns from its own ledger how
   auctions close: by seller (a consignor with ten or more sales on record
