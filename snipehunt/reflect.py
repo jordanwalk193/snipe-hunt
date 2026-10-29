@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from . import (calibrate, config, db, gitsync, inventory, notify, profile, rarity, sales,
+from . import (calibrate, closes, config, db, gitsync, inventory, notify, profile, rarity, sales,
                score, tune, usage)
 
 WEEK = 7 * 86400
@@ -79,6 +79,11 @@ the bias that is left looks like what it can't correct. The scorecard's \
 "by_source" splits the calls by where the going rate came from: "sales" \
 (backed by real sold prices), "guessed" (Claude's estimate, not corrected) \
 and "calibrated" (an estimate the calibration then corrected).
+- "closes" is the closing price as a share of the bot's going rate (1.0 = at \
+it) by seller type (small sellers against consignors with 10+ sales on record) \
+and, at small sellers, by ending hour (daytime 8am-8pm against evening). \
+Lowball snipes already skip hot sellers; picks and alerts already say which \
+kind of seller and ending they are.
 - "snipes" breaks the collector's snipes on picks down by tier and price \
 band: sniped_pct, how far their max sat from the bot's, and won/lost (lost = \
 sold to someone else; pending = still running; unknown = over, no result yet). \
@@ -174,6 +179,8 @@ def window(con, start: float, end: float) -> dict:
     return {
         "sales_recorded": len(sold),
         "scorecard": {**card, "under_max_rate": _pct(card["under_max"], card["calls"])},
+        # how auctions close by seller type and ending hour (closes.py): numbers only
+        "closes": {k: v for k, v in closes.learn(con).items() if k in ("calls", "trusted", "groups", "hours")},
         "missed_steals": {
             "count": len(missed),
             "median_pct_under": statistics.median(m["pct"] for m in missed) if missed else None,

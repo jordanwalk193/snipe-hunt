@@ -115,3 +115,28 @@ def test_added_to_gixen_marks_a_pick_until_gixens_list_shows_the_snipe(monkeypat
     assert by["100000000001"]["snipe"] == 5.05 and "marked" not in by["100000000001"]
     assert actions.handle(con, {"action": "sniped", "item_id": "100000000001", "undo": True})[0]
     assert snapshot.marked(con) == {}
+
+
+def test_a_snipe_on_a_hot_seller_gets_a_doubt_the_report_and_review_see_the_table():
+    from snipehunt import reflect, report, snipecheck
+    con = db.connect()
+    seed(con)
+    end = (datetime.now(config.TZ) + timedelta(hours=5)).isoformat(timespec="minutes")
+    db.touch(con, "100000000009", "2023 Topps Chrome Jordan Walker Gold /50", is_auction=True,
+             price=1.0, shipping=0.0, seller="bigconsign")
+    db.touch(con, "100000000010", "2023 Topps Chrome Jordan Walker Blue /150", is_auction=True,
+             price=1.0, shipping=0.0, seller="attic")
+    con.commit()
+    snipes = [{"item_id": "100000000009", "title": "2023 Topps Chrome Jordan Walker Gold /50", "max_bid": 5.05,
+               "end_time": end, "status": "SCHEDULED"},
+              {"item_id": "100000000010", "title": "2023 Topps Chrome Jordan Walker Blue /150", "max_bid": 5.05,
+               "end_time": end, "status": "SCHEDULED"}]
+    found = snipecheck.doubts(con, snipes, [])
+    assert [d["kind"] for d in found[0]] == ["hot_seller"] and "~140%" in found[0][0]["text"]
+    assert found[1] == []
+    assert "hot_seller" not in snipecheck.SERIOUS            # advice, not a phone alert
+    md = "\n".join(report.closes_section(con))
+    assert "## Where steals happen" in md and "bigconsign ~140% (20)" in md and "Daytime endings 75%" in md
+    bundle = reflect.window(con, time.time() - 7 * DAY, time.time() + 1)
+    assert bundle["closes"]["groups"]["consignor"]["share"] == 1.4
+    assert "bigconsign" not in json.dumps(bundle)            # no seller names reach the review

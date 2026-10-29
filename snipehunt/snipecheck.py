@@ -14,7 +14,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from . import db, ebay_search, profile, rarity, sales, settings
+from . import closes, db, ebay_search, profile, rarity, sales, settings
 
 KEY = "snipe_values"
 MAX_APPRAISED = 20       # snipes in one appraisal call
@@ -169,6 +169,8 @@ DOUBTS = {
     "grader": "A CCG slab (a grader most collectors skip)",
     "passed": "The bot looked at this auction and didn't rate it a steal",
     "seller": "A seller with little feedback",
+    "hot_seller": "Hot seller: their auctions close ~{pct}% of the going rate ({n} sold), "
+                  "a cheapskate max rarely wins here",
 }
 SERIOUS = ("not_player", "owned", "twice", "grader")   # these get a phone alert
 # Gixen writes emoji as escape codes ("uD83D uDD25Jordan"), which hides the name.
@@ -241,6 +243,7 @@ def doubts(con, snipes: list[dict], rows: list[dict]) -> list[list[dict]]:
     """For each snipe, in order, what might be wrong with it besides the price."""
     from . import report   # report imports snipecheck's neighbours; keep it local
     twins, who = _twins(snipes), profile.get()
+    learned = closes.learn(con)
     out = []
     for s in snipes:
         title, found = clean(s.get("title")), []
@@ -262,6 +265,11 @@ def doubts(con, snipes: list[dict], rows: list[dict]) -> list[list[dict]]:
         pick = con.execute("SELECT data FROM picks WHERE item_id=?", (s["item_id"],)).fetchone()
         if seen and seen["scored_at"] and not pick:
             found.append({"kind": "passed", "text": DOUBTS["passed"]})
+        row = con.execute("SELECT seller FROM seen WHERE item_id=?", (s["item_id"],)).fetchone()
+        heat = closes.seller(learned, row["seller"] if row else None)
+        if heat and heat["kind"] == "hot" and heat["basis"] == "own":
+            found.append({"kind": "hot_seller", "text": DOUBTS["hot_seller"].format(
+                pct=round(100 * heat["share"]), n=heat["n"])})
         if pick and json.loads(pick["data"]).get("new_seller"):
             fb = json.loads(pick["data"]).get("seller_feedback")
             found.append({"kind": "seller", "text": f"New seller ({fb} feedback)"})

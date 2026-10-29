@@ -14,6 +14,9 @@ appear in any release; renaming or removing one needs a new API version.
   leaves a broken-pipe traceback in the API's log.
 
 ### Where steals happen, and two more ways in
+- A Gixen snipe on a hot seller gets a doubt ("their auctions close ~151% of
+  the going rate, a cheapskate max rarely wins here"); the weekly report has a
+  "Where steals happen" section, and the self-review sees the numbers.
 - **Who sells it and when it ends.** The bot learns from its own ledger how
   auctions close: by seller (a consignor with ten or more sales on record
   against a one-off seller) and by ending hour (daytime against evening).

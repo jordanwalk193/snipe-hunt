@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import (calibrate, config, db, inventory, known_cards, profile, sales, settings,
+from . import (closes, calibrate, config, db, inventory, known_cards, profile, sales, settings,
                spending, tune)
 from .notify import TIER_ICON, TIER_ORDER
 from .score import ask_claude
@@ -144,6 +144,25 @@ def _pick_line(p: dict) -> str:
             f"({p.get('max_basis', 'estimate')}) · item `{p['item_id']}`")
 
 
+def closes_section(con) -> list[str]:
+    """Where steals happen: how picked auctions closed by seller type and ending hour."""
+    k = closes.summary(closes.learn(con))
+    if not k["trusted"]:
+        return []
+    pct = lambda g: f"{round(100 * g['share'])}%" if g.get("share") else "–"   # noqa: E731
+    md = ["", "## Where steals happen",
+          f"Closing price against the bot's going rate, median of {k['calls']} picked auctions that sold:",
+          f"- One-off sellers {pct(k['groups']['small'])} ({k['groups']['small']['n']}) · "
+          f"consignors {pct(k['groups']['consignor'])} ({k['groups']['consignor']['n']})",
+          f"- Daytime endings {pct(k['hours']['day'])} ({k['hours']['day']['n']}) · "
+          f"evening {pct(k['hours']['evening'])} ({k['hours']['evening']['n']}), small sellers only"]
+    if k["hot"]:
+        md.append("- 🔥 Hot: " + ", ".join(f"{x['seller']} ~{round(100 * x['share'])}% ({x['n']})" for x in k["hot"]))
+    if k["quiet"]:
+        md.append("- 🧊 Quiet: " + ", ".join(f"{x['seller']} ~{round(100 * x['share'])}% ({x['n']})" for x in k["quiet"]))
+    return md
+
+
 def sold_section(con, since: datetime, top: int = 5) -> list[str]:
     """What closed auctions went for this week, and how the bot's calls on them did."""
     rows = sales.with_calls(con, since.timestamp())
@@ -274,6 +293,7 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
     md += ["", "## Best upcoming snipes"]
     md += [_pick_line(p) for p in snipes] or ["- None on the board right now."]
     md += sold_section(con, since)
+    md += closes_section(con)
     md += feedback_section(con, since)
     md += missed_section(con, now)
     from . import brag   # brag reads the picks table through steals; kept local
