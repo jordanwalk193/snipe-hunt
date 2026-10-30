@@ -32,6 +32,8 @@ HOT = 1.15           # closes at this share of the going rate or more: a hot sel
 COLD = 0.90          # at this or less: a quiet seller
 DAY = (8, 20)        # local hours [from, to) whose endings close cheapest
 SHOW = 5             # hottest and quietest sellers named in the snapshot
+SELLS_MIN = 8        # closed auctions a seller needs before its sell-through counts
+SLOW = 50            # sells this percent of its auctions or less: a slow seller
 
 
 def _median(values: list[float]) -> float | None:
@@ -54,6 +56,7 @@ def learn(con) -> dict:
         "WHERE COALESCE(s.kind, 'auction') = 'auction' AND e.seller IS NOT NULL AND e.seller != ''"))
     per: dict[str, list[float]] = {}
     small, big, day, evening = [], [], [], []
+    by_type: dict[str, dict[str, list[float]]] = {}
     for r in rows:
         name, share = seller_of.get(r["item_id"]), r["total"] / r["call"]["value"]
         if name:
@@ -62,7 +65,15 @@ def learn(con) -> dict:
         (big if consignor else small).append(share)
         if not consignor:
             hour = datetime.fromtimestamp(r["sold_at"], config.TZ).hour
-            (day if DAY[0] <= hour < DAY[1] else evening).append(share)
+            block = "day" if DAY[0] <= hour < DAY[1] else "evening"
+            (day if block == "day" else evening).append(share)
+            # cheap base cards and autographs close differently at the same hour
+            by_type.setdefault(card_type(r["title"]), {"day": [], "evening": []})[block].append(share)
+    # sell-through: how often a seller's closed auctions sold at all
+    sells = {r["seller"]: {"n": r["n"], "pct": round(100 * r["sold"] / r["n"])} for r in con.execute(
+        "SELECT e.seller, count(*) AS n, sum(CASE WHEN s.item_id IS NULL THEN 0 ELSE 1 END) AS sold "
+        "FROM seen e LEFT JOIN sales s USING (item_id) WHERE e.is_auction=1 AND e.closed_at IS NOT NULL "
+        "AND e.seller IS NOT NULL AND e.seller != '' GROUP BY e.seller") if r["n"] >= SELLS_MIN}
     return {
         "calls": len(rows), "trusted": len(rows) >= MIN_CALLS,
         "sellers": {s: {"n": len(v), "share": _median(v)} for s, v in per.items()
@@ -72,7 +83,15 @@ def learn(con) -> dict:
                    "consignor": {"n": len(big), "share": _median(big)}},
         "hours": {"day": {"n": len(day), "share": _median(day)},
                   "evening": {"n": len(evening), "share": _median(evening)}},
+        "types": {t: {b: {"n": len(v), "share": _median(v)} for b, v in blocks.items()}
+                  for t, blocks in by_type.items()},
+        "sells": sells,
     }
+
+
+def card_type(title: str) -> str:
+    from . import reflect   # reflect imports this module; kept local
+    return reflect.card_type(title or "")
 
 
 def seller(learned: dict | None, name: str | None) -> dict | None:
@@ -92,15 +111,25 @@ def seller(learned: dict | None, name: str | None) -> dict | None:
             return None
         share, n, basis = g["share"], g["n"], group
     kind = "hot" if share >= HOT else "cold" if share <= COLD else "warm"
-    return {"kind": kind, "share": share, "n": n, "basis": basis}
+    out = {"kind": kind, "share": share, "n": n, "basis": basis}
+    sold = learned.get("sells", {}).get(name)
+    if sold:
+        out["sells"] = sold["pct"]
+    return out
 
 
-def ending(learned: dict | None, end_time: str | None) -> dict | None:
-    """How auctions ending at this hour close (small sellers): {"block", "share", "n"}."""
+def ending(learned: dict | None, end_time: str | None, title: str | None = None) -> dict | None:
+    """How auctions ending at this hour close (small sellers): {"block", "share", "n"},
+    for this kind of card when the ledger has enough of that kind, else for all."""
     if not learned or not learned.get("trusted") or not end_time:
         return None
     hour = datetime.fromisoformat(end_time).astimezone(config.TZ).hour
     block = "day" if DAY[0] <= hour < DAY[1] else "evening"
+    if title:
+        kind = card_type(title)
+        g = (learned.get("types") or {}).get(kind, {}).get(block)
+        if g and g["share"] and g["n"] >= SELLER_MIN:
+            return {"block": block, "share": g["share"], "n": g["n"], "type": kind}
     g = learned["hours"][block]
     if not g["share"] or g["n"] < SELLER_MIN:
         return None
@@ -112,15 +141,20 @@ def annotate(pick: dict, learned: dict | None) -> dict:
     the price it is likely to close at. Other picks come back unchanged."""
     if not pick.get("is_auction") or not learned:
         return pick
-    s, e = seller(learned, pick.get("seller")), ending(learned, pick.get("end_time"))
+    s = seller(learned, pick.get("seller"))
+    e = ending(learned, pick.get("end_time"), pick.get("title") or pick.get("card"))
     if not s and not e:
         pick.pop("closes", None)
         return pick
     out: dict = {}
     if s:
         out.update(seller=s["kind"], seller_share=s["share"], seller_n=s["n"])
+        if "sells" in s:
+            out["sells_pct"] = s["sells"]
     if e:
         out.update(ending=e["block"], ending_share=e["share"])
+        if "type" in e:
+            out["ending_type"] = e["type"]
     # A hot seller's following sets the price whatever the hour. At a small
     # seller the hour table (built from small sellers) is the better guide,
     # tempered by the seller's own record when it has one.
@@ -147,6 +181,10 @@ def summary(learned: dict) -> dict:
         "groups": learned["groups"], "hours": learned["hours"],
         "quiet": [{"seller": s, **v} for s, v in named if v["share"] <= COLD][:SHOW],
         "hot": [{"seller": s, **v} for s, v in reversed(named) if v["share"] >= HOT][:SHOW],
+        "types": learned.get("types", {}),
+        # sellers whose auctions often end unsold (high starts, reserves): dead listings
+        "slow": sorted(({"seller": s, **v} for s, v in learned.get("sells", {}).items() if v["pct"] <= SLOW),
+                       key=lambda x: x["pct"])[:SHOW],
     }
 
 
@@ -166,4 +204,6 @@ def line(pick: dict) -> str:
     if not parts:
         return ""
     likely = f" · likely to close ~${c['likely']:.2f}" if c.get("likely") else ""
-    return f"🧊 {' · '.join(parts).capitalize()}: closes ~{round(100 * c['likely_share'])}% of value here{likely}"
+    slow = (f" · this seller's auctions sell only {c['sells_pct']}% of the time"
+            if c.get("sells_pct") is not None and c["sells_pct"] <= SLOW else "")
+    return f"🧊 {' · '.join(parts).capitalize()}: closes ~{round(100 * c['likely_share'])}% of value here{likely}{slow}"

@@ -61,13 +61,14 @@ def thin_comps(comps: list[dict], now: float | None = None, full: int = FULL_COM
         return None
     now = now or datetime.now(config.TZ).timestamp()
     totals = [c["total"] for c in comps]   # newest first
+    fresh = [c["total"] for c in comps if c["sold_at"] >= now - STALE_COMPS]
     n = len(totals)
     if n == 1:
         value, cap = totals[0], GUESS_STARS
     elif n < full:
         value, cap = min(statistics.median(totals), totals[0]), 4
-    else:
-        value, cap = statistics.median(totals), 5
+    else:   # plenty: the fresh sales set the price when there are enough of them
+        value, cap = statistics.median(fresh if len(fresh) >= 2 else totals), 5
     stale = all(c["sold_at"] < now - STALE_COMPS for c in comps)
     newest = datetime.fromtimestamp(comps[0]["sold_at"], config.TZ).date().isoformat()
     return {"n": n, "newest": newest, "value": round(value, 2),
@@ -798,16 +799,21 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
               file=sys.stderr)
     for n, batch in enumerate(batches, 1):
         by_id = {i.item_id: i for i in batch}
+        # the ledger prices what it has sold before; Claude's web lookups go to the rest
+        comps_by = ({i.item_id: sales.ledger_comps(con, i) for i in batch}
+                    if con is not None else {})
+        priced = sum(1 for i in batch if comps_by.get(i.item_id))
+        batch_lookups = min(lookups, len(batch) - priced) if con is not None else lookups
         try:
             if con is not None:   # never hold the write lock through a Claude call
                 con.commit()
             sold = sales.relevant(con, batch) if con is not None else []
             track = sales.track_record(con, learned_factors) if con is not None else ""
             reply = extract_json(ask_claude(
-                build_prompt(batch, lookups, sold, track,
+                build_prompt(batch, batch_lookups, sold, track,
                              learned(con) if con is not None else ("", ""),
                              overvalued(con) if con is not None else ()),
-                tools=WEB_TOOLS if lookups else ""))
+                tools=WEB_TOOLS if batch_lookups else ""))
         except Exception as exc:
             if not scored:
                 raise
@@ -819,7 +825,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
         batch_picks: list[dict] = []
         for raw in reply.get("picks", []) or []:
             item = by_id.get(str(raw.get("item_id")))
-            comps = sales.ledger_comps(con, item) if item and con is not None else None
+            comps = comps_by.get(item.item_id) if item else None
             pick = _pick_dict(item, raw, combined, comps, learned_factors, closing) if item else None
             if pick:
                 batch_picks.append(pick)
@@ -828,8 +834,8 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
         if on_batch:
             on_batch(batch, batch_picks)
         if verbose:
-            print(f"score: batch {n}/{len(batches)}: {len(batch)} listings, "
-                  f"{len(reply.get('picks', []) or [])} picks, "
+            print(f"score: batch {n}/{len(batches)}: {len(batch)} listings, {priced} priced by the "
+                  f"ledger, {batch_lookups} lookups, {len(reply.get('picks', []) or [])} picks, "
                   f"{len(reply.get('not_player', []) or [])} rejected", file=sys.stderr)
     return picks, scored
 

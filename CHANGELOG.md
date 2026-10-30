@@ -6,6 +6,25 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### The ledger does more as it grows
+- **Lookups only for what the ledger can't price.** Each scoring batch counts
+  the listings with recorded sales of the exact card and gives Claude web
+  lookups only for the rest (none at all when the ledger covers the batch).
+  With three or more comps, the fresh ones (last 180 days) set the price.
+- **Trends.** A card sold three or more times in 120 days is compared, its
+  last 30 days against the sales before; a 10% move tags its picks (`trend`)
+  and the snapshot's `trends` lists the biggest movers up and down.
+- **What the collection is worth.** `worth`: every card in the inventory at
+  the ledger's newest sale of the same card (what you paid when there is
+  none), the week's movers against last week, and the top cards; also in the
+  weekly report.
+- **Best time by card type.** The ending-hour table is kept per card type
+  (base, insert, numbered, auto, graded) and used when it has enough of that
+  kind; a pick's `closes.ending_type` says which.
+- **Sell-through by seller.** How often a seller's closed auctions sold at
+  all; a seller at 50% or under is named in `closes.slow`, on the pick
+  (`sells_pct`) and in the alert line.
+
 ### Sold prices are kept for good
 - The one-year cap on the sold-price ledger is gone: the bot learns from it
   (calibration, where steals happen, comps), so it only grows. Back it up.

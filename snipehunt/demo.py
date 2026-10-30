@@ -457,6 +457,10 @@ def build(now: datetime | None = None) -> dict:
                                       "seller": SELLERS[1]}]},
         "market": _market(now),
         "tuning": {"on": True, "log": [], "tunables": {}},
+        "trends": {"cards": 12, "up": [{"card": "2023 Bowman Chrome 1st Refractor", "pct": 22, "n": 5, "now": 18.5, "was": 15.2, "dir": "up", "image": None, "url": "https://www.ebay.com"}],
+                   "down": [{"card": "2024 Topps Series 1 Gold /2024", "pct": -15, "n": 4, "now": 6.8, "was": 8.0, "dir": "down", "image": None, "url": "https://www.ebay.com"}]},
+        "worth": {"n": 2, "valued": 1, "paid": 15.62, "value": 24.5, "gain": 8.88, "week": "2026-W44", "since": "2026-W43",
+                  "movers": [], "top": [{"id": "2", "card": "2020 Bowman Draft Chrome 1st Bowman prospect BD-57", "paid": 12.12, "value": 21.0, "by": "sales", "n": 3, "at": "2026-10-20"}]},
         # where steals happen: made-up but shaped like closes.summary
         "closes": {"calls": 175, "trusted": True,
                    "groups": {"small": {"n": 100, "share": 0.86}, "consignor": {"n": 75, "share": 1.36}},

@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import (closes, calibrate, config, db, inventory, known_cards, profile, sales, settings,
+from . import (closes, ledger, calibrate, config, db, inventory, known_cards, profile, sales, settings,
                spending, tune)
 from .notify import TIER_ICON, TIER_ORDER
 from .score import ask_claude
@@ -142,6 +142,30 @@ def _pick_line(p: dict) -> str:
     return (f"- {TIER_ICON.get(p.get('tier'), '•')} [{p['card']}]({p.get('url', '')}) · "
             f"{_money(p.get('price'))} now · {when} · **Max: {p['max']:.2f}** "
             f"({p.get('max_basis', 'estimate')}) · item `{p['item_id']}`")
+
+
+def worth_section(con, now: datetime) -> list[str]:
+    """The collection by the ledger, and this week's movers."""
+    _, rows = inventory.read()
+    cards = ledger.groups(con)
+    w = ledger.worth(con, rows, cards, now)
+    if not w["valued"]:
+        return []
+    md = ["", "## What the collection is worth",
+          f"- {w['valued']} of {w['n']} cards priced by the ledger's newest sale of the same card "
+          f"(the rest at what you paid): worth ${w['value']:,.0f} against ${w['paid']:,.0f} paid "
+          f"({'+' if w['gain'] >= 0 else ''}${w['gain']:,.0f})"]
+    if w["movers"]:
+        md.append("- Movers since " + (w.get("since") or "last week") + ": " + ", ".join(
+            f"{m['card']} {'+' if m['pct'] > 0 else ''}{m['pct']}% (${m['was']:.0f}→${m['value']:.0f})"
+            for m in w["movers"][:5]))
+    t = ledger.trends(cards, now.timestamp(), 5)
+    if t["up"] or t["down"]:
+        md.append("- Market trends (cards sold 3+ times): "
+                  + "; ".join(f"📈 {m['card'][:50]} +{m['pct']}%" for m in t["up"])
+                  + ("; " if t["up"] and t["down"] else "")
+                  + "; ".join(f"📉 {m['card'][:50]} {m['pct']}%" for m in t["down"]))
+    return md
 
 
 def closes_section(con) -> list[str]:
@@ -294,6 +318,7 @@ def build(con, now: datetime | None = None, releases: list[dict] | None = None,
     md += [_pick_line(p) for p in snipes] or ["- None on the board right now."]
     md += sold_section(con, since)
     md += closes_section(con)
+    md += worth_section(con, now)
     md += feedback_section(con, since)
     md += missed_section(con, now)
     from . import brag   # brag reads the picks table through steals; kept local
