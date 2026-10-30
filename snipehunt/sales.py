@@ -32,7 +32,8 @@ SETTLE = 10 * 60        # seconds after the end before asking, so eBay has the r
 GONE_AFTER = 3 * 3600   # a Buy It Now, or a listing from before end times, not seen this long
 BIN_RECHECK = 24 * 3600  # a Buy It Now still for sale is asked about again after this
 BIN_GIVE_UP = 30 * 86400  # and no longer once it has been out of the search this long
-KEEP_DAYS = 365       # a year of sold prices: seasonal and older cards sell rarely
+# Sold prices are never thrown away: the ledger is what the bot learns from, and a
+# comp from two years ago still says what a card is worth when nothing newer exists.
 PER_LISTING = 3         # sold prices offered to Claude for one listing
 MAX_LINES = 60          # and for one scoring call, because every line is paid for
 HINTS_PER_LISTING = 1   # of those, sales of another grade or print run of the card
@@ -167,8 +168,6 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
             added += 1
         con.execute("UPDATE seen SET closed_at=? WHERE item_id=?", (int(now), row["item_id"]))
         con.commit()   # one at a time, so a dashboard button never waits on this loop
-    con.execute("DELETE FROM sales WHERE sold_at<?", (now - KEEP_DAYS * 86400,))
-    con.commit()
     return added
 
 

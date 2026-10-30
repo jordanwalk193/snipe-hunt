@@ -6,6 +6,10 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Sold prices are kept for good
+- The one-year cap on the sold-price ledger is gone: the bot learns from it
+  (calibration, where steals happen, comps), so it only grows. Back it up.
+
 ### Small things
 - The snapshot says whether the bot has a Gixen account (`gixen_account`), so
   the Home Assistant dashboard of a bot without one leaves the snipe panels

@@ -436,15 +436,15 @@ def test_a_cheap_sale_nobody_picked_is_a_missed_steal():
     assert view["missed_steals"] == 1 and view["missed"][0]["item_id"] == "4"
 
 
-def test_sold_prices_are_kept_for_a_year():
+def test_sold_prices_are_kept_for_good():
     con = db.connect()
     for item_id, days in (("old", 400), ("half", 200)):
         con.execute("INSERT INTO sales (item_id, title, price, sold_at) VALUES (?,?,?,?)",
                     (item_id, "2023 Chrome Refractor", 9.0, int(NOW - days * 86400)))
     db.touch(con, "1", "2023 Chrome Refractor #45", True, NOW - 3600, 0.99)
     sales.collect(con, FakeEbay({"1": ended(12.5)}), now=NOW)
-    assert sales.KEEP_DAYS == 365
-    assert {r[0] for r in con.execute("SELECT item_id FROM sales")} == {"1", "half"}
+    # nothing is ever pruned: a two-year-old comp still prices a card nothing newer can
+    assert {r[0] for r in con.execute("SELECT item_id FROM sales")} == {"1", "half", "old"}
 
 
 def test_the_scorecard_splits_the_calls_by_where_the_going_rate_came_from():
