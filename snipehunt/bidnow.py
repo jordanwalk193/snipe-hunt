@@ -142,7 +142,8 @@ def alert(con, client, now: datetime | None = None, send: bool = True) -> list[d
     for p in hits:
         title, body = message(p, now)
         try:
-            notify.send(title, body, url=p.get("url"), image=p.get("image"), urgent=True)
+            notify.send(title, body, url=p.get("url"), image=p.get("image"), urgent=True,
+                        actions=notify.pick_actions(p))
         except Exception as exc:   # the next run, ten minutes on, tries again
             print(f"bidnow: {exc}", file=sys.stderr)
             break

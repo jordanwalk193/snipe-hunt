@@ -31,8 +31,27 @@ def configured() -> bool:
     return ha or bool(config.get("NTFY_URL"))
 
 
+ACTION_PREFIX = "SNIPE_HUNT_"   # the Home Assistant integration listens for these
+
+
+def pick_actions(pick: dict) -> list[dict] | None:
+    """Buttons for one pick's alert: Added to Gixen (an auction), Skip, Open. The
+    integration turns a tap into the bot's own action; Open is just the listing."""
+    item = str(pick.get("item_id") or "")
+    if not item.isdigit():
+        return None
+    out = []
+    if pick.get("is_auction"):
+        out.append({"action": f"{ACTION_PREFIX}SNIPED_{item}", "title": "✓ Added to Gixen"})
+    out.append({"action": f"{ACTION_PREFIX}SKIP_{item}", "title": "Skip"})
+    if pick.get("url"):
+        out.append({"action": "URI", "title": "Open ↗", "uri": pick["url"]})
+    return out
+
+
 def send(title: str, message: str, url: str | None = None,
-         image: str | None = None, urgent: bool = False) -> None:
+         image: str | None = None, urgent: bool = False,
+         actions: list[dict] | None = None) -> None:
     """Send to Home Assistant if it is set up, and to ntfy if `NTFY_URL` is set.
 
     `urgent` (jackpots only) asks the phone to break through Focus / Do Not
@@ -49,6 +68,8 @@ def send(title: str, message: str, url: str | None = None,
             data["clickAction"] = url   # Android
         if image:
             data["image"] = image
+        if actions:
+            data["actions"] = actions[:3]   # the phone shows three at most
         if urgent:
             data["push"] = {"interruption-level": "time-sensitive"}   # iOS
             data.update(priority="high", ttl=0)                      # Android
@@ -346,7 +367,8 @@ def format_pick(pick: dict) -> str:
         lines.insert(0, EDGE_LABEL[pick["edge"]])
     if pick.get("max") is not None:
         basis = pick.get("max_basis", "estimate")
-        lines.append(f"Max: {pick['max']:.2f}" + (_guess(pick) or f" ({basis})"))
+        lines.append(f"Max: {pick['max']:.2f}" + (_guess(pick) or f" ({basis})")
+                     + (f" · under {o['under']} of {o['n']} sales" if (o := pick.get("win_odds")) else ""))
     if bin_line(pick):
         lines.append(bin_line(pick))
     if pick.get("deal"):
@@ -505,7 +527,9 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
             if dry_run:
                 print(f"--- would send ---\n{title}\n{body}\nurl={url}\n", file=sys.stderr)
             else:
-                send(title, body, url, image)
+                alone = flat(chunk)
+                send(title, body, url, image,
+                     actions=pick_actions(alone[0]) if len(alone) == 1 else None)
                 for p in flat(chunk):
                     db.mark_alerted(con, p["item_id"], p["total"])
             done += 1

@@ -6,6 +6,16 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Buttons on the alert, and win odds from the ledger
+- A single-pick alert now carries ✓ Added to Gixen (auctions), Skip and Open
+  buttons (`notify.pick_actions`, Home Assistant `data.actions`); the
+  ha-snipe-hunt integration (2.23) turns a tap into the bot's action.
+- An auction's max comes from the ledger when it has three or more fresh
+  closes of the exact card: the 25th-percentile close less shipping, on odd
+  cents, never above Claude's number (`max_ledger`). Every pick with comps
+  says its win odds (`win_odds`: how many recorded sales closed at or under
+  what you would pay), in the alert and on the dashboard.
+
 ### The ledger does more as it grows
 - **Lookups only for what the ledger can't price.** Each scoring batch counts
   the listings with recorded sales of the exact card and gives Claude web

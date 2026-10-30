@@ -38,7 +38,7 @@ def test_one_loud_alert_each_even_at_night_and_with_alert_settings_off(monkeypat
     sent = []
     monkeypatch.setattr(notify, "configured", lambda: True)
     monkeypatch.setattr(notify, "is_quiet", lambda now=None: True)
-    monkeypatch.setattr(notify, "send", lambda title, msg, url=None, image=None, urgent=False:
+    monkeypatch.setattr(notify, "send", lambda title, msg, url=None, image=None, urgent=False, actions=None:
                         sent.append((title, msg, urgent)))
     db.kv_set(con, "settings", json.dumps({"alert_green": False, "alert_min_stars": 5}))
     p = pick(deal=5)

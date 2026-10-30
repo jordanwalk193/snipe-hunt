@@ -325,7 +325,8 @@ def drop_alert(con, picks: list[dict], now: datetime | None = None) -> list[dict
              "Worth about ${:.2f} by the bot's estimate.".format(value)),
             "Buy it now, think later.", f"Item {p['item_id']}"])
         try:
-            notify.send(title, body, url=p.get("url"), image=p.get("image"), urgent=True)
+            notify.send(title, body, url=p.get("url"), image=p.get("image"), urgent=True,
+                        actions=notify.pick_actions(p))
         except Exception as exc:   # the next run tries again
             print(f"drops: {exc}", file=sys.stderr)
             break

@@ -47,6 +47,53 @@ STARS = ((50, 5), (35, 4), (20, 3), (10, 2))
 GUESS_STARS = 3          # the most stars a pick priced from a guess may have
 SELLER_TRUST_OVER = 30.0  # over this total, a seller with little feedback caps the tier
 FULL_COMPS = 3           # recorded sales of the exact card needed for five stars
+LEDGER_MAX_PCT = 25      # an auction's max from the ledger: this percentile of fresh closes
+ODDS_MIN = 2             # comps needed before win odds are shown
+
+
+def _fresh(comps: list[dict], now: float | None = None) -> list[float]:
+    """Delivered totals of the fresh comps (sales.FRESH_DAYS), or of all when few are fresh."""
+    now = now or datetime.now(config.TZ).timestamp()
+    fresh = [c["total"] for c in comps if c["sold_at"] >= now - STALE_COMPS]
+    return fresh if len(fresh) >= ODDS_MIN else [c["total"] for c in comps]
+
+
+def win_odds(comps: list[dict], pay: float, now: float | None = None) -> dict | None:
+    """How many recorded sales of this exact card closed at or under `pay`, delivered:
+    the odds a snipe at that total would have won. None with fewer than ODDS_MIN."""
+    totals = _fresh(comps, now) if comps else []
+    if len(totals) < ODDS_MIN:
+        return None
+    under = sum(t <= pay for t in totals)
+    return {"under": under, "n": len(totals), "pct": round(100 * under / len(totals))}
+
+
+def ledger_max(comps: list[dict], shipping: float, now: float | None = None) -> float | None:
+    """A max from the ledger: the LEDGER_MAX_PCT percentile of the fresh closes, less
+    shipping, on odd cents. None with fewer than FULL_COMPS comps. It only ever
+    lowers Claude's max: a snipe at it wins about one auction in four."""
+    totals = sorted(_fresh(comps, now)) if comps else []
+    if len(totals) < FULL_COMPS:
+        return None
+    rank = (len(totals) - 1) * LEDGER_MAX_PCT / 100
+    lo, hi = totals[int(rank)], totals[min(int(rank) + 1, len(totals) - 1)]
+    percentile = lo + (hi - lo) * (rank - int(rank))
+    limit = percentile - shipping
+    return pricing.odd_cents(limit) if limit >= 1 else None
+
+
+def with_odds(pick: dict, comps: list[dict] | None) -> dict:
+    """The pick's win odds at what you would pay: the max for an auction, the price for a
+    Buy It Now, with shipping."""
+    if not comps:
+        return pick
+    ship = 0.0 if pick.get("combined_ship") else (
+        pick["shipping"] if pick.get("shipping") is not None else UNKNOWN_SHIPPING)
+    pay = (pick["max"] if pick.get("is_auction") and pick.get("max") is not None else pick["price"]) + ship
+    odds = win_odds(comps, pay)
+    if odds:
+        pick["win_odds"] = odds
+    return pick
 STALE_COMPS = sales.FRESH_DAYS * 86400
 
 
@@ -689,6 +736,12 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
             max_bid = round(max_bid * factor, 2)
     if item.is_auction:   # odd cents, never above what Claude said (or the correction)
         max_bid = pricing.odd_cents(max_bid)
+    # The ledger's own max, when it has enough fresh closes: never above Claude's.
+    max_ledger = None
+    if item.is_auction and comps:
+        lm = ledger_max(comps, item.shipping if item.shipping is not None else UNKNOWN_SHIPPING)
+        if lm is not None and lm < max_bid:
+            max_ledger = max_bid = lm
     # Belt and braces: never surface something already priced past the max.
     if item.price > max_bid:
         return None
@@ -736,6 +789,7 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
         if item.is_auction else None,
         "max_basis": "sales" if raw.get("max_basis") == "sales" else "estimate",
         **({"value_raw": value_raw, "calibrated": factor} if factor != 1.0 else {}),
+        **({"max_ledger": max_ledger} if max_ledger else {}),   # the ledger set this max
         # Claude's number before this listing's shipping moved it (cards under $50)
         **({"value_typical": value_typical, "value_raw": value_raw}
            if value != value_typical else {}),
@@ -772,7 +826,8 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
     fitted = steals.fit(pick)   # steals mode: max_share of value at most; else unchanged
     if fitted is None:
         return None
-    return rerate(fitted) if fitted is not pick else apply_caps(pick)
+    out = rerate(fitted) if fitted is not pick else apply_caps(pick)
+    return with_odds(out, comps)
 
 
 def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None

@@ -129,7 +129,8 @@ def alert(con, picks: list[dict], now: datetime | None = None, send: bool = True
     for p in fresh:
         title, body = message(p)
         try:
-            notify.send(title, body, url=p.get("url"), image=p.get("image"), urgent=True)
+            notify.send(title, body, url=p.get("url"), image=p.get("image"), urgent=True,
+                        actions=notify.pick_actions(p))
         except Exception as exc:   # the next run tries again
             print(f"jackpot: {exc}", file=sys.stderr)
             break
