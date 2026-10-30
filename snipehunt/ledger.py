@@ -13,6 +13,7 @@ Nothing here reaches eBay or Claude; it is arithmetic on sales already kept.
 from __future__ import annotations
 
 import json
+import re
 import statistics
 from datetime import datetime
 
@@ -26,10 +27,16 @@ WORTH_KEY = "worth_weeks"   # kv: {"cur": {"week", "values"}, "prev": {...}}
 TOP = 8
 
 
+LOT = re.compile(r"\blots?\b|\(\d+\)|\bx\s?\d+\b|\b\d+\s?(cards|card lot)\b", re.I)
+
+
 def groups(con) -> list[dict]:
-    """Every card in the ledger with its sales, newest first (sales.history, uncapped)."""
+    """Every card in the ledger with its sales, newest first (sales.history, uncapped).
+    Lots are left out: five cards for $9 says nothing about one."""
     out: list[dict] = []
     for row in sales.with_calls(con):
+        if LOT.search(row["title"] or ""):
+            continue
         key, kind = sales.card_key(row["title"]), sales.traits(row["title"])
         g = next((g for g in out if g["traits"] == kind and _alike(g, key, row["title"])), None)
         if g is None:
