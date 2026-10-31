@@ -127,7 +127,7 @@ def appraise(con, snipes: list[dict], now: float | None = None,
             and going_rate(con, s, rows, cache) is None][:MAX_APPRAISED]
     if not todo:
         return 0
-    who, lookups = profile.get(), settings.load()["price_lookups"]
+    who, lookups = profile.get(), settings.load(con)["price_lookups"]   # this connection, not a second
     sold = sales.relevant(con, [SimpleNamespace(item_id=s["item_id"], title=s["title"])
                                 for s in todo])
     prompt = PROMPT.format(
