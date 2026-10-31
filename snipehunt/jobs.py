@@ -13,10 +13,11 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from . import (aspects, bidnow, bids, brag, config, db, ebay_search, filters, gitsync, gixen, hidden, inventory,
-               inventory_sync, jackpot, limited_drops, lowball, midtier, notify, offers, ops,
-               profile, rarity, reflect, report, sales, score, settings, sheets, shortlist,
-               snipecheck, steals, usage, watch, wins)
+from . import (aspects, bidnow, bids, brag, config, db, deep, ebay_search, filters,
+               gitsync, gixen, hidden, inventory, inventory_sync, jackpot,
+               limited_drops, lowball, midtier, notify, offers, ops, profile, rarity,
+               reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
+               steals, usage, watch, wins)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -35,6 +36,10 @@ def hourly(dry_run: bool = False) -> str:
             listings += hidden.search(con, {i.item_id for i in listings}, verbose=True)
     except Exception as exc:
         print(f"hidden: {exc}", file=sys.stderr)
+    try:   # the standing market, a few pages an hour (deep.py)
+        listings += deep.search(con, {i.item_id for i in listings}, verbose=True)
+    except Exception as exc:
+        print(f"deep: {exc}", file=sys.stderr)
     # reprints, customs and "you pick" listings never reach Claude; fake autos are flagged
     listings, junked = filters.prefilter(listings)
     if junked:
@@ -107,6 +112,13 @@ def hourly(dry_run: bool = False) -> str:
     else:
         fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)
                  and i.item_id not in lane_ids]
+        # the sweep's Buy It Nows: only the ones the ledger calls a steal, a few a run
+        swept = [i for i in fresh if deep.from_sweep(i) and not i.is_auction]
+        if swept:
+            keep = {i.item_id for i in deep.pick_fresh(con, swept)}
+            fresh = [i for i in fresh if i.item_id in keep or i not in swept]
+            print(f"deep: {len(keep)} of {len(swept)} standing Buy It Nows worth a look",
+                  file=sys.stderr)
 
     failed = None
     try:

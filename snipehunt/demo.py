@@ -332,8 +332,34 @@ def _steals(now: datetime, picks: list[dict]) -> dict:
                              "count": sum(1 for r in rows if k in brag._badges(r))}
                             for k, name, rule in brag.BADGES],
                  "streak_weeks": brag.streak(rows, now.date()),
-                 "card": brag.card(rows, totals, now)},
+                 "card": brag.card(rows, totals, now),
+                 "hall": _hall(rows, now)},
     }
+
+
+def _hall(rows: list[dict], now: datetime) -> dict:
+    """The Hall of Fame from the same made-up purchases, plus a few older cards."""
+    older = [{"card": "2020 Bowman Draft 1st Bowman #BD-57", "paid": 1.85, "value": 12.99,
+              "image": None, "by": "sales", "bot": False, "year": "2020"},
+             {"card": "2021 Bowman Chrome Mega Box Mojo Refractor", "paid": 3.0, "value": 9.0,
+              "image": None, "by": "sales", "bot": False, "year": "2021"}]
+    cards = [dict(r, by="bot", bot=True, year=r["card"][:4]) for r in rows] + older
+    for c in cards:
+        c["saved"] = round(c["value"] - c["paid"], 2)
+        c["pct"] = round(100 * c["paid"] / c["value"])
+    ranked = sorted((c for c in cards if c["value"] >= brag.HALL_MIN_VALUE
+                     and c["pct"] <= 100 - brag.HALL_MIN_OFF), key=lambda c: (c["pct"], -c["saved"]))
+    paid, worth = round(sum(c["paid"] for c in cards), 2), round(sum(c["value"] for c in cards), 2)
+    bot = [c for c in cards if c["bot"]]
+    out = {"top": [dict(c, off_pct=100 - c["pct"], badges=brag._badges(c)) for c in ranked[:brag.HALL]],
+           "n": len(ranked),
+           "totals": {"cards": len(cards), "unpriced": 3, "paid": paid, "worth": worth,
+                      "saved": round(worth - paid, 2), "pct": round(100 * paid / worth)},
+           "bot": {"n": len(bot), "paid": round(sum(c["paid"] for c in bot), 2),
+                   "worth": round(sum(c["value"] for c in bot), 2),
+                   "saved": round(sum(c["saved"] for c in bot), 2)}}
+    out["card"] = brag.hall_card(out, now)
+    return out
 
 
 def build(now: datetime | None = None) -> dict:
@@ -415,6 +441,8 @@ def build(now: datetime | None = None) -> dict:
             "sold_prices": 212, "sold_prices_7d": 41,
             "searching": False, "skipped": 0, "feedback": 0, "last_report": None,
             "last_self_review": None,
+            "deep": {"on": True, "band": "$6–$10 at 2,400", "passes": 3,
+                     "last_pass": int(now.timestamp()) - 9 * 3600, "found": 7_412},
             "cost_today": 0.84, "calls_today": 19, "cost_month": 11.37,
             "need_snipe": [p["item_id"] for p in picks if p["is_auction"] and p["snipe"] is None
                            and p["tier"] in ("fire", "green")

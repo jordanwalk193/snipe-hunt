@@ -154,7 +154,9 @@ category_id = ""     # every eBay category, not just card singles
 loose = ["1976 flag dodger stadium", "1981 dodgers team signed"]
 ```
 
-**Everything already listed.** The hourly searches read the first 100 results of each search: everything new in an hour, but not what was listed before the bot started. A one-off backfill pages through it all (eBay allows up to 10,000 per search) and scores what isn't scored yet. Its picks go to the dashboard and the sheet with one note, not an alert each:
+**The market sweep (`deep.py`).** The hourly searches read the first page of each: everything listed in the last hour, and the hundred auctions ending soonest. For a player with thousands of listings up at once that leaves most of the standing market unseen: a Buy It Now listed months ago is never on either page, and a week-long auction is only seen in its last half day (on the live Walker bot, 615 of 936 live auctions were unknown until then). So each hourly run also reads every live auction past the first page (up to five more pages), and `deep_pages` (6; 0 turns it off) pages of the standing Buy It Nows, in price bands so eBay's 10,000-result limit applies per band, picking up where the last run stopped; a full pass takes a day or two and then starts over. Everything swept in is remembered like any listing, so price drops on old Buy It Nows show, but only a Buy It Now the ledger prices as a steal (or one worth a look by itself: a low print run, an autograph, a slab, a thin title) goes to Claude, fifteen a run. Auctions score as they always did, just days earlier, which gives the lowball and sleeper logic time to work. Bot health on the dashboard shows where the sweep is.
+
+**A one-off backfill** still exists for a brand-new bot that wants the standing market scored at once, picks on the dashboard and the sheet with one note, not an alert each:
 
 ```
 python -m snipehunt.jobs backfill --pages 50 --skip-category 261328   # only what isn't a card single
@@ -286,6 +288,8 @@ The brag card holds card names, prices and percentages only: no seller, item num
 | `max_landed`, `max_landed_auto` | 25, 75 | the delivered ceiling, and an autograph's |
 | `skip_words` | 1/1, superfractor, printing plate… | titles with these are dropped |
 
+**The Hall of Fame.** The brag board counts the picks you bought through the bot. The hall ranks the whole collection: every card in `inventory.csv` against what the same card last sold for in the bot's ledger (or the bot's value for a pick the ledger can't price yet), the ten cheapest shares of value first, with what the priced cards cost against what they are worth and how many of them the bot found. It is in the snapshot as `brag.hall`, on the Stats tab of the Home Assistant dashboard, in the weekly report (the top three), and as a share-safe text card: card names, prices and percentages only.
+
 ## All-lane improvements
 
 These apply to every search, not just the mid-tier lane.
@@ -360,6 +364,7 @@ With `GITHUB_REPO` and `GITHUB_TOKEN` set, the week's proposals also go to one G
 | `track_off` | How far off the going rates must run before scoring is told | 10 | 5 to 20 | 5 |
 | `price_lookups` | Sold-price web lookups per scoring call | 8 | 0 to 12 | 2 |
 | `fast_min_price` | Asking price at which a plain card is worth a fast-lane call | 15 | 5 to 30 | 5 |
+| `deep_pages` | Pages (200 listings each) of the standing Buy It Nows the market sweep reads each hourly run; 0 turns the sweep off | 6 | 0 to 20 | – |
 | `yellow_max_total` | The cheap-card alert limit | 2 | 1 to 4 | 0.5 |
 
 Every change is logged with its reason and the metric it is judged by, measured over the four weeks before. Two weeks later the metric is measured again. Worse by more than noise (15% of itself, and at least 3 points) and the setting is put back. Fewer than 8 results before or after is "inconclusive, keep watching", for up to six weeks. A setting you have changed by hand since is never put back. The log is on the dashboard and in the weekly report, and the `self_tuning` switch freezes all of it. Never tunable: anything about the read-only rules, quiet hours, which alerts are on, credentials or how the bot signs in to Gixen.

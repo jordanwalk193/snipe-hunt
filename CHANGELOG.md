@@ -6,6 +6,22 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### The market sweep, and a Hall of Fame
+- **The standing market is read, not just the newest page.** `deep.py` pages
+  every live auction past the first page each run (so an auction is seen
+  within an hour of going live, not in its last half day) and `deep_pages`
+  (6) pages of the standing Buy It Nows in price bands, picking up where the
+  last run stopped; a full pass takes a day or two. Swept-in listings are
+  remembered like any other (price drops on old Buy It Nows show), but only a
+  Buy It Now the ledger prices as a steal, or one worth a look by itself, goes
+  to Claude, fifteen a run. The lane stops at 80% of the day's eBay calls, and
+  `status.deep` says where it is.
+- **`brag.hall`: the ten best steals of all time** from the whole collection,
+  each card against the ledger's newest sale of the same card (or the bot's
+  value for a pick the ledger can't price), with the priced cards' cost against
+  their worth, a bot-pick tally and a share-safe text card; the top three are
+  in the weekly report.
+
 ### Buttons on the alert, and win odds from the ledger
 - A single-pick alert now carries ✓ Added to Gixen (auctions), Skip and Open
   buttons (`notify.pick_actions`, Home Assistant `data.actions`); the

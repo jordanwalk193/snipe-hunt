@@ -50,6 +50,9 @@ DEFAULTS: dict = {
     "min_overlap": 0.5,              # share of title words a sold price must have in common
     "track_off": 10,                 # percent the going rates must be off before scoring is told
     "fast_min_price": 15.0,          # under this, a plain Buy It Now waits for the hourly run
+    # the market sweep (deep.py): pages of standing Buy It Nows read each hourly run,
+    # on top of every live auction; 0 turns the sweep off
+    "deep_pages": 6,
     # offers and lowball snipes may ask Claude to price up to 20 listings nothing has
     # priced yet, at most twice an hour; each answer is kept 30 days
     "deal_appraisals": True,
@@ -111,6 +114,7 @@ RANGES = {
     "urgent_hours": (0, 24),
     "alert_min_stars": (1, 5),
     "price_lookups": (0, 12),
+    "deep_pages": (0, 20),
     "estimate_bin_cap": (0, 1000),
     "min_seller_feedback": (0, 100000),
     "edge_min_pct": (15, 40),

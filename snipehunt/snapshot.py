@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from . import (config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
                rainbow, rarity, report, sales, scheduler, score, settings, shortlist,
                snipecheck, spending, tune, watch)
-from . import bidnow, brag, calibrate, closes, ledger, steals, usage
+from . import bidnow, brag, calibrate, closes, deep, ledger, steals, usage
 from .notify import TIER_ORDER
 
 VERSION = 1
@@ -383,6 +383,7 @@ def status(con, picks: list[dict], now: datetime) -> dict:
         "last_report": latest_report(),
         "last_self_review": max((p.name for p in config.REPORTS_DIR.glob("reflect-*.md")),
                                 default=None),
+        "deep": deep.status(con),   # the market sweep: where it is, passes made
     }
 
 
@@ -494,13 +495,15 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": json.loads(db.kv_get(con, LAST_ACTION_KEY, "null")),
         **({"team": team_view(con, picks, cfg)} if profile.get().mode == "team" else {}),
-        **steals_view(con, picks, now, cfg),
+        **steals_view(con, picks, now, cfg, rows, by_card),
     }
 
 
-def steals_view(con, picks: list[dict], now: datetime, cfg: dict) -> dict:
+def steals_view(con, picks: list[dict], now: datetime, cfg: dict,
+                rows: list[dict] | None = None, by_card: list[dict] | None = None) -> dict:
     """Steals mode and the "don't think, just buy" lists. Read-only; a failure here
-    leaves these keys out rather than taking the whole snapshot down."""
+    leaves these keys out rather than taking the whole snapshot down. `rows` (the
+    inventory) and `by_card` (ledger.groups) save the brag board's hall a re-read."""
     try:
         return {
             "steals": {"on": steals.on(), "max_share": cfg["max_share"]},
@@ -515,7 +518,7 @@ def steals_view(con, picks: list[dict], now: datetime, cfg: dict) -> dict:
             # Buy It Nows cut into steal range in the last day
             "dropped": [dict(_slim(p), was=p["was"], cut_pct=p.get("cut_pct"))
                         for p in steals.dropped_into_range(con, picks, now)],
-            "brag": brag.board(con, now),
+            "brag": brag.board(con, now, rows, by_card),
         }
     except Exception as exc:
         import sys
