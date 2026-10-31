@@ -6,6 +6,13 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Fixed
+- **A glitch in Claude's JSON no longer costs an hour.** `score.extract_json`
+  mends a stray quote inside a title (an 8" x 10" photo), a trailing comma and
+  a `//` remark before giving up, and `score.ask_json` asks once more when a
+  reply still can't be read (an outage is not retried). One such reply had
+  dropped a whole scoring batch, another the lowball refresh.
+
 ### The market sweep, and a Hall of Fame
 - **The standing market is read, not just the newest page.** `deep.py` pages
   every live auction past the first page each run (so an auction is seen

@@ -642,10 +642,81 @@ def build_prompt(items: list[Listing], lookups: int = 8,
 
 
 def extract_json(text: str) -> dict:
+    """The JSON object in Claude's reply, mended if it has to be. A reply now and
+    then carries a stray quote inside a title (an 8" x 10" photo), a comma before a
+    closing brace or a // remark; each has cost a whole hour's scoring."""
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         raise ValueError(f"no JSON object in Claude's reply: {text[:200]!r}")
-    return json.loads(text[start:end + 1])
+    chunk = text[start:end + 1]
+    try:
+        return json.loads(chunk)
+    except ValueError as exc:
+        try:
+            return json.loads(repair_json(chunk))
+        except ValueError:
+            raise exc from None
+
+
+def repair_json(text: str) -> str:
+    """Mend the glitches a model's JSON shows: a " inside a string that doesn't end
+    it (what follows isn't , } ] or :), a trailing comma, a // comment."""
+    out: list[str] = []
+    i, n, in_str = 0, len(text), False
+    while i < n:
+        c = text[i]
+        if in_str:
+            if c == "\\":
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if c == '"':
+                j = i + 1
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                if j >= n or text[j] in ",}]:":
+                    in_str = False
+                else:
+                    out.append('\\"')   # a quote that doesn't close the string
+                    i += 1
+                    continue
+            out.append(c)
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+        elif c == ",":
+            j = i + 1
+            while j < n:   # past blanks and remarks, to what the comma leads to
+                if text[j] in " \t\r\n":
+                    j += 1
+                elif text[j:j + 2] == "//":
+                    j = text.find("\n", j)
+                    j = n if j < 0 else j
+                else:
+                    break
+            if j < n and text[j] in "}]":   # a trailing comma
+                i += 1
+                continue
+        elif c == "/" and text[i:i + 2] == "//":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def ask_json(prompt: str, tools: str = WEB_TOOLS, timeout: int | None = None) -> dict:
+    """ask_claude plus extract_json, asking once more when the reply isn't JSON
+    that can be mended. An outage (ClaudeError) is not retried: it won't clear
+    in a minute, and the caller decides what to keep."""
+    kw = {"timeout": timeout} if timeout else {}
+    try:
+        return extract_json(ask_claude(prompt, tools=tools, **kw))
+    except ValueError as exc:
+        print(f"claude: reply wasn't JSON, asking again: {exc}", file=sys.stderr)
+        return extract_json(ask_claude(prompt, tools=tools, **kw))
 
 
 class ClaudeError(RuntimeError):
@@ -864,11 +935,11 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
                 con.commit()
             sold = sales.relevant(con, batch) if con is not None else []
             track = sales.track_record(con, learned_factors) if con is not None else ""
-            reply = extract_json(ask_claude(
+            reply = ask_json(
                 build_prompt(batch, batch_lookups, sold, track,
                              learned(con) if con is not None else ("", ""),
                              overvalued(con) if con is not None else ()),
-                tools=WEB_TOOLS if batch_lookups else ""))
+                tools=WEB_TOOLS if batch_lookups else "")
         except Exception as exc:
             if not scored:
                 raise
