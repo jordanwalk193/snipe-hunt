@@ -13,6 +13,22 @@ appear in any release; renaming or removing one needs a new API version.
   reply still can't be read (an outage is not retried). One such reply had
   dropped a whole scoring batch, another the lowball refresh.
 
+### Gaps and big money
+- **The collection against every card that has sold.** `gaps.py` treats the
+  ledger's cards as the market's checklist and matches each inventory row to
+  its card by year, number, parallel, print run, autograph and grade
+  (`ledger.match_row`, which also splits parallels the word-overlap match used
+  to lump together); what is left is a gap, by product family, sized as easy
+  fills (usually $6 or less delivered, sold at least twice) and big fish, with
+  a live Buy It Now where there is one. Snapshot key `gaps`.
+- **Where the big money goes.** `whales.py` puts every sale on a ladder by kind
+  (plain, numbered, relic, slab, autograph, 1 of 1), lists the biggest sales
+  and the product families that drive prices, calls out sales at three times a
+  card's usual price as overpays, measures how much of the money sits in the
+  top 5% of sales, and shows which of your cards sit in the money tiers.
+  Snapshot key `whales`. The binder list carries each card's ledger value.
+  Both are on the Stats tab of the Home Assistant dashboard from v2.26.0.
+
 ### The market sweep, and a Hall of Fame
 - **The standing market is read, not just the newest page.** `deep.py` pages
   every live auction past the first page each run (so an auction is seen

@@ -267,6 +267,8 @@ Every bot also gets these dashboard lists, steals mode or not (read-only, nothin
 | `savings` | bought picks (inventory rows with an eBay item number): paid against value, this month and in all, and the best buy |
 | `dropped` | Buy It Nows cut into steal range in the last day |
 | `brag` | the brag board, below |
+| `gaps` | the cards of the player that have sold on eBay but aren't in the inventory, by product family, with the cheap fills and the big ones (below) |
+| `whales` | where the big money goes: the price ladder by kind of card, the biggest sales, the overpays, and your cards in the money tiers (below) |
 
 **The brag board.** From the cards you bought: total saved, the five biggest steals, a steal of the month, a weekly streak (weeks in a row with a buy at half price or better), and badges: **90% Club** (paid 10% of value or less), **Dollar Store** (a $10+ card for a dollar or less) and **Half-Off Hero** (half price or less). It ends in the weekly report too, with a brag card ready to paste on a forum:
 
@@ -289,6 +291,10 @@ The brag card holds card names, prices and percentages only: no seller, item num
 | `skip_words` | 1/1, superfractor, printing plate… | titles with these are dropped |
 
 **The Hall of Fame.** The brag board counts the picks you bought through the bot. The hall ranks the whole collection: every card in `inventory.csv` against what the same card last sold for in the bot's ledger (or the bot's value for a pick the ledger can't price yet), the ten cheapest shares of value first, with what the priced cards cost against what they are worth and how many of them the bot found. It is in the snapshot as `brag.hall`, on the Stats tab of the Home Assistant dashboard, in the weekly report (the top three), and as a share-safe text card: card names, prices and percentages only.
+
+**Gaps.** The ledger's cards (sales grouped by card, lots and slabs left out) are the market's checklist: every card of the player that has changed hands. Each inventory row is matched to its card by year, card number, parallel, print run, autograph and grade (`ledger.match_row`, not word overlap); whatever is left is a gap, by product family. Gaps come sized two ways: the easy fills (cards that usually go for $6 or less delivered and have sold at least twice, the fifteen cheapest listed with the cost of filling them all) and the big fish (what the missing centrepieces go for). A gap with a live Buy It Now shows where to buy it. Snapshot key `gaps`; the Stats tab of the dashboard (integration v2.26.0 or later).
+
+**Big money.** Every sale on a ladder by what it is (plain, numbered, relic, slab, autograph, 1 of 1) with the median of each step, the biggest sales ever, the product families that drive prices, sales at three times or more what the same card usually goes for (overpays), how much of the money sits in the top 5% of sales, and which of your cards sit in the money tiers and what they are worth there. Snapshot key `whales`, next to the gaps on the dashboard. The binder list (`cards`) shows each card's ledger value next to what was paid.
 
 ## All-lane improvements
 
