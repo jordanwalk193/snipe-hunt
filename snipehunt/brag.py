@@ -143,7 +143,7 @@ def hall(con, rows: list[dict] | None = None, groups: list[dict] | None = None,
         if paid <= 0:
             continue
         name = report.card_name(r)
-        g = ledger.find(groups, name) if name else None
+        g = ledger.match_row(groups, r)
         pick = picks.get((r.get("ebay_item_id") or "").strip())
         if g:
             value, by, image = float(g["sales"][0]["total"]), "sales", g["image"]

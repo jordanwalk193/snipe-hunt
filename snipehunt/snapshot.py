@@ -16,6 +16,7 @@ from . import (config, db, gixen, inventory, jackpot, lowball, musthave, offers,
                rainbow, rarity, report, sales, scheduler, score, settings, shortlist,
                snipecheck, spending, tune, watch)
 from . import bidnow, brag, calibrate, closes, deep, ledger, steals, usage
+from . import gaps, whales
 from .notify import TIER_ORDER
 
 VERSION = 1
@@ -213,10 +214,12 @@ def _row(row: dict) -> dict:
             "seller": row.get("seller"), "page": report.binder_page(row)}
 
 
-def cards(rows: list[dict]) -> list[dict]:
-    """Every card, compact, for the searchable binder list."""
+def cards(rows: list[dict], gs: list[dict] | None = None) -> list[dict]:
+    """Every card, compact, for the searchable binder list: with "v", what the
+    ledger's newest sale of the same card went for (ledger.match_row), when it has one."""
     out = []
     for r in rows:
+        g = ledger.match_row(gs, r) if gs else None
         flags = "".join(letter for letter, on in (
             ("R", r.get("rc") == "Y"), ("A", r.get("auto") == "Y"),
             ("L", r.get("relic") == "Y"), ("N", bool(r.get("serial"))),
@@ -225,7 +228,9 @@ def cards(rows: list[dict]) -> list[dict]:
         out.append({"id": r.get("id"), "n": _short(report.card_name(r), 80),
                     "s": r.get("status"), "p": _price(r), "d": r.get("order_date"),
                     "pg": report.binder_page(r), "f": flags,
-                    "sl": _short(r.get("seller"), 20)})
+                    "sl": _short(r.get("seller"), 20),
+                    "v": round(g["sales"][0]["total"], 2) if g else None,
+                    "vn": len(g["sales"]) if g else 0})
     return out
 
 
@@ -465,7 +470,11 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "gixen_account": bool(config.get("GIXEN_USER")),
         # $20+ cards at a sliver of their value, the best first (also flagged in picks)
         "jackpots": [_slim(p) for p in jackpots],
-        "cards": cards(rows),
+        "cards": cards(rows, by_card),
+        # the holes in the collection against every card that has sold, and where to buy them
+        "gaps": gaps.view(con, rows, by_card, now),
+        # what the big money goes for: the price ladder, the biggest sales, overpays, your money cards
+        "whales": whales.view(con, rows, by_card, now),
         "collection": collection(rows, now),
         "pipeline": pipeline(rows, picks),
         "record": record(con, now),

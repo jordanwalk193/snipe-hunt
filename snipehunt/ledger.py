@@ -53,6 +53,8 @@ def _alike(g: dict, key: frozenset, title: str) -> bool:
         return False
     if len(key & g["key"]) / len(key | g["key"]) < sales.SAME_CARD:
         return False
+    if _stems(key ^ g["key"]) & _stems(PARALLEL_WORDS):
+        return False   # "Refractor" on one title only: a parallel, not the same card
     return sales._number_match(title, g["title"]) is not False and (
         getattr(sales, "same_player", None) is None or sales.same_player(title, g["title"]))
 
@@ -61,6 +63,96 @@ def find(gs: list[dict], title: str) -> dict | None:
     key, kind = sales.card_key(title), sales.traits(title)
     return next((g for g in gs if g["traits"] == kind and _alike(g, key, title)), None)
 
+
+
+# ------------------------------------------------------------ the collection's own cards
+# An inventory row is structured (year, set, card, parallel, number, serial); a sale
+# title is not. Matching by word overlap alone misses the plain cards (a title's
+# extra words dilute it) and mixes up parallels, so a row is matched by its parts.
+# Words that mark a parallel: a title shows the row's, and none the row lacks.
+PARALLEL_WORDS = frozenset("""refractor xfractor fractor prism prizm gold blue red green orange
+purple pink black aqua sapphire mojo wave speckle shimmer atomic sepia negative foil foilboard
+holo silver rainbow lava raywave magenta fuchsia lime yellow teal bronze platinum plate
+superfractor ssp variation image photo mini glitter pulsar velocity scope cracked ice disco camo
+tiger zebra giraffe snakeskin elephant hyper neon lazer laser aurora cosmic stars nebula
+galactic eclipse padparadscha metallic sparkle mega glossy logofractor geometric seams lightboard
+onyx amethyst emerald ruby sandglitter""".split())
+# Words that name a product: a title with one the row's set lacks is another set.
+SET_WORDS = frozenset("""chrome bowman heritage sapphire update holiday archives finest gallery
+stadium club gilded dynasty inception select mosaic donruss optic diamond kings allen ginter
+big league opening day pristine tier museum triple threads tribute definitive five star
+luminaries transcendent 206 leaf perfect game pro debut living now fire gypsy queen elite
+chronicles immaculate flawless national treasures spectra obsidian absolute contenders draft
+minors sterling best invicta platinum""".split())
+# set words a title may leave out without being another set
+SOFT_SET_WORDS = frozenset("edition series topps panini bowmans".split())
+_RUN = re.compile(r"/\s?(\d{1,5})\b")
+# words of the row's "card" field that say nothing about which card it is
+GENERIC = frozenset("base insert prospect prospects rookie card design variation parallel paper".split())
+
+
+def _stems(ws) -> frozenset[str]:
+    """"refractors" is "refractor": the plural a title uses must not hide a parallel."""
+    return frozenset(w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w for w in ws)
+
+
+def row_parts(row: dict) -> dict:
+    """What identifies an inventory row to a sale title."""
+    serial = _RUN.search(str(row.get("serial") or ""))
+    return {
+        "year": str(row.get("year") or "").strip(),
+        "set": _stems(sales.words(str(row.get("set") or ""))) - {"base"},
+        "own": (_stems(sales.words(f"{row.get('set') or ''} {row.get('card') or ''} {row.get('parallel') or ''}"))
+                - {"base"}),
+        "card": frozenset(w for w in _stems(sales.words(str(row.get("card") or "")))
+                          if w not in GENERIC and w not in SOFT_SET_WORDS and not w.isdigit()),
+        "parallel": _stems(sales.words(str(row.get("parallel") or ""))) - {"base"},
+        "number": str(row.get("card_no") or "").strip(),
+        "run": serial.group(1) if serial else None,
+        "auto": str(row.get("auto") or "").strip().upper() == "Y",
+        "graded": bool(str(row.get("graded") or "").strip()),
+    }
+
+
+def _row_fit(parts: dict, g: dict) -> tuple | None:
+    """How well a ledger card fits the row: None when it is another card, else a
+    sort key (higher is better)."""
+    title = g["title"]
+    if not parts["year"] or sales._year(title) != parts["year"]:
+        return None
+    grade, auto, run = g["traits"]
+    if bool(auto) != parts["auto"] or (grade is not None) != parts["graded"] or run != parts["run"]:
+        return None
+    numbered = None
+    if parts["number"]:
+        numbered = sales._number_match(f"#{parts['number']}", title)
+        if numbered is False:
+            return None
+    tw = _stems(sales.words(title))
+    if not parts["parallel"] <= tw or not parts["card"] <= tw:
+        return None
+    hard = parts["set"] - SOFT_SET_WORDS
+    if not hard <= tw and not (numbered is True and len(hard & tw) * 2 >= len(hard)):
+        return None   # an insert's title may drop "Chrome" when its number says which card
+    if not parts["number"] and not parts["card"] and sales.card_number(title):
+        return None   # "2026 Topps Now" alone can't claim a numbered card
+    number_words = _stems(sales.words(f"{parts['number']} {parts['run'] or ''}")) | {parts["year"]}
+    extra = tw - parts["own"] - number_words
+    if extra & _stems(PARALLEL_WORDS | SET_WORDS):
+        return None
+    return (numbered is True, len(parts["set"] & tw), len(g["sales"]))
+
+
+def match_row(gs: list[dict], row: dict) -> dict | None:
+    """The ledger card an inventory row is, by year, number, parallel, print run,
+    autograph and grade (not by word overlap: see row_parts)."""
+    parts = row_parts(row)
+    best, best_fit = None, None
+    for g in gs:
+        fit = _row_fit(parts, g)
+        if fit is not None and (best_fit is None or fit > best_fit):
+            best, best_fit = g, fit
+    return best
 
 def trend(g: dict, now: float) -> dict | None:
     """How this card's price moved: the last RECENT_DAYS against the sales before."""
@@ -119,7 +211,7 @@ def worth(con, rows: list[dict], gs: list[dict], now: datetime) -> dict:
         except ValueError:
             paid = 0.0
         name = report.card_name(r)
-        g = find(gs, name) if name else None
+        g = match_row(gs, r)
         sale = g["sales"][0] if g else None
         value = sale["total"] if sale else paid
         valued += sale is not None

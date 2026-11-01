@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from . import brag, config, jackpot, lowball, offers, profile, sales, settings, snapshot, snipecheck, spending
+from . import brag, config, jackpot, lowball, offers, profile, sales, settings, snapshot, snipecheck, spending, whales
 
 # (tier, card, price, shipping, max, value, hours until it ends or None for Buy It Now,
 #  basis, snipe, why, colour)
@@ -362,6 +362,69 @@ def _hall(rows: list[dict], now: datetime) -> dict:
     return out
 
 
+def _gaps(now: datetime) -> dict:
+    """The holes in the made-up collection against made-up sales."""
+    day = lambda d: (now - timedelta(days=d)).date().isoformat()
+    entry = lambda title, median, n, fam, d, live=None: {
+        "title": title, "median": median, "n": n, "last": day(d), "family": fam, "image": None,
+        "url": _search(title), "live": live}
+    easy = [entry("2023 Topps Chrome Refractor Rookie #209", 5.0, 47, "Topps Chrome", 2,
+                  {"item_id": "410000009001", "total": 4.25, "auction": False, "ends": None,
+                   "url": _search("2023 Topps Chrome Refractor #209")}),
+            entry("2023 Topps Heritage High Number #558", 2.92, 8, "Heritage", 5),
+            entry("2023 Bowman Chrome It Came to the League #CFL-14", 5.28, 8, "Bowman Chrome", 9),
+            entry("2023 Topps Living Set #647", 5.99, 8, "Living", 12),
+            entry("2023 Finest #60", 2.23, 5, "Finest", 20,
+                  {"item_id": "410000009002", "total": 0.99, "auction": True,
+                   "ends": (now + timedelta(hours=5)).isoformat(timespec="minutes"), "url": _search("2023 Finest #60")})]
+    big = [entry("2020 Bowman Draft Chrome 1st Bowman #BD-57 PSA 10", 64.76, 8, "Bowman Draft", 3),
+           entry("2021 Bowman Chrome Mega Box Mojo Autograph #BCMA", 55.81, 2, "Bowman Chrome", 30),
+           entry("2023 Topps Cosmic Chrome Rookie #151 PSA 10", 45.74, 2, "Cosmic Chrome", 15)]
+    bucket = lambda name, k, o, t, c: {"name": name, "known": k, "owned": o, "gap": k - o,
+                                       "pct": round(100 * o / k), "typical": t, "easy_cost": c}
+    years = [bucket(*a) for a in (("2020", 60, 7, 12.5, 18.0), ("2021", 55, 6, 8.2, 22.5), ("2022", 70, 9, 6.4, 31.0),
+                                  ("2023", 420, 38, 6.0, 88.0), ("2024", 90, 11, 5.1, 24.0), ("2026", 110, 14, 3.9, 40.0))]
+    fams = [bucket(*a) for a in (("Topps Chrome", 95, 9, 8.5, 42.0), ("Bowman", 70, 10, 9.2, 20.0), ("Update", 65, 7, 5.4, 36.0),
+                                 ("Heritage", 44, 2, 4.1, 30.0), ("Holiday", 40, 5, 3.0, 25.0), ("Bowman Chrome", 50, 5, 17.3, 12.0))]
+    return {"known": 805, "owned": 85, "gap": 720, "pct": 11, "easy_n": 87, "easy_cost": 278.5, "live_n": 9,
+            "years": years, "families": fams, "easy": easy, "big": big, "buyable": [easy[0]]}
+
+
+def _whales(now: datetime) -> dict:
+    """What the big money went for, made up in the shape of the real thing."""
+    day = lambda d: (now - timedelta(days=d)).date().isoformat()
+    sale = lambda title, total, kind, bids, d: {
+        "title": title, "total": total, "kind": kind, "bids": bids, "date": day(d), "image": None,
+        "url": _search(title), "tier": whales.tier(title), "family": whales.family(title)}
+    top = [sale("2020 Bowman Draft Chrome 1st Auto #CDA 65/75 PSA 9", 1104.99, "bin", None, 40),
+           sale("2023 Topps Dynasty Rookie Auto Patch 3/10", 791.0, "auction", 21, 12),
+           sale("2020 Bowman Chrome Draft 1st Blue Auto /150 PSA 10", 766.0, "auction", 31, 25),
+           sale("2023 Topps Cosmic Chrome Black Eclipse Auto /10", 546.6, "auction", 1, 60),
+           sale("2023 Topps Gilded Gold Etch Auto Yellow /75 PSA 10", 505.79, "bin", None, 8)]
+    ladder = [{"tier": t, "n": n, "median": m, "p75": p, "max": x, "x": r} for t, n, m, p, x, r in (
+        ("1 of 1", 7, 108.49, 109.32, 262.99, 28.6), ("Autograph", 116, 65.52, 121.99, 1104.99, 17.2),
+        ("Slab PSA 10", 60, 58.0, 78.5, 380.99, 15.3), ("Slab, other", 62, 23.74, 33.98, 105.97, 6.2),
+        ("Numbered", 188, 11.36, 20.52, 546.6, 3.0), ("Relic", 58, 9.25, 16.49, 105.8, 2.4),
+        ("Plain", 816, 3.8, 7.5, 215.49, 1.0))]
+    over = [dict(sale("2023 Topps Cosmic Chrome #151 (RC)", 40.56, "auction", 9, 26), usual=5.5, x=7.4, over=35.06),
+            dict(sale("2023 Topps Update Rookie Debut #US150", 26.0, "bin", None, 18), usual=2.35, x=11.0, over=23.65),
+            dict(sale("2023 Topps Heritage High Number #558", 12.71, "auction", 6, 110), usual=1.99, x=6.4, over=10.72)]
+    yours = {"n": 31, "by_tier": {"Autograph": 4, "Numbered": 21, "Relic": 4, "Slab PSA 10": 1, "Slab, other": 1},
+             "paid": 310.58, "value": 237.09, "valued": 19, "dupes_value": 0.0,
+             "top": [{"card": "2023 Topps Now #54 /9038", "tier": "Numbered", "paid": 4.0, "value": 50.08, "image": None},
+                     {"card": "2023 Bowman's Best Astral Projections auto /99", "tier": "Autograph", "paid": 36.0, "value": 42.07, "image": None},
+                     {"card": "2024 Topps Pristine Northern Lights Gold Refractor /50", "tier": "Numbered", "paid": 15.16, "value": 20.52, "image": None}]}
+    return {"n": 1307, "dollars": 33245.59, "median": 6.96, "top": top, "ladder": ladder,
+            "drivers": [{"family": "Chronicles", "n": 6, "median": 58.37, "max": 94.07},
+                        {"family": "Triple Threads", "n": 4, "median": 56.27, "max": 69.99},
+                        {"family": "Five Star", "n": 10, "median": 50.0, "max": 108.8},
+                        {"family": "Stadium Club", "n": 11, "median": 40.99, "max": 175.28}],
+            "overpaid": over, "overpaid_n": 11, "overpaid_dollars": 109.56,
+            "concentration": {"top_n": 65, "share": 49, "dollars": 16441.07},
+            "trend": {"tiers": ["Autograph", "Slab PSA 10"], "now": 60.88, "was": 60.67, "n": 162, "pct": 0},
+            "yours": yours}
+
+
 def build(now: datetime | None = None) -> dict:
     now = now or datetime.now(config.TZ)
     who = profile.get()
@@ -484,6 +547,8 @@ def build(now: datetime | None = None) -> dict:
                                       "date": (now - timedelta(days=1)).date().isoformat(),
                                       "seller": SELLERS[1]}]},
         "market": _market(now),
+        "gaps": _gaps(now),
+        "whales": _whales(now),
         "tuning": {"on": True, "log": [], "tunables": {}},
         "trends": {"cards": 12, "up": [{"card": "2023 Bowman Chrome 1st Refractor", "pct": 22, "n": 5, "now": 18.5, "was": 15.2, "dir": "up", "image": None, "url": "https://www.ebay.com"}],
                    "down": [{"card": "2024 Topps Series 1 Gold /2024", "pct": -15, "n": 4, "now": 6.8, "was": 8.0, "dir": "down", "image": None, "url": "https://www.ebay.com"}]},
