@@ -7,6 +7,11 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Fixed
+- **The Google Sheet keeps up with your collection.** It was refreshed only by
+  the hourly run, so a win the email sync added could take up to an hour to
+  appear. `sheets.after_inventory_change` now pushes as soon as the sync or
+  "filed in binder" changes `inventory.csv`, and pushes take a lock so two never
+  interleave.
 - **A glitch in Claude's JSON no longer costs an hour.** `score.extract_json`
   mends a stray quote inside a title (an 8" x 10" photo), a trailing comma and
   a `//` remark before giving up, and `score.ask_json` asks once more when a

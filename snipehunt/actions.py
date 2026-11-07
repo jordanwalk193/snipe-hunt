@@ -14,7 +14,7 @@ import time
 import unicodedata
 from datetime import datetime
 
-from . import config, db, gitsync, gixen, inventory, notify, report, scheduler, snapshot
+from . import config, db, gitsync, gixen, inventory, notify, report, scheduler, sheets, snapshot
 
 MAX_SKIPPED = 2000
 REASONS = db.REASONS    # "bad pick" reasons, then "good_pick"
@@ -112,6 +112,7 @@ def filed(con, data: dict) -> str:
     # A git remote can take a few seconds; the button shouldn't wait for it.
     threading.Thread(target=_push_inventory, daemon=True,
                      args=(f"inventory: {len(done)} filed in binder",)).start()
+    sheets.after_inventory_change("filing", background=True)
     if len(done) == 1:
         return f"Filed: {report.card_name(done[0])}."
     return f"Filed {len(done)} cards in the binder."

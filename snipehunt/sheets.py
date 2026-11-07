@@ -14,8 +14,11 @@ nothing is read back from the sheet, and nothing in it changes the bot.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import sys
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 
 from . import config, db, inventory, sales
@@ -289,8 +292,40 @@ def _summary_format(sheet_id: int) -> list[dict]:
     ]
 
 
+@contextmanager
+def _one_at_a_time():
+    """Pushes clear the tabs then write them: two at once could leave a tab half written."""
+    with open(config.ensure_state_dir() / "sheets.lock", "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
+
+
+def after_inventory_change(why: str, background: bool = False) -> None:
+    """inventory.csv just changed: refresh the sheet now, not at the next hourly run.
+    Never raises; `background` keeps an API reply from waiting on Google."""
+    if not configured():
+        return
+
+    def go():
+        try:
+            counts = push(db.connect())
+            print(f"sheets: pushed {sum(counts.values())} rows after {why}", file=sys.stderr)
+        except Exception as exc:   # the hourly run tries again
+            print(f"sheets: {exc} (after {why})", file=sys.stderr)
+
+    if background:
+        threading.Thread(target=go, daemon=True).start()
+    else:
+        go()
+
+
 def push(con=None, snap: dict | None = None, session=None, now: datetime | None = None) -> dict:
     """Write every data tab (and the Summary, the first time). Returns rows per tab."""
+    with _one_at_a_time():
+        return _push(con, snap, session, now)
+
+
+def _push(con, snap, session, now) -> dict:
     from . import snapshot   # it imports nearly everything; kept out of module import
     sheet = config.get("GOOGLE_SHEET_ID")
     if not sheet:

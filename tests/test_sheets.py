@@ -169,3 +169,25 @@ def test_an_api_that_is_off_is_not_blamed_on_sharing(sheet_env):
     with pytest.raises(sheets.SheetsError) as err:
         sheets.push(db.connect(), SNAP, session=Off(), now=NOW)
     assert "has not been used" in str(err.value) and "share the sheet" not in str(err.value)
+
+
+def test_an_inventory_change_pushes_the_sheet_at_once(sheet_env, monkeypatch, capsys):
+    pushed = []
+    monkeypatch.setattr(sheets, "_push", lambda con, snap, session, now: pushed.append(1) or {"Collection": 3})
+    sheets.after_inventory_change("inventory sync")
+    assert pushed == [1]
+    assert "after inventory sync" in capsys.readouterr().err
+
+
+def test_an_inventory_change_push_never_raises(sheet_env, monkeypatch, capsys):
+    def boom(*a):
+        raise sheets.SheetsError("Google Sheets 500")
+    monkeypatch.setattr(sheets, "_push", boom)
+    sheets.after_inventory_change("filing")   # no exception
+    assert "Google Sheets 500" in capsys.readouterr().err
+
+
+def test_no_sheet_no_push(monkeypatch):
+    monkeypatch.setattr(sheets, "configured", lambda: False)
+    monkeypatch.setattr(sheets, "_push", lambda *a: (_ for _ in ()).throw(AssertionError))
+    sheets.after_inventory_change("inventory sync")

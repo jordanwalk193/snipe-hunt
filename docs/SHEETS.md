@@ -1,7 +1,8 @@
 # Your hunt in a Google Sheet
 
 Snipe Hunt can write what it knows to a Google Sheet you own after every
-hourly run. It only writes, and it never reads anything back: changing the sheet
+hourly run, and again as soon as `inventory.csv` changes (an email sync or
+"filed in binder"), so a new win shows up in minutes, not up to an hour later. It only writes, and it never reads anything back: changing the sheet
 changes nothing in the bot.
 
 | Tab | What is in it | Rewritten each push? |

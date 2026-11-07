@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 
-from . import config, db, gitsync, inventory, profile
+from . import config, db, gitsync, inventory, profile, sheets
 from .score import ask_claude, extract_json
 
 IMAP_HOST = "imap.gmail.com"
@@ -252,6 +252,7 @@ def run(days: int | None = None, dry_run: bool = False, verbose: bool = True) ->
     if changes:
         inventory.write(fields, rows)
         gitsync.commit_and_push(["inventory.csv"], commit_message(counts))
+        sheets.after_inventory_change("inventory sync")
     db.log_mail_events(con, events)
     con.executemany("INSERT OR IGNORE INTO mail_seen VALUES (?, strftime('%s','now'))",
                     [(m["msg_id"],) for m in emails])
