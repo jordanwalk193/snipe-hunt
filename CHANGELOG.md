@@ -7,6 +7,13 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Fixed
+- **Held Buy It Now alerts no longer vanish overnight.** A Buy It Now held for
+  quiet hours was dropped as "probably sold" once it had been out of a run's
+  results for 2 hours, but the deep sweep visits each price band only now and
+  then, so live listings it found were often missing for hours. Up to 15 a run
+  are now looked up by item number (`notify.looker`) and dropped only when eBay
+  says they sold, ended or are out of stock; one that can't be looked up is
+  kept up to 2 days.
 - **The Google Sheet keeps up with your collection.** It was refreshed only by
   the hourly run, so a win the email sync added could take up to an hour to
   appear. `sheets.after_inventory_change` now pushes as soon as the sync or

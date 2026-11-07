@@ -133,7 +133,8 @@ def hourly(dry_run: bool = False) -> str:
         return _welcome(con, listings, picks)
     # held and left-over picks are checked against this run's prices before they go out
     sent = notify.deliver(con, picks, dry_run=dry_run,
-                          current={i.item_id: i for i in listings})
+                          current={i.item_id: i for i in listings},
+                          look=None if dry_run else notify.looker())
     if sheets.configured() and not dry_run:
         try:   # the Google Sheet copy of the hunt (optional)
             counts = sheets.push(con)

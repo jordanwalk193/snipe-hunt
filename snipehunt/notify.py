@@ -20,7 +20,9 @@ MAX_MESSAGES = 3                 # per run; the rest go out on the next run
 PENDING_KEY = "pending_picks"
 BEDTIME_KEY = "bedtime_bundle_night"
 BEDTIME_AFTER = 2                # hours past the end of quiet hours the bedtime bundle covers
-BIN_GONE = 2 * 3600              # a Buy It Now out of the results this long has likely sold
+BIN_GONE = 2 * 3600              # a Buy It Now out of the results this long may have sold...
+LOOK_MAX = 15                    # ...so up to this many a run are asked about by item number
+UNCHECKED_KEEP = 2 * 86400       # one that can't be asked about is kept this long, then dropped
 # eBay shows many buyers Pacific time, so every end time is given in both.
 ET, PT = ZoneInfo("America/New_York"), ZoneInfo("America/Los_Angeles")
 
@@ -464,13 +466,49 @@ def plan_messages(picks: list[dict], now: datetime | None = None
             ordered[cut:])
 
 
-def refresh(con, pick: dict, current: dict, now: datetime) -> dict | None:
+class CantLook(RuntimeError):
+    """No look-up this time (the run's look-ups or the day's eBay calls are spent, or eBay failed)."""
+
+
+def looker(limit: int = LOOK_MAX):
+    """item number -> the live Listing, or None once it has sold or ended.
+
+    The deep sweep visits each price band only now and then, so a Buy It Now it
+    found can be missing from a run's results for hours while still for sale:
+    "out of the results" alone is no proof that it sold.
+    """
+    from . import ebay_search, usage
+    state = {"client": None, "left": limit}
+
+    def look(item_id: str):
+        if state["left"] <= 0 or not usage.ebay_allowed("item"):
+            raise CantLook("look-ups spent")
+        state["left"] -= 1
+        try:
+            state["client"] = state["client"] or ebay_search.EbayClient()
+            raw = state["client"].item(item_id, fresh=True)
+        except Exception as exc:
+            raise CantLook(str(exc)) from exc
+        if not raw:
+            return None
+        end = raw.get("itemEndDate")
+        if end and datetime.fromisoformat(end.replace("Z", "+00:00")) <= datetime.now(config.TZ):
+            return None
+        if any(a.get("estimatedAvailabilityStatus") == "OUT_OF_STOCK"
+               for a in raw.get("estimatedAvailabilities") or []):
+            return None
+        return ebay_search.parse_item(raw)
+    return look
+
+
+def refresh(con, pick: dict, current: dict, now: datetime, look=None) -> dict | None:
     """A pick with today's price, or None when it is no longer worth sending.
 
     A pick held overnight, or left over from a full run, still carries the
     price it was scored at. `current` is this run's search results by item
-    number. An auction bid past its max is dropped, and so is a Buy It Now
-    that has been out of the results long enough to have sold.
+    number. An auction bid past its max is dropped. A Buy It Now out of the
+    results for a while is asked about by item number (`look`, see looker())
+    and dropped only once eBay says it sold or ended.
     """
     if pick.get("tier") == "drop":
         return pick   # a print-to-order drop is not an eBay listing
@@ -480,8 +518,18 @@ def refresh(con, pick: dict, current: dict, now: datetime) -> dict | None:
             return pick   # not in this search; its end time still rules it out when over
         row = con.execute("SELECT last_seen FROM seen WHERE item_id=?",
                           (pick["item_id"],)).fetchone()
-        gone = row is not None and row["last_seen"] < now.timestamp() - BIN_GONE
-        return None if gone else pick
+        if row is None or row["last_seen"] >= now.timestamp() - BIN_GONE:
+            return pick
+        if look is None:
+            return None
+        try:
+            item = look(pick["item_id"])
+        except CantLook:   # can't tell today: keep it a while, not for ever
+            return pick if row["last_seen"] >= now.timestamp() - UNCHECKED_KEEP else None
+        if item is None:
+            return None   # sold or ended
+        con.execute("UPDATE seen SET last_seen=?, price=?, shipping=? WHERE item_id=?",
+                    (int(now.timestamp()), item.price, item.shipping, pick["item_id"]))
     if pick.get("max") is not None and item.price > pick["max"]:
         return None
     return score.rerate(dict(pick, price=item.price, shipping=item.shipping,
@@ -489,7 +537,7 @@ def refresh(con, pick: dict, current: dict, now: datetime) -> dict | None:
 
 
 def deliver(con, new_picks: list[dict], dry_run: bool = False,
-            now: datetime | None = None, current: dict | None = None) -> int:
+            now: datetime | None = None, current: dict | None = None, look=None) -> int:
     """Bundle new picks plus anything held overnight into one notification.
 
     With `current` (this run's listings by item number), every candidate is
@@ -503,7 +551,7 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
     candidates = new_picks + [p for p in held if p["item_id"] not in known]
     stale = len(candidates)
     if current is not None:
-        candidates = [p for p in (refresh(con, p, current, now) for p in candidates) if p]
+        candidates = [p for p in (refresh(con, p, current, now, look) for p in candidates) if p]
     stale -= len(candidates)   # dropped because the price moved on or the listing is gone
     # a card at a sliver of its value skips every alert setting and quiet hours
     jackpots = {p["item_id"] for p in jackpot.alert(con, candidates, now, send=not dry_run)}
