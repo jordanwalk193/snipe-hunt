@@ -116,10 +116,13 @@ def thin_comps(comps: list[dict], now: float | None = None, full: int = FULL_COM
         value, cap = min(statistics.median(totals), totals[0]), 4
     else:   # plenty: the fresh sales set the price when there are enough of them
         value, cap = statistics.median(fresh if len(fresh) >= 2 else totals), 5
+    mixed = any(c.get("mixed") for c in comps)
+    if mixed:   # no sale of this parallel: other parallels only guess at it
+        cap = min(cap, GUESS_STARS)
     stale = all(c["sold_at"] < now - STALE_COMPS for c in comps)
     newest = datetime.fromtimestamp(comps[0]["sold_at"], config.TZ).date().isoformat()
     return {"n": n, "newest": newest, "value": round(value, 2),
-            "cap": max(1, cap - 1) if stale else cap, "stale": stale}
+            "cap": max(1, cap - 1) if stale else cap, "stale": stale, "mixed": mixed}
 
 
 def rate(pay: float, value: float | None) -> tuple[int | None, int | None]:

@@ -462,3 +462,42 @@ def test_the_scorecard_splits_the_calls_by_where_the_going_rate_came_from():
     assert got["guessed"]["calls"] == 2 and got["calibrated"]["value_bias_pct"] == 0
     assert sum(g["calls"] for g in got.values()) == 4
     assert [b["calls"] for b in got["guessed"]["bands"]] == [1, 1, 0]
+
+
+def test_a_base_card_is_not_a_missed_steal_next_to_its_refractors():
+    con = db.connect()
+    for item_id, word, ago in (("1", "Refractor", 5), ("2", "Sapphire", 4), ("3", "Refractor", 3)):
+        sale(con, item_id, f"2021 Bowman Draft Chrome Jordan Walker #BDC-187 {word}", 8.0,
+             ago=ago * 86400)
+    sale(con, "4", "2021 Bowman Draft Chrome Jordan Walker #BDC-187", 1.0, ago=3600)
+    assert sales.find_missed(con, NOW, owned=[]) == []
+
+
+def test_a_missed_steal_keeps_to_max_share(monkeypatch):
+    con = db.connect()
+    blue = "2023 Topps Chrome Jordan Walker Blue Refractor /150 #45"
+    for item_id, ago in (("1", 5), ("2", 4), ("3", 3)):
+        sale(con, item_id, blue, 22.0, ago=ago * 86400)
+    sale(con, "4", blue, 12.0, ago=3600)                                # 45% under
+    assert [m["item_id"] for m in sales.find_missed(con, NOW, owned=[])] == ["4"]
+    real = sales.settings.load
+    monkeypatch.setattr(sales.settings, "load", lambda con=None: dict(real(con), max_share=0.5))
+    assert sales.find_missed(con, NOW, owned=[]) == []                 # not at half price
+
+
+def test_ledger_comps_keep_to_the_listings_parallel():
+    con = db.connect()
+    for item_id, title, price in (
+            ("1", "2021 Bowman Draft Chrome Jordan Walker #BDC-187 Refractor", 9.0),
+            ("2", "2021 Bowman Draft Chrome Jordan Walker #BDC-187 Sapphire", 6.0),
+            ("3", "2021 Bowman Draft Chrome Jordan Walker #BDC-187", 1.5),
+            ("4", "2021 Bowman Draft Chrome Jordan Walker #BDC-187 Refractors", 8.0)):
+        sale(con, item_id, title, price)
+    base = listing("9", "2021 Bowman Draft Chrome Jordan Walker #BDC-187 Cardinals")
+    assert [c["item_id"] for c in sales.ledger_comps(con, base)] == ["3"]
+    refractor = listing("9", "Jordan Walker 2021 Bowman Draft Chrome Refractor #BDC-187")
+    assert sorted(c["item_id"] for c in sales.ledger_comps(con, refractor)) == ["1", "4"]
+    gold = listing("9", "2021 Bowman Draft Chrome Jordan Walker #BDC-187 Gold")
+    comps = sales.ledger_comps(con, gold)                    # no Gold sold: all, marked
+    assert len(comps) == 4 and all(c["mixed"] for c in comps)
+    assert score.thin_comps(comps)["cap"] <= score.GUESS_STARS

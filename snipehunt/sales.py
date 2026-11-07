@@ -598,9 +598,12 @@ def find_missed(con, now: float | None = None, days: int = MISSED_DAYS,
     owned = inventory.read()[1] if owned is None else owned
     bought = {(r.get("ebay_item_id") or "").strip() for r in owned} - {""}
     rows = with_calls(con)                       # newest first
+    # a steal by your own rule: no sale over max_share of the going rate counts
+    under = max(MISSED_UNDER, round(100 * (1 - settings.load(con)["max_share"])))
     by_traits: dict[tuple, list] = {}            # only the same grade and print run can match
     for row in rows:
         row["key"], row["number"] = card_key(row["title"]), card_number(row["title"])
+        row["parallel"] = _parallel(row["key"])
         by_traits.setdefault(traits(row["title"]), []).append(row)
     out = []
     for row in rows:
@@ -609,13 +612,14 @@ def find_missed(con, now: float | None = None, days: int = MISSED_DAYS,
         earlier = [r["total"] for r in by_traits[traits(row["title"])]
                    if r["sold_at"] < row["sold_at"] and r["key"]
                    and len(row["key"] & r["key"]) / len(row["key"] | r["key"]) >= SAME_CARD
+                   and r["parallel"] == row["parallel"]   # base isn't cheap next to Refractors
                    and not (row["number"] and r["number"]
                             and _number_match(row["title"], r["title"]) is False)]
         if len(earlier) < MISSED_PRIOR:
             continue
         typical = statistics.median(earlier)
         pct = round(100 * (1 - row["total"] / typical))
-        if pct >= MISSED_UNDER and row["item_id"] not in bought \
+        if pct >= under and row["item_id"] not in bought \
                 and not snipecheck.owned_copy(row["title"], owned):
             out.append({"item_id": row["item_id"], "title": row["title"], "total": row["total"],
                         "typical": round(typical, 2), "pct": pct, "n": len(earlier),
@@ -689,7 +693,27 @@ def ledger_comps(con, item: Listing, now: float | None = None) -> list[dict]:
             continue
         sale["total"] = delivered(sale["price"], sale["shipping"])
         out.append(sale)
-    return out
+    return same_parallel(item.title, out)
+
+
+def _parallel(ws) -> frozenset[str]:
+    """The parallel words among a title's words ("refractors" counted as "refractor")."""
+    from . import ledger   # ledger imports this module; kept local
+    return ledger._stems(ws) & ledger._stems(ledger.PARALLEL_WORDS)
+
+
+def same_parallel(title: str, comps: list[dict]) -> list[dict]:
+    """Of a card's comps, the ones with the title's parallel words: a Refractor prices
+    from Refractors and a base card from base cards, not from both. The same card
+    number and year let a Sapphire or a Refractor sale through _closeness.
+
+    When no comp has the same parallel, all of them, each marked "mixed", so the
+    value they make is held to a guess's stars (score.thin_comps)."""
+    mine = _parallel(words(title))
+    same = [c for c in comps if _parallel(c.get("words") or words(c["title"])) == mine]
+    if same or not comps:
+        return same
+    return [dict(c, mixed=True) for c in comps]
 
 
 def from_mail(con) -> int:

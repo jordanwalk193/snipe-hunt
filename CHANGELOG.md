@@ -7,6 +7,13 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Fixed
+- **A card is priced from sales of its own parallel.** The same card number and
+  year let Refractor and Sapphire sales price a base card (and the other way
+  round). `sales.ledger_comps` now keeps to comps with the listing's parallel
+  words; when none sold, the others still price it but at a guess's stars. On
+  one collector's 45 days of sales, confident values at 2x or more the real
+  price fell by almost half. Missed steals use the same rule and respect
+  `max_share`.
 - **Held Buy It Now alerts no longer vanish overnight.** A Buy It Now held for
   quiet hours was dropped as "probably sold" once it had been out of a run's
   results for 2 hours, but the deep sweep visits each price band only now and
