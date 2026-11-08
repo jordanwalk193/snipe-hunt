@@ -93,7 +93,7 @@ def skipped_ids(con) -> list[str]:
 def live_picks(con, now: datetime) -> list[dict]:
     """Picks whose listing is still up and, for auctions, still running."""
     rows = con.execute(
-        "SELECT p.data, s.price, s.shipping, s.bids, s.last_seen, s.bid_at "
+        "SELECT p.data, p.created_at, s.price, s.shipping, s.bids, s.last_seen, s.bid_at "
         "FROM picks p JOIN seen s USING (item_id) "
         "WHERE s.last_seen >= ?", (int(now.timestamp()) - LIVE_WINDOW,))
     skipped = set(skipped_ids(con))
@@ -101,6 +101,7 @@ def live_picks(con, now: datetime) -> list[dict]:
     for r in rows:
         p = held_to_steals(current(json.loads(r["data"]), r["price"], r["shipping"]))
         if p is not None:   # when eBay last told us this price, and the bids behind it
+            p["scored_at"] = r["created_at"]
             at = max(r["last_seen"] or 0, r["bid_at"] or 0)
             p["price_at"] = datetime.fromtimestamp(at, config.TZ).isoformat(
                 timespec="minutes") if at else None
@@ -108,6 +109,9 @@ def live_picks(con, now: datetime) -> list[dict]:
                 p["bids"] = r["bids"]
         picks.append(p)
     picks = [p for p in picks if p and p["item_id"] not in skipped]
+    # the very card bought since the pick was scored (inventory.csv): no longer wanted
+    owned = inventory.read()[1]
+    picks = [p for p in picks if not snipecheck.bought(p, owned)]
     return [p for p in picks if not (
         p.get("is_auction") and p.get("end_time")
         and datetime.fromisoformat(p["end_time"]) <= now)]

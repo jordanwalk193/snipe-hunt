@@ -12,9 +12,10 @@ import json
 import re
 import sys
 import time
+from datetime import datetime
 from types import SimpleNamespace
 
-from . import closes, db, ebay_search, profile, rarity, sales, settings
+from . import closes, config, db, ebay_search, profile, rarity, sales, settings
 
 KEY = "snipe_values"
 MAX_APPRAISED = 20       # snipes in one appraisal call
@@ -204,7 +205,7 @@ def owned_copy(title: str, rows: list[dict]) -> dict | None:
     false alarm on a good snipe is worse than a miss: same year, the row's card
     number in the title, the same parallel words on both sides, the same print
     run, and graded or raw the same way (a graded copy of a raw card is an upgrade)."""
-    title = clean(title)
+    title = TEAM_COLOURS.sub(" ", clean(title))   # "Red Sox" is a team, not a Red parallel
     year = YEAR.search(title)
     if not year:
         return None
@@ -222,6 +223,29 @@ def owned_copy(title: str, rows: list[dict]) -> dict | None:
         if run == (rarity.print_run(serial) if serial else None) and graded == bool(r.get("graded")):
             return r
     return None
+
+
+# A colour that is part of a team name is no parallel.
+TEAM_COLOURS = re.compile(r"\b(red|white) sox\b|\bblue jays?\b|\bred ?birds\b|\bred wings\b|"
+                          r"\bgolden knights\b|\bsilver and black\b", re.I)
+
+
+def bought(pick: dict, rows: list[dict]) -> dict | None:
+    """The inventory row showing the collector bought this very card after the pick
+    was scored, or None. The very card is owned_copy's match (same year, number,
+    parallel, print run, graded or raw) with the same autograph status: a better
+    copy is Claude's call and stays. A pick scored after the buy was made knowing
+    it, so it stays too; `scored_at` is the pick's scoring time (epoch), unknown
+    means before."""
+    if pick.get("tier") == "drop":
+        return None
+    title = pick.get("title") or pick.get("card") or ""
+    row = owned_copy(title, rows)
+    if row is None or bool(sales.AUTO.search(title)) != (str(row.get("auto") or "").upper() == "Y"):
+        return None
+    scored = pick.get("scored_at")
+    since = datetime.fromtimestamp(scored, config.TZ).date().isoformat() if scored else ""
+    return row if (row.get("order_date") or "") >= since else None
 
 
 def _twins(snipes: list[dict]) -> dict[str, str]:

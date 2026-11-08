@@ -9,7 +9,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import closes, config, db, filters, jackpot, pricing, profile, sales, score, settings
+from . import (closes, config, db, filters, inventory, jackpot, pricing, profile, sales, score,
+               settings, snipecheck)
 
 TIER_ICON = {"fire": "🔥", "green": "🟢", "yellow": "🟡", "drop": "⏰"}
 TIER_ORDER = {"drop": 0, "fire": 1, "green": 2, "yellow": 3}
@@ -552,6 +553,9 @@ def deliver(con, new_picks: list[dict], dry_run: bool = False,
     stale = len(candidates)
     if current is not None:
         candidates = [p for p in (refresh(con, p, current, now, look) for p in candidates) if p]
+    # the very card bought meanwhile (a held pick carries no scoring time: it was before)
+    owned = inventory.read()[1]
+    candidates = [p for p in candidates if not snipecheck.bought(p, owned)]
     stale -= len(candidates)   # dropped because the price moved on or the listing is gone
     # a card at a sliver of its value skips every alert setting and quiet hours
     jackpots = {p["item_id"] for p in jackpot.alert(con, candidates, now, send=not dry_run)}

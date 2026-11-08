@@ -7,6 +7,14 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Added
+- **A pick leaves the board once its very card is bought.** A pick is scored
+  once, but the inventory moves on: `snipecheck.bought` finds the inventory row
+  that is the same card (`owned_copy`: same year, number, parallel, print run,
+  graded or raw, and now the same autograph status) bought after the pick was
+  scored, and `snapshot.live_picks` and `notify.deliver` drop such picks. A
+  better copy, another colour, or a pick Claude made knowing the card was owned
+  all stay. Team names are no longer read as colour parallels ("Red Sox" is not
+  a Red), in `owned_copy` and so in the lowball and missed-steal checks too.
 - **Vague titles are identified from eBay's item specifics.** A listing whose
   title names no year or set ("PRIZM Rookie Draft Picks Power Surge RC") is one
   nobody finds and Claude can't price: on one collector's record, 94% of such
