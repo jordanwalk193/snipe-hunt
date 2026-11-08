@@ -27,7 +27,7 @@ import re
 import sys
 from datetime import datetime, timedelta
 
-from . import bidnow, config, db, jackpot, pricing, profile, sales, settings
+from . import bidnow, config, db, jackpot, pricing, priority, profile, sales, settings
 
 # [steals] in the profile, with these where it says nothing
 DEFAULTS = {
@@ -101,6 +101,8 @@ def too_dear(item, cfg: dict) -> str | None:
         return "high-end"
     ship = item.shipping if item.shipping is not None else sales.UNKNOWN_SHIPPING
     ceiling = cfg["max_landed_auto"] if AUTO_WORDS.search(title) else cfg["max_landed"]
+    # a case hit or other priority card (casehits.md) has its own, usually higher, ceiling
+    ceiling = max(ceiling, priority.ceiling_for(item.title or "") or 0)
     return "over the ceiling" if (item.price or 0) + ship > ceiling else None
 
 

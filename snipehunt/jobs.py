@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from . import (aspects, bidnow, bids, brag, config, db, deep, ebay_search, filters,
                gitsync, gixen, hidden, inventory, inventory_sync, jackpot,
-               limited_drops, lowball, midtier, notify, offers, ops, profile, rarity,
+               limited_drops, lowball, midtier, notify, offers, ops, priority, profile, rarity,
                reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
                steals, usage, watch, wins)
 
@@ -40,6 +40,10 @@ def hourly(dry_run: bool = False) -> str:
         listings += deep.search(con, {i.item_id for i in listings}, verbose=True)
     except Exception as exc:
         print(f"deep: {exc}", file=sys.stderr)
+    try:   # case hits and priority cards, a few casehits.md rows a run (priority.py)
+        listings += priority.search(con, {i.item_id for i in listings}, verbose=True)
+    except Exception as exc:
+        print(f"priority: {exc}", file=sys.stderr)
     # reprints, customs and "you pick" listings never reach Claude; fake autos are flagged
     listings, junked = filters.prefilter(listings)
     if junked:
@@ -51,6 +55,13 @@ def hourly(dry_run: bool = False) -> str:
     if not dry_run:
         # the lowest print runs for sale, for the dashboard
         rarity.save(con, listings, inventory.read()[1])
+        try:   # every live copy of a priority card, and one alert per new one under its ceiling
+            priority.save(con, listings)
+            con.commit()
+            priority.alert(con, listings)
+        except Exception as exc:
+            con.rollback()
+            print(f"priority: {exc}", file=sys.stderr)
     # steals mode: over the delivered ceiling or high-end noise never reaches Claude
     # (still noted as seen above, so price drops are tracked); a no-op otherwise
     listings, dear = steals.keep(listings)

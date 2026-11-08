@@ -624,10 +624,11 @@ def build_prompt(items: list[Listing], lookups: int = 8,
         extra["habits"] = habits_line(who.collector)
         extra["logo_rule"] = (LOGO_ONLY_RULE if who.logo_only else LOGO_RULE).format(
             name=who.player, collector=who.collector)
-    from . import steals   # steals imports jackpot and pricing; kept local
+    from . import priority, steals   # steals imports jackpot and pricing; kept local
     lane_rules = (MIDTIER_RULE if any(i.lane == "midtier" for i in items) else "") + (
         FAKE_AUTO_RULE if any("fake_auto" in i.flags for i in items) else "") + (
-        steals.prompt_rule())   # nothing unless steals mode is on
+        steals.prompt_rule()) + (   # nothing unless steals mode is on
+        priority.prompt_rule())     # nothing without casehits.md
     return template.format(
         **extra,
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],

@@ -22,6 +22,7 @@ DEFAULTS: dict = {
     "alerts_enabled": True,          # master switch for phone alerts
     # a $20+ card at a sliver of its value (jackpot.py): its own loud alert, even at night
     "jackpot_alerts": True,
+    "priority_alerts": True,         # a case hit / priority card listed at or under its ceiling (casehits.md)
     "alert_fire": True,
     "alert_green": True,
     "alert_cheap_yellow": True,

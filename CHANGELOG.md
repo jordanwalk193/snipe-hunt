@@ -6,6 +6,20 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Added
+- **Case hits and priority cards.** An optional `data/casehits.md` lists the
+  cards to hunt first (case hits, SSPs, variations, autos, grails, event cards)
+  with an eBay search, a kind and a ceiling each. `snipehunt/priority.py`
+  searches "case hit" and "ssp" every hourly run plus three rows round-robin
+  (lane `priority`, cut at 85% of the daily cap), lifts steals mode's ceiling
+  to the row's own for a matching listing (its `skip_words` still apply),
+  tells Claude the ceilings, marks the picks `labels: ["PRIORITY"]` for the
+  dashboard's 🎯 pill, and sends one alert per new copy listed at or under
+  its ceiling (setting `priority_alerts`); a row's first search is silent.
+  `Hype` rows, cards titled "SSP" or "case hit" that sell like commons, never
+  alert and show as a warning. Snapshot key `priority` (the Home Assistant
+  integration's Case hits & priority cards panel, v2.27.0).
+
 ### Fixed
 - **A card is priced from sales of its own parallel.** The same card number and
   year let Refractor and Sapphire sales price a base card (and the other way

@@ -192,6 +192,33 @@ def _must_have() -> dict:
             "total": sum(len(y["cards"]) for y in years)}
 
 
+def _priority(now: datetime) -> dict:
+    """Two priority rows and a hype row, shaped like priority.view."""
+    def row(card, kind, rare, typical, search, ceiling, live, sold, owned=False):
+        return {"card": card, "kind": kind, "rare": rare, "typical": typical, "search": search,
+                "ceiling": ceiling, "hype": kind == "Hype", "key": card.lower().replace(" ", "-")[:48],
+                "owned": owned, "live": live, "under": sum(x["total"] <= (ceiling or 0) for x in live),
+                "sold": sold, "ebay": _search(search)}
+    copy = {"item_id": "410000800011", "title": "2023 Chrome Hidden Gems Rookie SSP Case Hit",
+            "price": 149.0, "shipping": 4.5, "total": 153.5, "is_auction": False, "bids": None,
+            "best_offer": True, "end_time": None, "seller": "cardcloset", "image": _art("#6a1b9a", "GEM"),
+            "url": "https://www.ebay.com/itm/410000800011", "row": "2023-chrome-hidden-gems"}
+    rows = [
+        row("2023 Chrome Hidden Gems", "Case hit", "One per case of 2023 Chrome; rookie year", "~$200",
+            "2023 chrome hidden gems", 180, [copy], {"n": 3, "median": 198.0, "low": 160.0, "high": 240.0,
+                                                     "last": {"at": int(now.timestamp()) - 86400 * 9, "total": 198.0}}),
+        row("2023 Select Color Wheel", "Case hit", "The Select case hit", "~$45",
+            "2023 select color wheel", 45, [], {"n": 2, "median": 44.0, "low": 42.0, "high": 46.0,
+                                                "last": {"at": int(now.timestamp()) - 86400 * 20, "total": 46.0}}, owned=True),
+        row("Holiday \"SSP\" variations (no number)", "Hype", "Sellers call these SSP; they sell for $2-3",
+            "~$3", "holiday ssp", None, [], {"n": 12, "median": 2.75, "low": 1.25, "high": 6.0,
+                                            "last": {"at": int(now.timestamp()) - 3600 * 30, "total": 2.5}}),
+    ]
+    real = [r for r in rows if not r["hype"]]
+    return {"rows": rows, "n": len(real), "live_n": sum(len(r["live"]) for r in real),
+            "under_n": sum(r["under"] for r in real), "owned_n": sum(r["owned"] for r in real)}
+
+
 def _rainbows() -> list[dict]:
     parallels = [{"name": name, "run": run, "where": "",
                   "owned": {"id": str(30 + n), "status": status} if status else None,
@@ -570,6 +597,7 @@ def build(now: datetime | None = None) -> dict:
         "wantlist": snapshot.wantlist(),
         "must_have": _must_have(),
         "rainbows": _rainbows(),
+        "priority": _priority(now),
         "spending": spend,
         "settings": {key: cfg[key] for key in settings.visible()},
         "last_action": None,

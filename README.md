@@ -94,6 +94,7 @@ Edit these, then `docker compose restart`:
 | `inventory.csv` | Every card you own or have coming |
 | `wantlist.md` | What you're chasing and your price ceilings |
 | `preferences.md` | How you buy, written like a brief to a friend bidding for you |
+| `casehits.md` | Optional. Case hits, short prints and grails to hunt first: each row gets its own eBay searches (a few rows an hour), its own price ceiling over steals mode's, the 🎯 label on its picks and one alert when a new copy is listed under the ceiling; `Hype` rows (titled SSP or case hit, sell like commons) never alert. Start from `examples/casehits.example.md` |
 | `musthave.md` | Optional. The defining cards of each year, with an eBay search and a rule for which inventory rows count as owning each. The dashboard shows which you have, how many are for sale and the cheapest, and Make an offer puts these first. Start from `examples/musthave.example.md` |
 | `rainbow.md` | Optional. Every parallel of a card you rainbow-chase: which you have, which are for sale now and live picks. Start from `examples/rainbow.example.md` |
 

@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import (config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
-               rainbow, rarity, report, sales, scheduler, score, settings, shortlist,
+               rainbow, priority, rarity, report, sales, scheduler, score, settings, shortlist,
                snipecheck, spending, tune, watch)
 from . import bidnow, brag, calibrate, closes, deep, ledger, steals, usage
 from . import gaps, whales
@@ -49,7 +49,7 @@ def _slim(pick: dict) -> dict:
         "image": pick.get("image"), "snipe": pick.get("snipe"),
         # only when there is something to say, so most picks stay as they were
         **{k: pick[k] for k in ("marked", "bin_price", "closes", "jackpot_bin", "trend", "win_odds",
-                                "max_ledger") if pick.get(k)},
+                                "max_ledger", "labels") if pick.get(k)},
         "bid_now": pick.get("bid_now"), "value": pick.get("value"),
         # when eBay last gave this price (a search, or bids.py near the end), and
         # an auction's bid count then
@@ -447,6 +447,9 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
     given = {f["item_id"]: f["reason"] for f in db.feedback(con)[::-1] if f["source"] == "you"}
     for p in picks:   # a "good call" stays on the board; the dashboard marks it
         p["feedback"] = given.get(p["item_id"])
+        row = priority.entry_for(p.get("title") or p.get("card") or "")   # casehits.md
+        if row and not row["hype"]:
+            p["labels"] = ["PRIORITY"]   # the dashboard's 🎯 pill
     picks = ranked(picks)
     # a card at a sliver of its value: the dashboard's loudest banner
     jackpots = jackpot.mark(picks, now)
@@ -479,6 +482,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "pipeline": pipeline(rows, picks),
         "record": record(con, now),
         "market": sales.market(con, now),
+        # case hits and the other cards in casehits.md: live copies, owned, what they sell for
+        "priority": priority.view(con, rows, now),
         "rarest": rarity.load(con, now.isoformat(timespec="minutes")),
         "rarest_census": rarity.census(con),
         "moves": watch.load(con, now.isoformat(timespec="minutes")),
