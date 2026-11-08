@@ -7,6 +7,20 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Added
+- **Vague titles are identified from eBay's item specifics.** A listing whose
+  title names no year or set ("PRIZM Rookie Draft Picks Power Surge RC") is one
+  nobody finds and Claude can't price: on one collector's record, 94% of such
+  auctions closed with one bid or none. `snipehunt/specifics.py` makes one
+  read-only item call per vague, affordable listing (table `specifics`, at most
+  12 a run, eBay's `item` lane), and appends the card's identity to the title
+  in square brackets, so the scoring prompt, the sales ledger, the inventory
+  match and the dashboard all see the card. Its picks carry `labels:
+  ["VAGUE"]` (the dashboard's 🕵️ pill, v2.27.1). Picks now also keep the
+  search `queries` that found them.
+- **Lowball snipes follow the ending hour.** Once a three-hour ending block has
+  12 endings on record, `lowball.level_for` snipes at that block's own level
+  (overnight and daytime endings close far cheaper than evening ones); each
+  target carries its `level`.
 - **Case hits and priority cards.** An optional `data/casehits.md` lists the
   cards to hunt first (case hits, SSPs, variations, autos, grails, event cards)
   with an eBay search, a kind and a ceiling each. `snipehunt/priority.py`

@@ -17,7 +17,7 @@ from . import (aspects, bidnow, bids, brag, config, db, deep, ebay_search, filte
                gitsync, gixen, hidden, inventory, inventory_sync, jackpot,
                limited_drops, lowball, midtier, notify, offers, ops, priority, profile, rarity,
                reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
-               steals, usage, watch, wins)
+               specifics, steals, usage, watch, wins)
 
 
 def hourly(dry_run: bool = False) -> str:
@@ -49,6 +49,12 @@ def hourly(dry_run: bool = False) -> str:
     if junked:
         print(f"filters: dropped {sum(junked.values())} ("
               + ", ".join(f"{n} {w}" for w, n in junked.items()) + ")", file=sys.stderr)
+    try:   # vague titles: the card's identity from eBay's item specifics (specifics.py)
+        n = specifics.enrich(con, listings)
+        if n:
+            print(f"specifics: {n} vague titles identified", file=sys.stderr)
+    except Exception as exc:
+        print(f"specifics: {exc}", file=sys.stderr)
     moves = _remember(con, listings)
     if not dry_run and not first_run:
         watch.save(con, moves)

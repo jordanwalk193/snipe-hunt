@@ -139,6 +139,21 @@ def level(results: list[dict]) -> float:
     return round(min(max(at, LEVEL_RANGE[0]), LEVEL_RANGE[1]), 2)
 
 
+MIN_BLOCK = 12          # endings in a three-hour block before its own level counts
+
+
+def level_for(results: list[dict], hour: int, overall: float | None = None) -> float:
+    """The snipe level for an auction ending at this hour (the collector's time zone):
+    its three-hour block's own level once the block has a record (a 3 AM ending
+    closes far cheaper than a 9 PM one), else the overall level."""
+    overall = level(results) if overall is None else overall
+    block = sorted(r["share"] for r in results if r["hour"] // 3 == hour // 3)
+    if len(block) < MIN_BLOCK:
+        return overall
+    at = block[min(len(block) - 1, int(len(block) * WIN_SHARE))]
+    return round(min(max(at, LEVEL_RANGE[0]), LEVEL_RANGE[1]), 2)
+
+
 def hours(results: list[dict]) -> dict:
     """Per three-hour block of local ending time: how many, and the median share."""
     blocks: dict[str, list[float]] = {}
@@ -189,15 +204,16 @@ def find(con, listings: list[Listing], inventory: list[dict], sniped: set[str] =
         value = float(rate["value"]) if rate and rate.get("value") else None
         if not value or value < MIN_VALUE or item.total > value * UNDER:
             continue
-        snipe = snipe_for(value, item.shipping, share)
+        end = datetime.fromisoformat(item.end_time)
+        mine = level_for(results, end.astimezone(config.TZ).hour, share)
+        snipe = snipe_for(value, item.shipping, mine)
         if snipe is None or snipe < item.price:
             continue
-        end = datetime.fromisoformat(item.end_time)
         targets.append({
             "item_id": item.item_id, "title": item.title, "url": item.url, "image": item.image,
             "price": item.price, "shipping": item.shipping, "bids": item.bid_count or 0,
             "end_time": item.end_time, "value": round(value, 2), "basis": rate.get("basis"),
-            "snipe": snipe, "share": round(item.total / value, 2),
+            "snipe": snipe, "share": round(item.total / value, 2), "level": mine,
             "dead": dead_hour(end, blocks), "overlooked": overlooked(item),
             "sniped": item.item_id in sniped, "seller": item.seller})
         tagged = closes.annotate(dict(targets[-1], is_auction=True), closing)

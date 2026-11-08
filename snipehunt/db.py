@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS seen (
     alerted_at     INTEGER
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS specifics (
+    item_id    TEXT PRIMARY KEY,
+    identity   TEXT,
+    checked_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sales (
     item_id   TEXT PRIMARY KEY,
     title     TEXT,

@@ -450,6 +450,8 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         row = priority.entry_for(p.get("title") or p.get("card") or "")   # casehits.md
         if row and not row["hype"]:
             p["labels"] = ["PRIORITY"]   # the dashboard's 🎯 pill
+        if "specifics" in (p.get("queries") or ()):   # a vague title the bot identified
+            p["labels"] = p.get("labels", []) + ["VAGUE"]
     picks = ranked(picks)
     # a card at a sliver of its value: the dashboard's loudest banner
     jackpots = jackpot.mark(picks, now)

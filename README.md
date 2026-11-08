@@ -316,6 +316,10 @@ These apply to every search, not just the mid-tier lane.
 - **Win messages.** The daily email sync announces each new win once, with "Binder: 2021 → pp4–5". When the title's year is wrong and the card number says otherwise it uses the real year and says so; when the year came from the title alone it adds "check the back of the card".
 - **Combined shipping.** When two or more open wins or unpaid orders are with one seller, you get "<seller>: N wins, wait for one combined invoice before paying.", at most once a day per seller, and no more once they are paid.
 
+## Vague titles
+
+A title like "Jordan Walker PRIZM Rookie Draft Picks Power Surge RC" names no year and no set, so searches miss it and Claude can't price it; such auctions mostly close with one bid or none. The bot asks eBay for the item specifics of every vague, affordable listing (one read-only item call each, kept in the `specifics` table, at most 12 a run) and appends the card's identity to the title in square brackets, so everything downstream sees the card. Those picks carry the 🕵️ VAGUE label on the dashboard. Lowball snipes also follow the ending hour once a three-hour block has 12 endings on record: an overnight ending gets a lower snipe than a 9 PM one.
+
 ## The schedule
 
 One process runs everything. Times are in `SNIPEHUNT_TZ`.

@@ -529,6 +529,9 @@ def _compact(item: Listing, marked: list[dict] = ()) -> str:
         "match": item.match,
         **({"found": "by card number; the title leaves the player's name out"}
            if any(q.startswith("no-name") for q in item.queries) else {}),
+        **({"vague": "the title names no set or year; the card in [brackets] is from eBay's "
+                     "item specifics. Few buyers find such listings, so they close cheap"}
+           if "specifics" in item.queries else {}),
         **_marked(item, marked),
         # eBay's condition says graded or raw even when the title doesn't
         **({"condition": "graded" if item.graded else "raw"} if item.graded is not None else {}),
@@ -870,6 +873,7 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
            if value != value_typical else {}),
         "comps": str(raw.get("comps", ""))[:300], "why": str(raw.get("why", ""))[:140],
         "title": item.title, "price": item.price, "shipping": item.shipping,
+        "queries": list(item.queries),
         "total": item.total, "is_auction": item.is_auction,
         "best_offer": "BEST_OFFER" in item.buying_options,
         "end_time": item.end_time, "seller": item.seller,
