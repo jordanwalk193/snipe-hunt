@@ -613,11 +613,11 @@ def ceilings() -> set[float]:
     return out
 
 
-def build_prompt(items: list[Listing], lookups: int = 8,
-                 sold: list[dict] | None = None, track: str = "",
-                 learned: tuple[str, str] = ("", ""),
-                 marked: list[dict] = ()) -> str:
-    """`marked` are cards marked overvalued (overvalued()); similar listings say so."""
+def _filled(items: list[Listing], lookups: int = 8,
+            sold: list[dict] | None = None, track: str = "",
+            learned: tuple[str, str] = ("", ""),
+            marked: list[dict] = ()) -> tuple[str, dict]:
+    """The prompt's template (player or team) and what goes in each of its slots."""
     who = profile.get()
     team = who.mode == "team"
     template = team_prompt() if team else PROMPT
@@ -634,7 +634,7 @@ def build_prompt(items: list[Listing], lookups: int = 8,
         FAKE_AUTO_RULE if any("fake_auto" in i.flags for i in items) else "") + (
         steals.prompt_rule()) + (   # nothing unless steals mode is on
         priority.prompt_rule())     # nothing without casehits.md
-    return template.format(
+    return template, dict(
         **extra,
         learned=learned[1], edge_min=settings.load()["edge_min_pct"],
         bin_cap=settings.load()["estimate_bin_cap"],
@@ -648,6 +648,69 @@ def build_prompt(items: list[Listing], lookups: int = 8,
         wantlist=config.WANTLIST.read_text(),
         inventory=inventory_for_scoring(items if team else None),
         listings="\n".join(_compact(i, marked) for i in items))
+
+
+def build_prompt(items: list[Listing], lookups: int = 8,
+                 sold: list[dict] | None = None, track: str = "",
+                 learned: tuple[str, str] = ("", ""),
+                 marked: list[dict] = ()) -> str:
+    """The whole prompt as one text, for reading and for tests. score() sends the
+    same words in two parts (prompt_halves). `marked` are cards marked overvalued
+    (overvalued()); similar listings say so."""
+    template, slots = _filled(items, lookups, sold, track, learned, marked)
+    return template.format(**slots)
+
+
+# What changes from one batch to the next. Everything else (the rules, preferences,
+# want list and inventory) is the same on every call, so it rides in the system
+# prompt and the API serves it from its cache, at a tenth of the price, for a while
+# after each call.
+BATCH_SLOTS = ("lookup_rule", "sold_rule", "learned", "sold", "listings")
+BATCH_HEAD = "=== this batch ===\n"
+REPLY_MARK = "Reply with ONLY one JSON object"
+FILES_MARK = "=== preferences.md ==="
+
+
+def prompt_halves(items: list[Listing], lookups: int = 8,
+                  sold: list[dict] | None = None, track: str = "",
+                  learned: tuple[str, str] = ("", ""),
+                  marked: list[dict] = ()) -> tuple[str, str]:
+    """build_prompt's words in two parts: (the stable rules and files, this batch).
+
+    The batch part is the lookup budget, the sold prices and what was learned,
+    the listings, and the reply format last. Cut from the one template, so the
+    two can never say different things. In team mode the inventory is cut to
+    the batch's cards, so that half changes with the batch and is cached less."""
+    template, slots = _filled(items, lookups, sold, track, learned, marked)
+    mark = {k: f"\x00{k}\x00" for k in BATCH_SLOTS}
+    text = template.format(**{**slots, **mark})
+    text = text.replace(mark["lookup_rule"] + "\n", "").replace(mark["sold_rule"], "")
+    head, rest = text.split(REPLY_MARK, 1)
+    reply, files = rest.split(FILES_MARK, 1)
+    files, tail = files.split(mark["learned"], 1)
+    for k in ("sold", "listings"):
+        tail = tail.replace(mark[k], slots[k])
+    static = head + FILES_MARK + files.rstrip("\n") + "\n"
+    batch = (BATCH_HEAD + slots["lookup_rule"] + "\n" + slots["sold_rule"] + slots["learned"]
+             + tail + "\n" + REPLY_MARK + reply.rstrip("\n") + "\n")
+    return static, batch
+
+
+def system_for_scoring(static: str | None = None) -> str:
+    """What `claude -p` gets as --system-prompt for a scoring call: the usual system
+    line, then the stable half of the prompt (prompt_halves; for no listings when
+    `static` isn't given, which is the same text in player mode)."""
+    if static is None:
+        static = prompt_halves([], 0)[0]
+    return SYSTEM.format(today=datetime.now(config.TZ).strftime("%A, %B %-d, %Y")) + "\n\n" + static
+
+
+def web_tools() -> str:
+    """The read-only web tools a scoring call may use. WebFetch pulls whole pages into
+    the call (tens of thousands of tokens each, sent again on every turn), so it is
+    off unless the `lookup_fetch` setting turns it on; WebSearch alone brings sold
+    prices back as snippets."""
+    return WEB_TOOLS if settings.load().get("lookup_fetch") else "WebSearch"
 
 
 def extract_json(text: str) -> dict:
@@ -717,21 +780,22 @@ def repair_json(text: str) -> str:
 
 
 _STEP = ""   # what the call being made is for (ask_json's caller names it; ask_claude logs it)
+_SYSTEM = ""   # a system prompt for the call being made (scoring puts its stable half there)
 
 
 def ask_json(prompt: str, tools: str = WEB_TOOLS, timeout: int | None = None,
-             step: str = "") -> dict:
+             step: str = "", system: str = "") -> dict:
     """ask_claude plus extract_json, asking once more when the reply isn't JSON
     that can be mended. An outage (ClaudeError) is not retried: it won't clear
     in a minute, and the caller decides what to keep. `step` names the call in
-    the log and the cost record."""
-    global _STEP
+    the log and the cost record; `system` replaces the usual system prompt."""
+    global _STEP, _SYSTEM
     kw = {"timeout": timeout} if timeout else {}
-    _STEP = step
+    _STEP, _SYSTEM = step, system
     try:
         return _ask_json(prompt, tools, kw)
     finally:
-        _STEP = ""
+        _STEP = _SYSTEM = ""
 
 
 def _ask_json(prompt: str, tools: str, kw: dict) -> dict:
@@ -768,7 +832,7 @@ def _failure(proc: subprocess.CompletedProcess) -> str:
 
 
 def ask_claude(prompt: str, tools: str = WEB_TOOLS,
-               timeout: int = TIMEOUT, step: str = "") -> str:
+               timeout: int = TIMEOUT, step: str = "", system: str = "") -> str:
     """Run `claude -p` in the state directory, away from any project files.
 
     Listing titles and email bodies are text written by strangers, so Claude
@@ -777,13 +841,15 @@ def ask_claude(prompt: str, tools: str = WEB_TOOLS,
 
     `step` names the call in the log and the cost record ("score 1/2: 80
     listings"), so a dear run can be read back to the calls that made it so.
+    `system` replaces the usual system prompt (scoring sends its stable half there).
     """
     started = time.monotonic()
     cmd = [config.get("CLAUDE_BIN"), "-p", "--output-format", "json",
            "--tools", tools, "--strict-mcp-config",
            "--no-session-persistence",   # or every call leaves a transcript on disk
            "--system-prompt",
-           SYSTEM.format(today=datetime.now(config.TZ).strftime("%A, %B %-d, %Y"))]
+           _SYSTEM or system
+           or SYSTEM.format(today=datetime.now(config.TZ).strftime("%A, %B %-d, %Y"))]
     if tools:
         cmd += ["--allowedTools", tools]
     if config.get("CLAUDE_MODEL"):   # a smaller model costs less; see the README
@@ -1027,11 +1093,13 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
                 con.commit()
             sold = sales.relevant(con, batch) if con is not None else []
             track = sales.track_record(con, learned_factors) if con is not None else ""
+            static, batch_text = prompt_halves(
+                batch, batch_lookups, sold, track,
+                learned(con) if con is not None else ("", ""),
+                overvalued(con) if con is not None else ())
             reply = ask_json(
-                build_prompt(batch, batch_lookups, sold, track,
-                             learned(con) if con is not None else ("", ""),
-                             overvalued(con) if con is not None else ()),
-                tools=WEB_TOOLS if batch_lookups else "",
+                batch_text, tools=web_tools() if batch_lookups else "",
+                system=system_for_scoring(static),
                 step=f"score {n}/{len(batches)}: {len(batch)} listings, {batch_lookups} lookups")
         except Exception as exc:
             if not scored:

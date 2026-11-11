@@ -141,7 +141,7 @@ def appraise(con, snipes: list[dict], now: float | None = None,
     # A Claude call takes a minute: don't hold the write lock through it (the Gixen
     # cache read above writes), or the dashboard and the cost record wait on it.
     con.commit()
-    reply = score.ask_json(prompt, tools=score.WEB_TOOLS if lookups else "",
+    reply = score.ask_json(prompt, tools=score.web_tools() if lookups else "",
                            step=f"appraise {len(todo)} snipes, {lookups} lookups")
     asked, done = {s["item_id"] for s in todo}, 0
     for raw in reply.get("values") or []:

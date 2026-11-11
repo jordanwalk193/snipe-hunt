@@ -48,7 +48,10 @@ def test_price_lookups_off_means_no_web_tools_and_says_so(monkeypatch):
                    shipping=1.0, buying_options=["AUCTION"], bid_count=0,
                    end_time="2026-10-20T00:00:00Z", seller="s", url="u", image=None)
     score.score([item])
-    assert calls[-1][1] == score.WEB_TOOLS and "at most 8 lookups" in calls[-1][0]
+    assert calls[-1][1] == "WebSearch" and "at most 8 lookups" in calls[-1][0]
+    settings.update(db.connect(), {"lookup_fetch": True})   # whole pages only when asked for
+    score.score([item])
+    assert calls[-1][1] == score.WEB_TOOLS
     settings.update(db.connect(), {"price_lookups": 0})
     score.score([item])
     assert calls[-1][1] == "" and "no web access" in calls[-1][0]
@@ -303,3 +306,64 @@ def test_ask_json_names_its_call_and_forgets_the_name_after(monkeypatch):
                         seen.append(score._STEP) or "{}")
     score.ask_json("hi", tools="", step="stories for 3 picks")
     assert seen == ["stories for 3 picks"] and score._STEP == ""
+
+
+# --- the prompt in two halves: the stable one cached, the batch one sent each time
+
+def _two():
+    from snipehunt.ebay_search import Listing
+    return [Listing("1", "2023 Topps Chrome Example Player RC #209", 4.0, "USD", 1.0, ["AUCTION"], 2,
+                    "2026-11-20T00:00:00-05:00", "s", "u", None),
+            Listing("2", "Example Player 2020 Bowman Draft BD-57 PSA 9", 12.5, "USD", None,
+                    ["FIXED_PRICE"], None, None, "t", "u", None)]
+
+
+def _lines(text):
+    """Every line but the blank ones, in any order."""
+    return sorted(line for line in text.split("\n") if line.strip())
+
+
+def test_the_two_halves_say_exactly_what_the_one_prompt_says():
+    sold = [{"title": "2023 Topps Chrome Example Player RC #209", "price": 9.0, "shipping": 1.0,
+             "sold_at": 1_700_000_000, "bids": 4, "kind": "auction", "hint": False}]
+    for lookups in (8, 0):
+        whole = score.build_prompt(_two(), lookups, sold, "- track line\n", ("- learned rule\n", "=== learned ===\nx\n\n"))
+        static, batch = score.prompt_halves(_two(), lookups, sold, "- track line\n",
+                                            ("- learned rule\n", "=== learned ===\nx\n\n"))
+        assert _lines(static + batch) == _lines(whole + score.BATCH_HEAD)
+        # the stable half holds no listing, lookup budget or sold price; the batch half does
+        assert "Example Player 2020 Bowman" not in static and "lookups" not in static
+        assert "sold prices seen" not in static and "track line" not in static
+        assert '"item_id": "2"' in batch and "track line" in batch and "learned rule" in batch
+        assert "HARD RULES" in static and "=== inventory.csv ===" in static
+        assert batch.rstrip().endswith('"not_player": ["item_id", …]}')
+    # and it is the same for any batch, so the API can serve it from its cache
+    assert score.prompt_halves(_two()[:1], 3)[0] == score.prompt_halves(_two()[1:], 8)[0]
+    assert score.system_for_scoring().endswith(score.prompt_halves([], 0)[0])
+
+
+def test_team_mode_splits_its_own_prompt_the_same_way(monkeypatch):
+    from snipehunt import profile
+    monkeypatch.setattr(profile, "_cache", profile.parse(
+        (config.EXAMPLES / "profile.team.example.toml").read_text()))
+    whole = score.build_prompt(_two(), 4)
+    static, batch = score.prompt_halves(_two(), 4)
+    assert _lines(static + batch) == _lines(whole + score.BATCH_HEAD)
+    assert '"want_ceiling"' in batch and "HARD RULES" in static
+
+
+def test_scoring_sends_the_stable_half_as_the_system_prompt(monkeypatch):
+    seen = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append((cmd, kwargs["input"]))
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"result": '{"picks": []}'}), "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    score.score(_two())
+    (cmd, sent), = seen
+    system = cmd[cmd.index("--system-prompt") + 1]
+    assert "Today is" in system and "=== preferences.md ===" in system and "HARD RULES" in system
+    assert sent.startswith(score.BATCH_HEAD) and '"item_id": "1"' in sent and "HARD RULES" not in sent
+    assert cmd[cmd.index("--tools") + 1] == "WebSearch"
+    score.ask_claude("hello")                      # other calls keep the usual system prompt
+    assert "=== preferences.md ===" not in seen[-1][0][seen[-1][0].index("--system-prompt") + 1]

@@ -159,3 +159,11 @@ def test_the_login_check_only_asks_the_cli_for_its_status(monkeypatch):
     score.login_status()
     assert seen == [[config.get("CLAUDE_BIN"), "auth", "status"]]   # no prompt, no tools, no login
     assert "claude -p" not in source("authcheck.py") and "subprocess.run" not in source("authcheck.py")
+
+
+def test_scoring_lookups_never_get_more_than_web_reading(monkeypatch):
+    from snipehunt import db
+    for fetch in (False, True):
+        settings.update(db.connect(), {"lookup_fetch": fetch})
+        assert set(score.web_tools().split(",")) <= set(score.WEB_TOOLS.split(","))
+    assert "web_tools() if" in source("score.py") and "web_tools() if" in source("snipecheck.py")

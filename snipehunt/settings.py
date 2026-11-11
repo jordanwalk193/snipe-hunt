@@ -29,6 +29,9 @@ DEFAULTS: dict = {
     "yellow_max_total": 2.00,        # a yellow pick alerts at this total or less
     "alert_min_stars": 1,            # rated picks alert only at this many deal stars or more
     "price_lookups": 8,              # sold-price web lookups per scoring call; 0 = none
+    # true lets a lookup fetch whole web pages (WebFetch): closer reading, but each page is
+    # tens of thousands of tokens sent again on every turn. false = search snippets only.
+    "lookup_fetch": False,
     # a Buy It Now over this total whose value is only a guess is shown, never alerted
     "estimate_bin_cap": 25.0,
     # a seller under this many feedback can't make a pick over SELLER_TRUST_OVER better than yellow

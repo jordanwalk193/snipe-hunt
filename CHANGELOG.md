@@ -27,6 +27,15 @@ appear in any release; renaming or removing one needs a new API version.
   same way) can never be one. `score.priced_out` marks such listings scored
   with no pick and no Claude call; autographs, graded cards and print runs of
   99 or fewer are always sent. Player mode sends every listing, as before.
+- **The scoring prompt is sent in two halves, so most of it is cached.** The
+  rules, preferences, want list and inventory are the same on every call: they
+  now go in the system prompt (`score.prompt_halves`, `system_for_scoring`),
+  which the API serves from its cache for a while after each call, at a tenth
+  of the price. The batch (lookup budget, sold prices, what was learned, the
+  listings and the reply format) is the message. The words are the same as
+  before (`build_prompt` still returns them in one piece); a test checks the
+  two halves hold exactly its lines. `ask_json` and `ask_claude` take
+  `system=`. In team mode the inventory is cut to each batch, so less is cached.
 - **A pick leaves the board once its very card is bought.** A pick is scored
   once, but the inventory moves on: `snipecheck.bought` finds the inventory row
   that is the same card (`owned_copy`: same year, number, parallel, print run,
@@ -61,6 +70,13 @@ appear in any release; renaming or removing one needs a new API version.
   `Hype` rows, cards titled "SSP" or "case hit" that sell like commons, never
   alert and show as a warning. Snapshot key `priority` (the Home Assistant
   integration's Case hits & priority cards panel, v2.27.0).
+
+### Changed
+- **Sold-price lookups search, they don't fetch pages.** A fetched page is
+  tens of thousands of tokens, sent again on every later turn of the call,
+  and was most of what a scoring call cost on the bot this came from. Scoring
+  and appraisals now get WebSearch only; the new setting `lookup_fetch` (off)
+  gives them WebFetch back. Golden `player_settings.json` gains the key.
 
 ### Fixed
 - **A card is priced from sales of its own parallel.** The same card number and
