@@ -19,6 +19,8 @@ from . import closes, config, db, ebay_search, profile, rarity, sales, settings
 
 KEY = "snipe_values"
 MAX_APPRAISED = 20       # snipes in one appraisal call
+WEB_MIN = 8.00           # a snipe's max (or bid) under this is appraised without a web search
+WEB_MAX = 4              # web lookups per appraisal at most
 KEEP_DAYS = 30
 # How far under (or over) the going rate you would pay, shipping included.
 OVER, FAIR, LONG_SHOT = -5, 15, 45
@@ -128,7 +130,11 @@ def appraise(con, snipes: list[dict], now: float | None = None,
             and going_rate(con, s, rows, cache) is None][:MAX_APPRAISED]
     if not todo:
         return 0
-    who, lookups = profile.get(), settings.load(con)["price_lookups"]   # this connection, not a second
+    who = profile.get()
+    # Web lookups are most of an appraisal's cost (each search result rides along for
+    # every later turn): spend them only where a wrong value costs real money.
+    dear = [s for s in todo if float(s.get("max_bid") or s.get("current_bid") or 0) >= WEB_MIN]
+    lookups = min(settings.load(con)["price_lookups"], len(dear), WEB_MAX)   # this connection
     sold = sales.relevant(con, [SimpleNamespace(item_id=s["item_id"], title=s["title"])
                                 for s in todo])
     prompt = PROMPT.format(

@@ -101,6 +101,10 @@ appear in any release; renaming or removing one needs a new API version.
   and was most of what a scoring call cost on the bot this came from. Scoring
   and appraisals now get WebSearch only; the new setting `lookup_fetch` (off)
   gives them WebFetch back. Golden `player_settings.json` gains the key.
+- **Appraisals search the web only where it matters.** `snipecheck.appraise`
+  (Gixen snipes, offers and lowball targets nothing else can price) now gives
+  Claude web lookups only for listings whose max, or current bid, is $8 or
+  more, and four at most a call; the rest are priced without a search.
 
 ### Fixed
 - **A card is priced from sales of its own parallel.** The same card number and

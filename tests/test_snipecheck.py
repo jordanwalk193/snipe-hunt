@@ -52,3 +52,23 @@ def test_the_going_rate_comes_from_the_pick_then_a_sale_then_one_appraisal(monke
     assert (checks[2]["verdict"], checks[2]["value"], checks[2]["basis"]) == (
         "long_shot", 30.0, "estimate")
     assert summary["unknown"] == 0 and summary["committed"] == 36.36
+
+
+def test_appraisal_searches_the_web_only_for_snipes_worth_it(monkeypatch):
+    from snipehunt import db, score, snipecheck
+    con = db.connect()
+    asked = []
+    monkeypatch.setattr(score, "ask_json", lambda prompt, tools="", step="", **k:
+                        asked.append((tools, step, prompt)) or {"values": []})
+    cheap = [{"item_id": str(i), "title": f"2023 Topps Example Player #{i}", "max_bid": 3.03}
+             for i in range(5)]
+    snipecheck.appraise(con, cheap)
+    assert asked[-1][0] == "" and "0 lookups" in asked[-1][1]       # all under $8: no web search
+    assert "no web access" in asked[-1][2]
+    dear = [{"item_id": str(10 + i), "title": f"2023 Topps Chrome Example Player Auto #{i}",
+             "max_bid": 25.25} for i in range(6)]
+    snipecheck.appraise(con, cheap + dear)
+    assert asked[-1][0] and "4 lookups" in asked[-1][1]             # six worth it, four at most
+    snipecheck.appraise(con, [{"item_id": "30", "title": "2023 Topps Example Player #30",
+                               "current_bid": 9.0}])                 # a bid counts when there's no max
+    assert "1 lookups" in asked[-1][1]
