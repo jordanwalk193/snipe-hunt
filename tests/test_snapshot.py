@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from snipehunt import api, config, db, gixen, notify, settings, snapshot
+from snipehunt import api, config, db, gixen, notify, score, settings, snapshot
 
 NOW = datetime(2026, 10, 12, 18, 0, tzinfo=config.TZ)
 
@@ -322,3 +322,17 @@ def test_each_pick_says_what_share_of_value_it_costs_now_and_where_the_fold_is()
     snap = snapshot.snapshot(con, datetime.now(config.TZ))
     got = next(x for x in snap["picks"] if x["item_id"] == "77")
     assert got["share_now"] == 0.4 and snap["fold_share"] == 0.40
+
+
+def test_a_long_shot_is_labelled_on_the_dashboard():
+    from snipehunt import db as _db
+    con = _db.connect()
+    _db.kv_set(con, "settings", json.dumps({"long_shot_value": 50}))
+    p = {"item_id": "78", "card": "2023 Topps Chrome Example Auto", "tier": "fire", "price": 8.0,
+         "shipping": 2.0, "total": 10.0, "value": 90.0, "max": 20.20, "max_basis": "sales",
+         "is_auction": True, "end_time": "2099-01-01T00:00:00-05:00", "url": "https://www.ebay.com/itm/78"}
+    _db.save_pick(con, score.apply_caps(p, settings.load(con)))
+    _db.touch(con, "78", p["card"], True, None, 2.0, 8.0, "s")
+    con.commit()
+    got = next(x for x in snapshot.snapshot(con, datetime.now(config.TZ))["picks"] if x["item_id"] == "78")
+    assert got["long_shot"] is True and got["tier"] == "yellow"

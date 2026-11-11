@@ -57,7 +57,8 @@ def _slim(pick: dict) -> dict:
         "jackpot": pick.get("jackpot"),   # "sales" or "guess" when it is one (jackpot.py)
         # "mega" or "jackpot"; a ledger jackpot Claude never scored, a card already owned,
         # and what the value rests on (a ledger jackpot: how many recorded sales)
-        **{k: pick[k] for k in ("jackpot_level", "ledger_only", "owned", "comps") if pick.get(k)},
+        **{k: pick[k] for k in ("jackpot_level", "ledger_only", "owned", "comps", "long_shot")
+           if pick.get(k)},
         # what paying now costs as a share of value (an auction at its current bid); the
         # dashboard folds the ones at fold_share or more away from the steals
         "share_now": round(jackpot.pay(pick) / float(pick["value"]), 2) if pick.get("value") else None,

@@ -34,12 +34,14 @@ DEFAULTS = {
     "max_share": 0.50,          # "50% of value at most", shipping counted
     "bid_now_alerts": True,
     "drop_alerts": True,
+    "long_shot_value": 50,      # an auction of a card worth more is a long shot at the max
     "max_landed": 25.0,         # a card costing more than this delivered is skipped
     "max_landed_auto": 75.0,    # the same for an autograph
     # high-end noise a frugal collector never wins cheap
     "skip_words": ["1/1", "1 of 1", "one of one", "superfractor", "printing plate"],
 }
-SETTING_KEYS = ("max_share", "bid_now_alerts", "drop_alerts")   # Home Assistant may override
+SETTING_KEYS = ("max_share", "bid_now_alerts", "drop_alerts",
+                "long_shot_value")   # Home Assistant may override
 AUTO_WORDS = re.compile(r"\b(auto|autograph|autographed|signed|signature)\b", re.I)
 
 RADAR_SIZE = 10

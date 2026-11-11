@@ -26,6 +26,13 @@ appear in any release; renaming or removing one needs a new API version.
   over the value), and the snapshot has `fold_share`, a new setting (0.40,
   0.2 to 1.0) for where the dashboard folds picks away as close to market.
   Display only: nothing about scoring or alerts changes.
+- **Long shots.** A new setting, `long_shot_value`: an auction of a card worth
+  more than it almost never goes for the bot's max (on the bot this came from,
+  1 snipe in 32 over $50 won in five weeks), so `score.apply_caps` caps it at
+  yellow and marks it `long_shot` (in the snapshot too). Want-list cards and
+  Buy It Nows keep their tier; the max and jackpots are unchanged. Off (0) in
+  player mode; steals mode starts it at $50 (`[steals] long_shot_value`), and
+  Home Assistant can set it (0 to 1000).
 - **A warning before the Claude login lapses.** A Claude CLI signed in with
   `claude auth login` stops working after a few weeks, and every job fails
   until someone signs in again. `snipehunt/authcheck.py` reads `claude auth
@@ -96,6 +103,10 @@ appear in any release; renaming or removing one needs a new API version.
   integration's Case hits & priority cards panel, v2.27.0).
 
 ### Changed
+- **The self-review counts snipes on older picks apart.** In `snipes.by_tier`
+  and `by_band`, `sniped` is now the snipes on the stretch's own picks (so it
+  matches `sniped_pct`) and the new `sniped_earlier` those on picks made
+  before it; snipe_log has one row per auction, so they were never revisions.
 - **Sold-price lookups search, they don't fetch pages.** A fetched page is
   tens of thousands of tokens, sent again on every later turn of the call,
   and was most of what a scoring call cost on the bot this came from. Scoring

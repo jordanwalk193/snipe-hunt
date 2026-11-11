@@ -85,7 +85,8 @@ and, at small sellers, by ending hour (daytime 8am-8pm against evening). \
 Lowball snipes already skip hot sellers; picks and alerts already say which \
 kind of seller and ending they are.
 - "snipes" breaks the collector's snipes on picks down by tier and price \
-band: sniped_pct, how far their max sat from the bot's, and won/lost (lost = \
+band: sniped (this stretch's own picks) and sniped_earlier (picks made before \
+it), sniped_pct, how far their max sat from the bot's, and won/lost (lost = \
 sold to someone else; pending = still running; unknown = over, no result yet). \
 "outcomes" adds them all up, "unattributed" are snipes not on any pick. \
 won_paid_vs_value_pct is what won snipes cost against the bot's going rate, \
@@ -275,9 +276,10 @@ def snipe_results(con, picks: list[dict], start: float, end: float,
     many auction picks got one, how far their max sat from the bot's, and how they
     ended (see snipe_outcome).
 
-    A snipe belongs to its pick even when the pick was made the week before, so
-    the groups add up to every snipe on a pick. sniped_pct only counts snipes on
-    this stretch's own picks, so it stays a share of them."""
+    A snipe belongs to its pick even when the pick was made the week before. Each
+    group's "sniped" counts the snipes on this stretch's own picks (so it matches
+    sniped_pct) and "sniped_earlier" those on older picks: snipe_log has one row
+    per auction, so these are not revisions. Together they are every snipe on a pick."""
     now = time.time() if now is None else now
     by_id = {p["item_id"]: p for p in picks if p.get("is_auction")}
     snipes = [dict(r) for r in con.execute(
@@ -302,7 +304,7 @@ def snipe_results(con, picks: list[dict], start: float, end: float,
         out: dict = {}
 
         def slot(p):
-            return out.setdefault(key(p), {"auctions": 0, "sniped": 0, "_own": 0,
+            return out.setdefault(key(p), {"auctions": 0, "sniped": 0, "sniped_earlier": 0,
                                            **dict.fromkeys(OUTCOMES, 0), "_gaps": []})
         for p in by_id.values():
             slot(p)["auctions"] += 1
@@ -311,14 +313,15 @@ def snipe_results(con, picks: list[dict], start: float, end: float,
             if p is None:
                 continue
             g = slot(p)
-            g["sniped"] += 1
-            g["_own"] += s["item_id"] in by_id
+            # "sniped" counts this stretch's own picks only, so the groups add up to
+            # sniped_pct; a snipe logged now on an older pick is "sniped_earlier"
+            g["sniped" if s["item_id"] in by_id else "sniped_earlier"] += 1
             if s["my_max"] is not None and s["bot_max"] is not None:
                 g["_gaps"].append(s["my_max"] - s["bot_max"])
             g[outcome[s["item_id"]]] += 1
         for g in out.values():
             gaps = g.pop("_gaps")
-            g["sniped_pct"] = _pct(g.pop("_own"), g["auctions"])
+            g["sniped_pct"] = _pct(g["sniped"], g["auctions"])
             g["avg_my_max_minus_bot_max"] = round(statistics.mean(gaps), 2) if gaps else None
         return out
 

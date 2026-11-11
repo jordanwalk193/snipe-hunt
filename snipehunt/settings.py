@@ -74,6 +74,9 @@ DEFAULTS: dict = {
     "max_share": 1.0,                # an auction max or Buy It Now keeps to this share of value
     "bid_now_alerts": False,         # auctions ending within the hour at 10% of value or less
     "drop_alerts": False,            # a Buy It Now just cut into steal range
+    # an auction of a card worth more than this is a long shot at the bot's max: capped at
+    # yellow and labelled (score.apply_caps). 0 = off; steals mode starts it at 50
+    "long_shot_value": 0,
 }
 
 # What the weekly self-review may adjust on its own, and how far (tune.py).
@@ -141,6 +144,7 @@ RANGES = {
     "midtier_max_pay": (20, 1000),
     "max_share": (0.3, 1.0),
     "fold_share": (0.2, 1.0),
+    "long_shot_value": (0, 1000),
 }
 ITEM = {
     "sellers": re.compile(r"[A-Za-z0-9._*\-]{1,64}"),

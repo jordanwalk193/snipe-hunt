@@ -146,6 +146,10 @@ def apply_caps(pick: dict, cfg: dict | None = None) -> dict:
     seller under `min_seller_feedback` caps a pick over $30 at "yellow" and
     marks it "new_seller"; "capped_from" keeps the tier it had, which is what
     decides whether it alerts (with the warning), since a yellow over $30 never would.
+    An auction of a card worth more than `long_shot_value` (0 = off; steals mode
+    starts it at $50) almost never goes for the bot's max: it is capped at
+    "yellow" and marked "long_shot". Want-list cards and Buy It Nows keep their
+    tier; the max, and any jackpot, are unchanged.
     """
     cfg = cfg or settings.load()
     guess = pick.get("max_basis") != "sales"
@@ -178,6 +182,15 @@ def apply_caps(pick: dict, cfg: dict | None = None) -> dict:
         pick["capped_from"], pick["tier"] = pick["tier"], "yellow"
     elif not pick["new_seller"] and pick.get("capped_from"):
         pick["tier"] = pick.pop("capped_from")   # the price fell back under $30
+    # On the bot this came from, 1 snipe in 32 over $50 won at the bot's max in five weeks.
+    long_at = cfg.get("long_shot_value") or 0
+    if (long_at and pick.get("is_auction") and not pick.get("want")
+            and float(pick.get("value") or 0) > long_at):
+        pick["long_shot"] = True
+        if pick.get("tier") in ("fire", "green"):
+            pick["tier"] = "yellow"
+    else:
+        pick.pop("long_shot", None)   # only there when it applies, like scam_risk
     return pick
 
 

@@ -400,3 +400,33 @@ def test_the_warm_units_run_the_warm_job_at_half_past():
     timer = (deploy / "snipe-hunt-warm.timer").read_text()
     assert "-m snipehunt.jobs warm" in service and "Type=oneshot" in service
     assert "OnCalendar=*:31" in timer
+
+
+def test_an_auction_of_a_card_over_the_long_shot_line_is_yellow_not_fire():
+    cfg = dict(score.settings.load(), long_shot_value=50)
+    base = {"tier": "fire", "max_basis": "sales", "price": 10.0, "shipping": 1.0, "value": 80.0,
+            "is_auction": True, "deal": 4, "max": 12.12}
+    got = score.apply_caps(dict(base), cfg)
+    assert got["long_shot"] and got["tier"] == "yellow" and got["max"] == 12.12   # max unchanged
+    assert score.apply_caps(dict(base, is_auction=False), cfg)["tier"] == "fire"   # can be bought
+    assert score.apply_caps(dict(base, value=45.0), cfg)["tier"] == "fire"         # under the line
+    assert score.apply_caps(dict(base, want=True), cfg)["tier"] == "fire"          # want list keeps it
+    off = score.apply_caps(dict(base), dict(cfg, long_shot_value=0))
+    assert off["tier"] == "fire" and "long_shot" not in off                         # switched off
+
+
+def test_long_shots_are_off_in_player_mode_and_on_at_50_in_steals_mode(monkeypatch):
+    from snipehunt import profile, settings
+    assert settings.load()["long_shot_value"] == 0
+    monkeypatch.setattr(profile, "_cache", profile.parse(
+        (config.EXAMPLES / "profile.example.toml").read_text() + "\n[steals]\n"))
+    assert settings.load()["long_shot_value"] == 50
+
+
+def test_a_new_seller_cap_still_comes_off_once_the_price_falls_under_a_long_shot_line():
+    cfg = dict(score.settings.load(), long_shot_value=50, min_seller_feedback=100)
+    pick = {"tier": "green", "max_basis": "sales", "price": 40.0, "shipping": 1.0, "value": 45.0,
+            "is_auction": True, "seller_feedback": 3}
+    capped = score.apply_caps(dict(pick), cfg)
+    assert capped["tier"] == "yellow" and capped["capped_from"] == "green"
+    assert score.apply_caps(dict(capped, price=20.0), cfg)["tier"] == "green"

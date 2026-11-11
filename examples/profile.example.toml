@@ -65,6 +65,7 @@ lots = true                   # false drops "lot of" listings before scoring
 # max_landed_auto = 75.0      # the same for an autograph
 # bid_now_alerts = true       # auctions ending within the hour at 10% of value or less
 # drop_alerts = true          # a Buy It Now just cut into steal range
+# long_shot_value = 50        # an auction of a card worth more is capped at yellow; 0 = off
 # skip_words = ["1/1", "1 of 1", "one of one", "superfractor", "printing plate"]
 
 [search.midtier]

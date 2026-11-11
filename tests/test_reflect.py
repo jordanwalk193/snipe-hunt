@@ -319,7 +319,7 @@ def test_a_failed_claude_call_has_its_own_error_name():
     assert issubclass(score.ClaudeError, RuntimeError)
 
 
-def test_every_snipe_on_a_pick_is_counted_even_from_last_weeks_pick_and_still_running():
+def test_every_snipe_on_a_pick_is_counted_and_last_weeks_picks_apart():
     import time as _t
     from snipehunt import db as _db, reflect
     con = _db.connect()
@@ -345,9 +345,11 @@ def test_every_snipe_on_a_pick_is_counted_even_from_last_weeks_pick_and_still_ru
     assert got["outcomes"] == {"won": 1, "lost": 1, "pending": 1, "unknown": 1}
     assert got["won_not_in_inventory"] == 1
     green = got["by_tier"]["green"]
-    # the groups add up to every snipe on a pick; the share is of this week's picks only
-    assert green["sniped"] == 4 and green["auctions"] == 3 and green["sniped_pct"] == 100
-    assert sum(g["sniped"] for g in got["by_band"].values()) == 4
+    # "sniped" is this week's own picks, so it matches sniped_pct; the snipe on last
+    # week's pick is counted apart, and the two together are every snipe on a pick
+    assert green["sniped"] == 3 and green["sniped_earlier"] == 1 and green["auctions"] == 3
+    assert green["sniped_pct"] == 100
+    assert sum(g["sniped"] + g["sniped_earlier"] for g in got["by_band"].values()) == 4
 
 
 def test_counts_kept_per_day_are_cut_to_the_week_so_eight_days_are_not_added_up():

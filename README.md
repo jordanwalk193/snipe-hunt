@@ -290,6 +290,7 @@ The brag card holds card names, prices and percentages only: no seller, item num
 | `enabled` | true | `false` keeps the table but turns steals mode off |
 | `max_share` | 0.50 | 0.3–1.0; Home Assistant can change it (setting `max_share`) |
 | `bid_now_alerts`, `drop_alerts` | true | Home Assistant can switch each off |
+| `long_shot_value` | 50 | an auction of a card worth more than this rarely goes for the bot's max: capped at 🟡 and labelled a long shot (want-list cards and Buy It Nows keep their tier); 0 turns it off. Off outside steals mode unless set from Home Assistant |
 | `max_landed`, `max_landed_auto` | 25, 75 | the delivered ceiling, and an autograph's |
 | `skip_words` | 1/1, superfractor, printing plate… | titles with these are dropped |
 

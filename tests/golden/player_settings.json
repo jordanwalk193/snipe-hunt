@@ -38,6 +38,7 @@
   "max_share": 1.0,
   "bid_now_alerts": false,
   "drop_alerts": false,
+  "long_shot_value": 0,
   "midtier_enabled": true,
   "midtier_deal_ratio": 0.6,
   "midtier_max_pay": 80.0
@@ -81,6 +82,7 @@
   "max_share",
   "bid_now_alerts",
   "drop_alerts",
+  "long_shot_value",
   "midtier_enabled",
   "midtier_deal_ratio",
   "midtier_max_pay"
