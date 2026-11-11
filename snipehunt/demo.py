@@ -516,6 +516,8 @@ def build(now: datetime | None = None) -> dict:
                          url="https://www.ebay.com/itm/410000900001",
                          why="Priced at $1.25 with free returns: the seller almost certainly meant $125."))
     jackpots = jackpot.mark(picks, now)
+    for p in picks:   # what paying now costs as a share of value (snapshot._slim)
+        p["share_now"] = round(jackpot.pay(p) / float(p["value"]), 2) if p.get("value") else None
     return {
         "api": snapshot.VERSION, "demo": True, "profile": who.public(),
         "generated": now.isoformat(timespec="seconds"),
@@ -544,6 +546,7 @@ def build(now: datetime | None = None) -> dict:
         },
         "picks": picks,
         "jackpots": jackpots,
+        "fold_share": settings.DEFAULTS["fold_share"],
         "gixen": _checked({"available": True, "problem": None,
                   "read_at": (now - timedelta(minutes=6)).isoformat(timespec="seconds"),
                   "snipes": sorted(snipes, key=lambda s: s["end_time"]), "outbid_count": 1,

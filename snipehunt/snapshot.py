@@ -58,6 +58,9 @@ def _slim(pick: dict) -> dict:
         # "mega" or "jackpot"; a ledger jackpot Claude never scored, a card already owned,
         # and what the value rests on (a ledger jackpot: how many recorded sales)
         **{k: pick[k] for k in ("jackpot_level", "ledger_only", "owned", "comps") if pick.get(k)},
+        # what paying now costs as a share of value (an auction at its current bid); the
+        # dashboard folds the ones at fold_share or more away from the steals
+        "share_now": round(jackpot.pay(pick) / float(pick["value"]), 2) if pick.get("value") else None,
         "deal": pick.get("deal"), "deal_pct": pick.get("deal_pct"),
         "edge": pick.get("edge"), "fast": bool(pick.get("fast")),
         "feedback": pick.get("feedback"),
@@ -486,6 +489,7 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "gixen_account": bool(config.get("GIXEN_USER")),
         # $20+ cards at a sliver of their value, the best first (also flagged in picks)
         "jackpots": [_slim(p) for p in jackpots],
+        "fold_share": cfg["fold_share"],   # picks at this share of value or more fold into "close to market"
         "cards": cards(rows, by_card),
         # the holes in the collection against every card that has sold, and where to buy them
         "gaps": gaps.view(con, rows, by_card, now),

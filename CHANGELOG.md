@@ -21,6 +21,11 @@ appear in any release; renaming or removing one needs a new API version.
   jackpot alert fires a Home Assistant event, `snipe_hunt_jackpot`
   (`notify.fire_event`). The snapshot's `jackpots` include the ledger ones, and
   picks carry `jackpot_level`, `ledger_only`, `owned` and `comps` when set.
+- **What a pick costs now, as a share of its value.** Each snapshot pick has
+  `share_now` (paying now, an auction at its current bid, shipping counted,
+  over the value), and the snapshot has `fold_share`, a new setting (0.40,
+  0.2 to 1.0) for where the dashboard folds picks away as close to market.
+  Display only: nothing about scoring or alerts changes.
 - **A warning before the Claude login lapses.** A Claude CLI signed in with
   `claude auth login` stops working after a few weeks, and every job fails
   until someone signs in again. `snipehunt/authcheck.py` reads `claude auth

@@ -308,3 +308,17 @@ def test_api_server_keeps_quiet_when_a_client_hangs_up(capsys):
         server.handle_error(None, ("127.0.0.1", 1))
     err = capsys.readouterr().err
     assert "Broken pipe" not in err and "a real bug" in err
+
+
+def test_each_pick_says_what_share_of_value_it_costs_now_and_where_the_fold_is():
+    from snipehunt import db as _db
+    con = _db.connect()
+    p = {"item_id": "77", "card": "2023 Topps Chrome Example #150", "tier": "green", "price": 8.0,
+         "shipping": 2.0, "total": 10.0, "value": 25.0, "max_basis": "sales", "is_auction": False,
+         "url": "https://www.ebay.com/itm/77"}
+    _db.save_pick(con, p)
+    _db.touch(con, "77", p["card"], False, None, 2.0, 8.0, "s")
+    con.commit()
+    snap = snapshot.snapshot(con, datetime.now(config.TZ))
+    got = next(x for x in snap["picks"] if x["item_id"] == "77")
+    assert got["share_now"] == 0.4 and snap["fold_share"] == 0.40

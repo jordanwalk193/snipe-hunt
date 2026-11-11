@@ -34,6 +34,9 @@ DEFAULTS: dict = {
     "lookup_fetch": False,
     # a Buy It Now over this total whose value is only a guess is shown, never alerted
     "estimate_bin_cap": 25.0,
+    # the dashboard folds a pick away once paying for it costs this share of its value or more:
+    # close to market, no longer a steal worth the top of the page (display only)
+    "fold_share": 0.40,
     # a seller under this many feedback can't make a pick over SELLER_TRUST_OVER better than yellow
     "min_seller_feedback": 100,
     "quiet_hours": True,
@@ -137,6 +140,7 @@ RANGES = {
     "midtier_deal_ratio": (0.2, 0.95),
     "midtier_max_pay": (20, 1000),
     "max_share": (0.3, 1.0),
+    "fold_share": (0.2, 1.0),
 }
 ITEM = {
     "sellers": re.compile(r"[A-Za-z0-9._*\-]{1,64}"),

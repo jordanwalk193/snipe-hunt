@@ -418,6 +418,8 @@ docker compose exec snipe-hunt python -m snipehunt.jobs reflect --dry-run
 
 ## Home Assistant dashboard
 
+Each pick in the snapshot says what paying for it now costs as a share of its value (`share_now`), and the `fold_share` setting (0.40 by default) is where the dashboard folds picks away as close to market rather than a steal. It changes only what the dashboard shows.
+
 Install the [Snipe Hunt integration](https://github.com/jordanwalk193/ha-snipe-hunt) through HACS: add that address as a custom repository of type Integration, download it, restart Home Assistant, then add the **Snipe Hunt** integration. Give it the bot's address, `http://<bot machine>:8766`, and your `API_TOKEN`.
 
 You get a five-tab dashboard, about fifty entities, an auctions calendar, and every setting as a switch or number: which tiers alert, the minimum deal rating worth an alert, quiet hours, the bedtime bundle, the cheap-card limit, a monthly budget, watched sellers, sellers who combine shipping and extra searches.
