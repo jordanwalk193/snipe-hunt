@@ -1,0 +1,12 @@
+# Starts snipe-hunt-warm.service at half past each hour, between the hourly runs.
+# Install both: copy them to /etc/systemd/system, then
+# `systemctl enable --now snipe-hunt-warm.timer`.
+[Unit]
+Description=Snipe Hunt: keep the scoring prompt cached between hourly runs (half past each hour)
+
+[Timer]
+OnCalendar=*:31
+RandomizedDelaySec=20
+
+[Install]
+WantedBy=timers.target

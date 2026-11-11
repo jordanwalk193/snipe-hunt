@@ -367,3 +367,36 @@ def test_scoring_sends_the_stable_half_as_the_system_prompt(monkeypatch):
     assert cmd[cmd.index("--tools") + 1] == "WebSearch"
     score.ask_claude("hello")                      # other calls keep the usual system prompt
     assert "=== preferences.md ===" not in seen[-1][0][seen[-1][0].index("--system-prompt") + 1]
+
+
+def test_the_warm_job_sends_what_scoring_sends_ahead_of_the_listings(monkeypatch):
+    from snipehunt import db, jobs, profile, settings
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(cmd=cmd, input=kwargs["input"])
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"result": "ok"}), "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert jobs.warm() == "prompt cache warm (ok)"
+    cmd = seen["cmd"]
+    system = cmd[cmd.index("--system-prompt") + 1]
+    assert system == score.system_for_scoring() and "=== inventory.csv ===" in system
+    assert cmd[cmd.index("--tools") + 1] == score.web_tools()     # the same tools as a scoring call
+    assert "single word ok" in seen["input"]
+    settings.update(db.connect(), {"price_lookups": 0})
+    jobs.warm()
+    assert seen["cmd"][seen["cmd"].index("--tools") + 1] == ""
+    assert jobs.warm(dry_run=True) == "would warm the prompt cache"
+    monkeypatch.setattr(profile, "_cache", profile.parse(
+        (config.EXAMPLES / "profile.team.example.toml").read_text()))
+    seen.clear()
+    assert jobs.warm().startswith("nothing to warm") and not seen
+
+
+def test_the_warm_units_run_the_warm_job_at_half_past():
+    from pathlib import Path
+    deploy = Path(__file__).resolve().parent.parent / "deploy"
+    service = (deploy / "snipe-hunt-warm.service").read_text()
+    timer = (deploy / "snipe-hunt-warm.timer").read_text()
+    assert "-m snipehunt.jobs warm" in service and "Type=oneshot" in service
+    assert "OnCalendar=*:31" in timer

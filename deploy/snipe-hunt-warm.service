@@ -1,0 +1,17 @@
+# Optional, for running without Docker next to deploy/snipe-hunt.service. One tiny
+# Claude call (about $0.03) so the scoring prompt's cached half is still in the
+# API's cache when the next hourly run starts; started by snipe-hunt-warm.timer.
+# Player mode only (a team's prompt changes with each batch). Same layout as
+# snipe-hunt.service: the repo at /opt/snipe-hunt, secrets in /var/lib/snipe-hunt/env.
+[Unit]
+Description=Snipe Hunt: keep the scoring prompt cached between hourly runs
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/snipe-hunt
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/snipe-hunt/.venv/bin/python -m snipehunt.jobs warm
+TimeoutStartSec=300
+Nice=10

@@ -36,6 +36,11 @@ appear in any release; renaming or removing one needs a new API version.
   before (`build_prompt` still returns them in one piece); a test checks the
   two halves hold exactly its lines. `ask_json` and `ask_claude` take
   `system=`. In team mode the inventory is cut to each batch, so less is cached.
+- **Keeping the cache warm between hourly runs (optional).** The cache lasts
+  about an hour and the runs are an hour apart. `python -m snipehunt.jobs
+  warm` makes one tiny call with the same system prompt and tools, and
+  `deploy/snipe-hunt-warm.service` and `.timer` run it at half past each hour
+  for a setup without Docker (about $0.03 a call). Player mode only.
 - **A pick leaves the board once its very card is bought.** A pick is scored
   once, but the inventory moves on: `snipecheck.bought` finds the inventory row
   that is the same card (`owned_copy`: same year, number, parallel, print run,

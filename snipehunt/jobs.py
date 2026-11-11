@@ -613,8 +613,28 @@ def self_review(dry_run: bool = False) -> str:
     return reflect.run(con, dry_run=dry_run)
 
 
+def warm(dry_run: bool = False) -> str:
+    """Keep the scoring prompt's stable half in the API's cache between hourly runs.
+
+    The cache lasts about an hour and the hourly runs are an hour apart, so
+    without this a run can pay to write the cache again instead of reading it.
+    One tiny call at half past (deploy/snipe-hunt-warm.timer) keeps it warm for
+    about $0.03. It sends what scoring sends ahead of the listings, tools
+    included, since the cache only matches the same start. Player mode only: a
+    team's prompt changes with every batch.
+    """
+    if profile.get().mode == "team":
+        return "nothing to warm: a team's prompt changes with every batch"
+    if dry_run:
+        return "would warm the prompt cache"
+    tools = score.web_tools() if settings.load()["price_lookups"] else ""
+    reply = score.ask_claude("Reply with the single word ok.", tools=tools,
+                             step="warm the prompt cache", system=score.system_for_scoring())
+    return f"prompt cache warm ({reply.strip()[:12]})"
+
+
 JOBS = {"hourly": hourly, "daily": daily, "weekly": weekly, "fast": fast,
-        "reflect": self_review, "lastcall": lastcall, "backfill": backfill}
+        "reflect": self_review, "lastcall": lastcall, "backfill": backfill, "warm": warm}
 
 
 def main() -> None:

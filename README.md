@@ -331,6 +331,7 @@ A title like "Jordan Walker PRIZM Rookie Draft Picks Power Surge RC" names no ye
 - **The ledger screens first in steals mode.** A listing asking more than its recorded sales say the card is worth can't be a steal, so it is marked scored without a Claude call. Autographs, graded cards and print runs of 99 or fewer are always sent. Player mode sends everything, as before.
 - **Most of the prompt is cached.** The rules, preferences, want list and inventory go in the system prompt, the same on every call, so the API serves them from its cache at a tenth of the price; each batch's listings and sold prices are the message.
 - **Search, not fetch.** Sold-price lookups use web search only: a fetched page is tens of thousands of tokens, paid for again on every turn of the call. Turn the `lookup_fetch` setting on to let Claude read whole pages again.
+- **Keeping the cache warm (optional).** The cache lasts about an hour, the runs are an hour apart. `python -m snipehunt.jobs warm` makes one tiny call with the same system prompt (about $0.03) so the next run reads the cache instead of writing it again. Without Docker, `deploy/snipe-hunt-warm.service` and `deploy/snipe-hunt-warm.timer` run it at half past each hour (`systemctl enable --now snipe-hunt-warm.timer`). Player mode only: a team's prompt changes with every batch.
 
 ## The schedule
 
