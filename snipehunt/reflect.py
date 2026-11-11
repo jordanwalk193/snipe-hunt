@@ -171,6 +171,7 @@ def window(con, start: float, end: float) -> dict:
     per_job = lambda prefix: {job: round(stats[f"{prefix}:{job}"], 2)   # noqa: E731
                               for job in JOBS if stats.get(f"{prefix}:{job}")}
     cost, runs, calls = per_job("cost"), per_job("runs"), per_job("ebay_calls")
+    claude = per_job("claude_calls")
     errors: Counter = Counter()
     for key, n in stats.items():
         if key.startswith("error:"):   # an exception's class name, never its message
@@ -205,7 +206,16 @@ def window(con, start: float, end: float) -> dict:
             if stats.get("bedtime_bundles") else None},
         "cost": {
             "usd_by_job": cost, "usd_total": round(sum(cost.values()), 2),
-            "usd_per_pick": round(sum(cost.values()) / len(picks), 3) if picks else None},
+            "usd_per_pick": round(sum(cost.values()) / len(picks), 3) if picks else None,
+            # what the calls were made of (usage.detail), so a dear week can be read
+            "calls": int(sum(claude.values())),
+            "usd_per_call": round(sum(cost.values()) / sum(claude.values()), 3) if claude else None,
+            "turns_per_call": _per_call(stats, "claude_turns", claude),
+            "web_searches_per_call": _per_call(stats, "claude_web", claude),
+            "tokens_in_per_call": _per_call(stats, "claude_tokens_in", claude, 0),
+            "tokens_out_per_call": _per_call(stats, "claude_tokens_out", claude, 0),
+            # listings the ledger priced out before Claude saw them (score.priced_out)
+            "listings_skipped_by_ledger": int(stats.get("prefiltered", 0))},
         "ebay_calls_per_run": {job: round(calls[job] / runs[job], 1)
                                for job in calls if runs.get(job)},
         # every eBay call by lane (usage.lane_of), so a lane that costs more than it finds shows
@@ -556,8 +566,19 @@ ROWS = (   # label, then where the number is in a window
     ("Bedtime bundle size, average", ("alerts", "avg_bedtime_bundle_size")),
     ("Claude cost ($)", ("cost", "usd_total")),
     ("Claude cost per pick ($)", ("cost", "usd_per_pick")),
+    ("Claude calls", ("cost", "calls")),
+    ("Claude cost per call ($)", ("cost", "usd_per_call")),
+    ("Web searches per call", ("cost", "web_searches_per_call")),
+    ("Listings skipped by the ledger", ("cost", "listings_skipped_by_ledger")),
     ("Gixen sign-outs", ("reliability", "gixen_sign_outs")),
 )
+
+
+def _per_call(stats: dict, prefix: str, calls: dict, digits: int = 1) -> float | None:
+    """A per-job daily count (usage.COUNTED) averaged over the Claude calls that made it."""
+    n = sum(calls.values())
+    total = sum(v for k, v in stats.items() if k.startswith(prefix + ":"))
+    return round(total / n, digits) if n and total else None
 
 
 def _dig(data: dict, path: tuple) -> str:

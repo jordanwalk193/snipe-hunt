@@ -190,3 +190,116 @@ def test_a_failed_call_says_why_not_how_many_tokens(monkeypatch):
         assert "usage limit reached" in str(exc)
     else:
         raise AssertionError("no ClaudeError")
+
+
+# --- the ledger pre-filter: in steals mode, listings priced past a steal never reach Claude
+
+CARD = "2023 Topps Chrome Example Player Refractor #209 RC"
+_SOLD = [0]
+
+
+def _listing(item_id, title, price, shipping=0.0, auction=True, seller="s"):
+    from snipehunt.ebay_search import Listing
+    return Listing(item_id=item_id, title=title, price=price, currency="USD", shipping=shipping,
+                   buying_options=["AUCTION"] if auction else ["FIXED_PRICE"], bid_count=0,
+                   end_time="2026-11-20T00:00:00-05:00", seller=seller, url="u", image=None)
+
+
+def _sold(con, title, totals):
+    import time
+    now = int(time.time())
+    for i, total in enumerate(totals):
+        _SOLD[0] += 1
+        con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (f"90000000{_SOLD[0]:04d}", title, total, 0.0, 3, now - i * 86400))
+    con.commit()
+
+
+def test_a_listing_asking_more_than_its_recorded_sales_is_priced_out():
+    from snipehunt import db, sales
+    con = db.connect()
+    _sold(con, CARD, [12.0, 10.0, 11.0])         # the card goes for about $11 delivered
+    dear = _listing("1", CARD, price=9.0, shipping=4.0)      # $13 delivered: no steal possible
+    cheap = _listing("2", CARD, price=3.0, shipping=1.0)
+    assert score.priced_out(dear, sales.ledger_comps(con, dear))
+    assert not score.priced_out(cheap, sales.ledger_comps(con, cheap))
+    # shipping unknown is costed the usual way; a combined-shipping seller pays none
+    assert score.priced_out(_listing("3", CARD, price=8.0, shipping=None),
+                            sales.ledger_comps(con, dear))
+    assert not score.priced_out(_listing("4", CARD, price=9.0, shipping=4.0, seller="Combo"),
+                                sales.ledger_comps(con, dear), combined=frozenset({"combo"}))
+
+
+def test_nothing_priced_by_other_rules_is_priced_out():
+    from snipehunt import db, sales
+    con = db.connect()
+    for title in ("2023 Topps Chrome Example Player Auto #CA-EP",
+                  "2023 Topps Chrome Example Player #209 PSA 10",
+                  "2023 Topps Chrome Example Player Gold Refractor /50 #209"):
+        _sold(con, title, [20.0, 22.0, 21.0])
+        item = _listing("7", title, price=60.0, shipping=5.0)
+        assert not score.priced_out(item, sales.ledger_comps(con, item)), title
+    assert not score.priced_out(_listing("8", CARD, 99.0), [])   # nothing on record: Claude decides
+
+
+def _three(con):
+    from snipehunt import db
+    _sold(con, CARD, [12.0, 10.0, 11.0])
+    dear, cheap = _listing("1", CARD, price=15.0), _listing("2", CARD, price=2.0)
+    other = _listing("3", "2022 Bowman Example Player #BP-1", price=15.0)   # no sales on record
+    for i in (dear, cheap, other):
+        db.touch(con, i.item_id, i.title)
+    con.commit()
+    return [dear, cheap, other]
+
+
+def test_in_steals_mode_priced_out_listings_are_scored_without_a_claude_call(monkeypatch):
+    from snipehunt import db, settings
+    con = db.connect()
+    settings.update(con, {"max_share": 0.5})
+    asked, saved = [], []
+    monkeypatch.setattr(score, "ask_claude", lambda prompt, tools=score.WEB_TOOLS, **kw:
+                        asked.append(prompt) or '{"picks": []}')
+    picks, scored = score.score(_three(con), verbose=True, con=con,
+                                on_batch=lambda batch, batch_picks: saved.append(
+                                    ([b.item_id for b in batch], batch_picks)))
+    assert len(asked) == 1 and '"item_id": "1"' not in asked[0]
+    assert '"item_id": "2"' in asked[0]
+    assert {i.item_id for i in scored} == {"1", "2", "3"}
+    assert saved[0] == (["1"], [])                      # the skipped one is saved first, no pick
+    assert set(saved[1][0]) == {"2", "3"}
+    assert con.execute("SELECT n FROM stats WHERE key='prefiltered'").fetchone()[0] == 1
+
+
+def test_player_mode_still_sends_every_listing_to_claude(monkeypatch):
+    from snipehunt import db
+    con = db.connect()
+    asked = []
+    monkeypatch.setattr(score, "ask_claude", lambda prompt, tools=score.WEB_TOOLS, **kw:
+                        asked.append(prompt) or '{"picks": []}')
+    score.score(_three(con), con=con)
+    assert len(asked) == 1 and all(f'"item_id": "{n}"' in asked[0] for n in "123")
+    assert con.execute("SELECT n FROM stats WHERE key='prefiltered'").fetchone() is None
+
+
+def test_a_claude_reply_is_read_for_what_the_call_took(monkeypatch, capsys):
+    from snipehunt import db, usage
+    reply = {"result": "{}", "total_cost_usd": 0.41, "num_turns": 5, "modelUsage": {
+        "claude-x": {"inputTokens": 100, "cacheReadInputTokens": 900, "outputTokens": 50,
+                     "webSearchRequests": 2}}}
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
+        cmd, 0, json.dumps(reply), ""))
+    assert score.ask_claude("hello", step="appraise 3 snipes") == "{}"
+    assert ("claude: appraise 3 snipes: $0.41, 5 turns, 2 web, 1k in (900 cached), 50 out"
+            in capsys.readouterr().err)
+    log = json.loads(db.kv_get(db.connect(), usage.LOG_KEY))
+    assert log[-1]["web"] == 2 and log[-1]["step"] == "appraise 3 snipes"
+
+
+def test_ask_json_names_its_call_and_forgets_the_name_after(monkeypatch):
+    seen = []
+    monkeypatch.setattr(score, "ask_claude", lambda prompt, tools=score.WEB_TOOLS:
+                        seen.append(score._STEP) or "{}")
+    score.ask_json("hi", tools="", step="stories for 3 picks")
+    assert seen == ["stories for 3 picks"] and score._STEP == ""

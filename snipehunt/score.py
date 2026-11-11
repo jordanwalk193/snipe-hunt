@@ -14,11 +14,13 @@ import re
 import statistics
 import subprocess
 import sys
+import time
 import unicodedata
 
 from datetime import datetime, timedelta
 
-from . import (calibrate, closes, config, db, filters, inventory, pricing, profile, sales, settings,
+from . import (calibrate, closes, config, db, filters, inventory, pricing, profile, rarity, sales,
+               settings,
                usage)
 from .ebay_search import Listing
 
@@ -714,16 +716,39 @@ def repair_json(text: str) -> str:
     return "".join(out)
 
 
-def ask_json(prompt: str, tools: str = WEB_TOOLS, timeout: int | None = None) -> dict:
+_STEP = ""   # what the call being made is for (ask_json's caller names it; ask_claude logs it)
+
+
+def ask_json(prompt: str, tools: str = WEB_TOOLS, timeout: int | None = None,
+             step: str = "") -> dict:
     """ask_claude plus extract_json, asking once more when the reply isn't JSON
     that can be mended. An outage (ClaudeError) is not retried: it won't clear
-    in a minute, and the caller decides what to keep."""
+    in a minute, and the caller decides what to keep. `step` names the call in
+    the log and the cost record."""
+    global _STEP
     kw = {"timeout": timeout} if timeout else {}
+    _STEP = step
+    try:
+        return _ask_json(prompt, tools, kw)
+    finally:
+        _STEP = ""
+
+
+def _ask_json(prompt: str, tools: str, kw: dict) -> dict:
     try:
         return extract_json(ask_claude(prompt, tools=tools, **kw))
     except ValueError as exc:
         print(f"claude: reply wasn't JSON, asking again: {exc}", file=sys.stderr)
         return extract_json(ask_claude(prompt, tools=tools, **kw))
+
+
+def login_status() -> dict:
+    """What `claude auth status` reports: loggedIn, loginExpiresAt... (authcheck reads
+    it). Raises when the CLI can't be asked or doesn't answer in JSON."""
+    proc = subprocess.run([config.get("CLAUDE_BIN"), "auth", "status"],
+                          capture_output=True, text=True, timeout=60,
+                          cwd=str(config.ensure_state_dir()))
+    return json.loads(proc.stdout)
 
 
 class ClaudeError(RuntimeError):
@@ -743,13 +768,17 @@ def _failure(proc: subprocess.CompletedProcess) -> str:
 
 
 def ask_claude(prompt: str, tools: str = WEB_TOOLS,
-               timeout: int = TIMEOUT) -> str:
+               timeout: int = TIMEOUT, step: str = "") -> str:
     """Run `claude -p` in the state directory, away from any project files.
 
     Listing titles and email bodies are text written by strangers, so Claude
     gets only the tools named here: `--tools` removes everything else (shell,
     file edits) and `--strict-mcp-config` drops any MCP servers set up for this user.
+
+    `step` names the call in the log and the cost record ("score 1/2: 80
+    listings"), so a dear run can be read back to the calls that made it so.
     """
+    started = time.monotonic()
     cmd = [config.get("CLAUDE_BIN"), "-p", "--output-format", "json",
            "--tools", tools, "--strict-mcp-config",
            "--no-session-persistence",   # or every call leaves a transcript on disk
@@ -764,6 +793,8 @@ def ask_claude(prompt: str, tools: str = WEB_TOOLS,
     env = dict(os.environ)
     if config.get("ANTHROPIC_API_KEY"):   # may come from the env file, not the environment
         env["ANTHROPIC_API_KEY"] = config.get("ANTHROPIC_API_KEY")
+    if config.get("CLAUDE_CODE_OAUTH_TOKEN"):   # a long-lived login (authcheck.py)
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = config.get("CLAUDE_CODE_OAUTH_TOKEN")
     try:
         proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, env=env,
                               timeout=timeout, cwd=str(config.ensure_state_dir()))
@@ -774,7 +805,10 @@ def ask_claude(prompt: str, tools: str = WEB_TOOLS,
     if proc.returncode != 0:
         raise ClaudeError(f"claude -p exit {proc.returncode}: {_failure(proc)[:300]}")
     outer = json.loads(proc.stdout)
-    usage.record(outer.get("total_cost_usd") or 0)
+    took = usage.detail(outer, time.monotonic() - started,
+                        step or _STEP or os.environ.get(usage.JOB_ENV, ""))
+    usage.record(outer.get("total_cost_usd") or 0, took)
+    print(f"claude: {usage.describe(outer.get('total_cost_usd') or 0, took)}", file=sys.stderr)
     if outer.get("is_error"):
         raise ClaudeError(f"claude -p error: {str(outer.get('result'))[:300]}")
     return outer.get("result", "")
@@ -909,6 +943,35 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
     return with_odds(out, comps)
 
 
+def priced_out(item: Listing, comps: list[dict], combined: frozenset = frozenset(),
+               now: float | None = None) -> bool:
+    """Can the ledger alone say this listing is no steal, so Claude needn't see it?
+
+    _pick_dict prices a card from its recorded sales whenever it has any, and
+    in steals mode a pick must then cost under that going rate (steals.fit: a
+    share of it). So a listing already asking more than the ledger's rate,
+    shipping counted the same way, can never come back a pick, and sending it
+    only pays for tokens: on the bot
+    this came from, over half of what Claude scored in a week was priced past
+    its ledger value. Autographs, graded cards and low-numbered parallels are
+    always sent: the want list prices those by other rules. score() asks this
+    only in steals mode.
+    """
+    if not comps:
+        return False
+    title = item.title
+    run = rarity.print_run(title)
+    if (run is not None and run <= 99) or rarity.AUTO.search(title) or rarity.GRADED.search(title):
+        return False
+    ledger = thin_comps(comps, now)
+    value = pricing.for_listing(ledger["value"], item.shipping) if ledger else None
+    if not value:
+        return False
+    ship = 0.0 if (item.seller or "").lower() in combined else (
+        item.shipping if item.shipping is not None else UNKNOWN_SHIPPING)
+    return item.price + ship > value
+
+
 def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
           ) -> tuple[list[dict], list[Listing]]:
     """Return (picks, listings that were actually scored).
@@ -918,8 +981,30 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
     before it is kept and the rest waits for the next hourly run. With `con`,
     each batch is shown what similar cards sold for, and how far off the going
     rates have been running (see sales.py).
+
+    In steals mode, listings the ledger already prices past a steal
+    (priced_out) are counted as scored, with no pick, without a Claude call.
+    Player mode sends them all, as it always has: a fair-priced card can still
+    be a yellow pick there.
     """
     items = sorted(items, key=lambda i: (not i.is_auction, i.end_time or "9"))
+    skipped: list[Listing] = []
+    comps_all: dict[str, list[dict]] = {}
+    if con is not None:
+        comps_all = {i.item_id: sales.ledger_comps(con, i) for i in items}
+    if con is not None and items and settings.load(con)["max_share"] < 1.0:
+        combined_pre = combined_sellers(con)
+        kept = []
+        for i in items:
+            (skipped if priced_out(i, comps_all[i.item_id], combined_pre) else kept).append(i)
+        items = kept
+        if skipped:
+            db.bump(con, "prefiltered", len(skipped))   # the self-review counts the saving
+            if on_batch:
+                on_batch(skipped, [])
+            if verbose:
+                print(f"score: {len(skipped)} listings already past their going rate on record, "
+                      "not sent to Claude", file=sys.stderr)
     # Sold-price lookups are close to half of what a run costs; 0 turns them off.
     lookups = settings.load()["price_lookups"]
     picks: list[dict] = []
@@ -934,8 +1019,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
     for n, batch in enumerate(batches, 1):
         by_id = {i.item_id: i for i in batch}
         # the ledger prices what it has sold before; Claude's web lookups go to the rest
-        comps_by = ({i.item_id: sales.ledger_comps(con, i) for i in batch}
-                    if con is not None else {})
+        comps_by = {i.item_id: comps_all[i.item_id] for i in batch} if con is not None else {}
         priced = sum(1 for i in batch if comps_by.get(i.item_id))
         batch_lookups = min(lookups, len(batch) - priced) if con is not None else lookups
         try:
@@ -947,7 +1031,8 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
                 build_prompt(batch, batch_lookups, sold, track,
                              learned(con) if con is not None else ("", ""),
                              overvalued(con) if con is not None else ()),
-                tools=WEB_TOOLS if batch_lookups else "")
+                tools=WEB_TOOLS if batch_lookups else "",
+                step=f"score {n}/{len(batches)}: {len(batch)} listings, {batch_lookups} lookups")
         except Exception as exc:
             if not scored:
                 raise
@@ -971,7 +1056,7 @@ def score(items: list[Listing], verbose: bool = False, on_batch=None, con=None
             print(f"score: batch {n}/{len(batches)}: {len(batch)} listings, {priced} priced by the "
                   f"ledger, {batch_lookups} lookups, {len(reply.get('picks', []) or [])} picks, "
                   f"{len(reply.get('not_player', []) or [])} rejected", file=sys.stderr)
-    return picks, scored
+    return picks, scored + skipped
 
 
 def main() -> None:

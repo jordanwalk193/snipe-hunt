@@ -12,7 +12,7 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import (config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
+from . import (authcheck, config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
                rainbow, priority, rarity, report, sales, scheduler, score, settings, shortlist,
                snipecheck, spending, tune, watch)
 from . import bidnow, brag, calibrate, closes, deep, ledger, steals, usage
@@ -393,6 +393,7 @@ def status(con, picks: list[dict], now: datetime) -> dict:
         "last_self_review": max((p.name for p in config.REPORTS_DIR.glob("reflect-*.md")),
                                 default=None),
         "deep": deep.status(con),   # the market sweep: where it is, passes made
+        "claude_login": authcheck.cached(con),   # how long the CLI login has left (authcheck)
     }
 
 

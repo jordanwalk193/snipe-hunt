@@ -324,6 +324,12 @@ Every dashboard refresh and alert run checks each pick against `inventory.csv`: 
 
 A title like "Jordan Walker PRIZM Rookie Draft Picks Power Surge RC" names no year and no set, so searches miss it and Claude can't price it; such auctions mostly close with one bid or none. The bot asks eBay for the item specifics of every vague, affordable listing (one read-only item call each, kept in the `specifics` table, at most 12 a run) and appends the card's identity to the title in square brackets, so everything downstream sees the card. Those picks carry the 🕵️ VAGUE label on the dashboard. Lowball snipes also follow the ending hour once a three-hour block has 12 endings on record: an overnight ending gets a lower snipe than a 9 PM one.
 
+## Claude's login and cost
+
+- **Login.** A Claude CLI signed in with `claude auth login` lapses after a few weeks, and then nothing is scored. The daily job checks `claude auth status` and sends one alert a day from five days before the login ends (or once it has lapsed); the dashboard shows the latest reading (`status.claude_login`). `claude setup-token` makes a long-lived login: put it in the env file as `CLAUDE_CODE_OAUTH_TOKEN` and there is nothing to check. With `ANTHROPIC_API_KEY` there is no login at all.
+- **What each call took.** Every Claude call writes one log line (what it was for, cost, turns, web searches, tokens in and out, seconds) and the last 400 are kept in the state database (`claude_log`). The weekly self-review shows calls, cost per call and web searches per call.
+- **The ledger screens first in steals mode.** A listing asking more than its recorded sales say the card is worth can't be a steal, so it is marked scored without a Claude call. Autographs, graded cards and print runs of 99 or fewer are always sent. Player mode sends everything, as before.
+
 ## The schedule
 
 One process runs everything. Times are in `SNIPEHUNT_TZ`.

@@ -533,6 +533,10 @@ def build(now: datetime | None = None) -> dict:
             "last_self_review": None,
             "deep": {"on": True, "band": "$6–$10 at 2,400", "passes": 3,
                      "last_pass": int(now.timestamp()) - 9 * 3600, "found": 7_412},
+            "claude_login": {"logged_in": True, "token": False, "days_left": 23.5,
+                             "expires": (now + timedelta(days=23, hours=12)).isoformat(
+                                 timespec="seconds"),
+                             "checked": (now - timedelta(minutes=12)).isoformat(timespec="seconds")},
             "cost_today": 0.84, "calls_today": 19, "cost_month": 11.37,
             "need_snipe": [p["item_id"] for p in picks if p["is_auction"] and p["snipe"] is None
                            and p["tier"] in ("fire", "green")

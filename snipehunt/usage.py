@@ -41,8 +41,41 @@ def _take_spool() -> list[dict]:
     return out
 
 
-def record(usd) -> None:
-    """Add one call's cost to today's total. Never raises: this is bookkeeping.
+LOG_KEY = "claude_log"   # the last LOG_KEEP calls, one line each: what each one cost and why
+LOG_KEEP = 400
+COUNTED = ("turns", "web", "tokens_in", "tokens_out")   # per job per day, for the self-review
+
+
+def detail(outer: dict, secs: float, step: str = "") -> dict:
+    """What one `claude -p --output-format json` reply says the call took: turns,
+    web searches, tokens in and out (cached input counted apart), seconds, model."""
+    tokens_in = tokens_out = cached = web = 0
+    models = []
+    for name, m in (outer.get("modelUsage") or {}).items():
+        if not isinstance(m, dict):
+            continue
+        models.append(str(name))
+        tokens_in += int(m.get("inputTokens") or 0) + int(m.get("cacheCreationInputTokens") or 0)
+        cached += int(m.get("cacheReadInputTokens") or 0)
+        tokens_out += int(m.get("outputTokens") or 0)
+        web += int(m.get("webSearchRequests") or 0)
+    return {"step": step, "turns": int(outer.get("num_turns") or 0), "web": web,
+            "tokens_in": tokens_in + cached, "cached": cached, "tokens_out": tokens_out,
+            "secs": round(secs), "model": ",".join(models)}
+
+
+def describe(usd, d: dict) -> str:
+    """One log line per call, so an expensive run explains itself."""
+    k = lambda n: f"{n / 1000:.0f}k" if n >= 1000 else str(n)   # noqa: E731
+    return (f"{d.get('step') or 'call'}: ${float(usd or 0):.2f}, {d.get('turns', 0)} turns, "
+            f"{d.get('web', 0)} web, {k(d.get('tokens_in', 0))} in "
+            f"({k(d.get('cached', 0))} cached), {k(d.get('tokens_out', 0))} out, "
+            f"{d.get('secs', 0)}s")
+
+
+def record(usd, detail: dict | None = None) -> None:
+    """Add one call's cost to today's total, and with `detail` (see detail()) its
+    turns, web searches and tokens. Never raises: this is bookkeeping.
 
     When the database is busy (often this same run, mid-write), the cost goes to
     a spool file instead and is added at the next call that gets through.
@@ -52,6 +85,10 @@ def record(usd) -> None:
                  "job": os.environ.get(JOB_ENV) or "other"}   # which job spent it
     except (TypeError, ValueError):
         return
+    if detail:
+        entry.update({k: detail[k] for k in (*COUNTED, "step", "secs", "model", "cached")
+                      if detail.get(k) is not None})
+        entry["at"] = datetime.now(config.TZ).isoformat(timespec="seconds")
     try:
         con = db.connect()
         con.execute(f"PRAGMA busy_timeout={BUSY_MS}")
@@ -64,12 +101,18 @@ def record(usd) -> None:
     try:
         pending = _take_spool()
         days = json.loads(db.kv_get(con, KEY, "{}"))
+        log = json.loads(db.kv_get(con, LOG_KEY, "[]"))
         for e in [*pending, entry]:
             day = days.setdefault(e["day"], {"usd": 0.0, "calls": 0})
             day["usd"] = round(day["usd"] + e["usd"], 4)
             day["calls"] += 1
             db.bump(con, f"cost:{e['job']}", e["usd"], e["day"])
             db.bump(con, f"claude_calls:{e['job']}", 1, e["day"])
+            for k in COUNTED:
+                db.bump(con, f"claude_{k}:{e['job']}", e.get(k) or 0, e["day"])
+            if "at" in e:
+                log.append({k: v for k, v in e.items() if k != "day"})
+        db.kv_set(con, LOG_KEY, json.dumps(log[-LOG_KEEP:]))
         db.kv_set(con, KEY, json.dumps(dict(sorted(days.items())[-KEEP_DAYS:])))
         con.commit()
     except Exception as exc:

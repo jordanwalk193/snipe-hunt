@@ -7,6 +7,26 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Added
+- **A warning before the Claude login lapses.** A Claude CLI signed in with
+  `claude auth login` stops working after a few weeks, and every job fails
+  until someone signs in again. `snipehunt/authcheck.py` reads `claude auth
+  status`: the daily job sends one phone alert a day from five days before
+  the login ends (or once it has lapsed), with what to do, and the hourly job
+  keeps the reading for the dashboard (`status.claude_login`). With
+  `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, a new optional secret)
+  or `ANTHROPIC_API_KEY` set there is nothing to check.
+- **What each Claude call took.** Every `claude -p` call logs one line (what
+  it was for, cost, turns, web searches, tokens in and out with the cached
+  part, seconds), keeps the last 400 in the state database (kv `claude_log`),
+  and counts turns, web searches and tokens per job per day. The weekly
+  self-review adds Claude calls, cost per call, web searches per call and
+  listings skipped by the ledger.
+- **Steals mode: the ledger screens listings before Claude does.** In steals
+  mode a pick must cost less than its going rate, so a listing already asking
+  more than its recorded sales say the card is worth (shipping counted the
+  same way) can never be one. `score.priced_out` marks such listings scored
+  with no pick and no Claude call; autographs, graded cards and print runs of
+  99 or fewer are always sent. Player mode sends every listing, as before.
 - **A pick leaves the board once its very card is bought.** A pick is scored
   once, but the inventory moves on: `snipecheck.bought` finds the inventory row
   that is the same card (`owned_copy`: same year, number, parallel, print run,

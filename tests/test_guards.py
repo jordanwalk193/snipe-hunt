@@ -147,3 +147,15 @@ def test_the_team_prompt_carries_the_same_hard_rules(monkeypatch):
             "touch Gixen. You may only read web pages.") in text
     # team mode scores with the same Claude call and the same two tools
     assert "ask_claude(" in source("score.py") and "team_prompt" in source("score.py")
+
+
+def test_the_login_check_only_asks_the_cli_for_its_status(monkeypatch):
+    seen = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"loggedIn": True}), "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    score.login_status()
+    assert seen == [[config.get("CLAUDE_BIN"), "auth", "status"]]   # no prompt, no tools, no login
+    assert "claude -p" not in source("authcheck.py") and "subprocess.run" not in source("authcheck.py")

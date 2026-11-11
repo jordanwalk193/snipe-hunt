@@ -77,7 +77,10 @@ def test_the_metrics_bundle_holds_numbers_and_short_labels_and_no_listing_text()
     assert week["alerts"] == {"sent": 9, "held": 4, "dropped_as_stale": 2,
                               "bedtime_bundles": 2, "avg_bedtime_bundle_size": 2.5}
     assert week["cost"] == {"usd_by_job": {"hourly": 3.5}, "usd_total": 3.5,
-                            "usd_per_pick": 0.7}
+                            "usd_per_pick": 0.7, "calls": 0, "usd_per_call": None,
+                            "turns_per_call": None, "web_searches_per_call": None,
+                            "tokens_in_per_call": None, "tokens_out_per_call": None,
+                            "listings_skipped_by_ledger": 0}
     assert week["ebay_calls_per_run"] == {"hourly": 20.0}
     assert week["reliability"]["error_types"] == {"RuntimeError": 2, "Other": 1}
     assert week["picks"]["skipped_pct"] == 20.0                                 # 1 of 5

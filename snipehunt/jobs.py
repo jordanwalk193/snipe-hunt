@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from . import (aspects, bidnow, bids, brag, config, db, deep, ebay_search, filters,
+from . import (aspects, authcheck, bidnow, bids, brag, config, db, deep, ebay_search, filters,
                gitsync, gixen, hidden, inventory, inventory_sync, jackpot,
                limited_drops, lowball, midtier, notify, offers, ops, priority, profile, rarity,
                reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
@@ -101,6 +101,12 @@ def hourly(dry_run: bool = False) -> str:
         except Exception as exc:
             con.rollback()
             print(f"snipecheck: {exc}", file=sys.stderr)
+        try:   # how long the Claude login has left, for the dashboard
+            authcheck.refresh(con)
+            con.commit()
+        except Exception as exc:
+            con.rollback()
+            print(f"authcheck: {exc}", file=sys.stderr)
         if not first_run:   # these price from what earlier runs learned
             _deals(con, listings)
 
@@ -542,6 +548,10 @@ def daily(dry_run: bool = False) -> str:
             notify.send(f"{profile.get().app_name}: midtier summary", midtier.summary(con))
         except Exception as exc:
             errors.append(f"midtier summary: {exc}")
+    try:   # the Claude login lapses every few weeks: a warning before it does
+        parts.append("Claude login: " + authcheck.check(con, dry_run=dry_run))
+    except Exception as exc:
+        errors.append(f"login check: {exc}")
     if errors:
         raise RuntimeError("; ".join(errors + parts))
     return "; ".join(parts)
