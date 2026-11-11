@@ -54,11 +54,13 @@ def pick_actions(pick: dict) -> list[dict] | None:
 
 def send(title: str, message: str, url: str | None = None,
          image: str | None = None, urgent: bool = False,
-         actions: list[dict] | None = None) -> None:
+         actions: list[dict] | None = None, critical: bool = False) -> None:
     """Send to Home Assistant if it is set up, and to ntfy if `NTFY_URL` is set.
 
     `urgent` (jackpots only) asks the phone to break through Focus / Do Not
-    Disturb: time-sensitive on iPhone, high priority on Android, urgent on ntfy."""
+    Disturb: time-sensitive on iPhone, high priority on Android, urgent on ntfy.
+    `critical` (the once-a-month "mega" jackpot) sounds even on silent, at full
+    volume: a critical alert on iPhone, the alarm channel on Android."""
     ha_url, token, service = (config.get(k) for k in ("HA_URL", "HA_TOKEN", "HA_NOTIFY_SERVICE"))
     ntfy = config.get("NTFY_URL")
     if not (ha_url and token and service) and not ntfy:
@@ -76,6 +78,10 @@ def send(title: str, message: str, url: str | None = None,
         if urgent:
             data["push"] = {"interruption-level": "time-sensitive"}   # iOS
             data.update(priority="high", ttl=0)                      # Android
+        if critical:
+            data["push"] = {"interruption-level": "critical",
+                            "sound": {"name": "default", "critical": 1, "volume": 1.0}}   # iOS
+            data.update(priority="high", ttl=0, channel="alarm_stream")   # Android: the alarm channel
         payload = {"title": title, "message": message}
         if data:
             payload["data"] = data
@@ -91,11 +97,27 @@ def send(title: str, message: str, url: str | None = None,
             headers["Click"] = url
         if image:
             headers["Attach"] = image
-        if urgent:
+        if urgent or critical:
             headers["Priority"] = "urgent"
         resp = requests.post(ntfy, data=message.encode("utf-8"), headers=headers, timeout=20)
         if resp.status_code >= 400:
             raise RuntimeError(f"ntfy {resp.status_code}: {resp.text[:200]}")
+
+
+def fire_event(event: str, data: dict) -> None:
+    """A Home Assistant event (POST /api/events/<event>) for automations to act on:
+    flash the lights, say it on a speaker. Only with HA_URL and HA_TOKEN set; never
+    fails the caller."""
+    ha_url, token = config.get("HA_URL"), config.get("HA_TOKEN")
+    if not (ha_url and token):
+        return
+    try:
+        resp = requests.post(f"{ha_url.rstrip('/')}/api/events/{event}",
+                             headers={"Authorization": f"Bearer {token}"}, json=data, timeout=10)
+        if resp.status_code >= 400:
+            print(f"notify: event {event}: {resp.status_code}", file=sys.stderr)
+    except Exception as exc:   # an automation hook must never stop an alert
+        print(f"notify: event {event}: {type(exc).__name__}", file=sys.stderr)
 
 
 def is_quiet(now: datetime | None = None) -> bool:

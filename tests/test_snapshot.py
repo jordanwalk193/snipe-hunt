@@ -266,7 +266,8 @@ def test_demo_mode_serves_made_up_data_and_changes_nothing(con, server, monkeypa
     add(con, "111111111111")
     con.commit()
     real_pick = snapshot.snapshot(con, NOW)["picks"][0]
-    assert set(real_pick) == set(fake["picks"][0])
+    # the demo's first pick is its jackpot; jackpot_level is only on a jackpot
+    assert set(real_pick) == set(fake["picks"][0]) - {"jackpot_level"}
     monkeypatch.setitem(config.load(), "SNIPEHUNT_DEMO", "1")
     code, snap = call(server + "/api/snapshot")
     assert code == 200 and snap["demo"] is True and len(snap["picks"]) == 10   # 9 plus the demo jackpot

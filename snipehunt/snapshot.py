@@ -55,6 +55,9 @@ def _slim(pick: dict) -> dict:
         # an auction's bid count then
         "price_at": pick.get("price_at"), "bids": pick.get("bids"),
         "jackpot": pick.get("jackpot"),   # "sales" or "guess" when it is one (jackpot.py)
+        # "mega" or "jackpot"; a ledger jackpot Claude never scored, a card already owned,
+        # and what the value rests on (a ledger jackpot: how many recorded sales)
+        **{k: pick[k] for k in ("jackpot_level", "ledger_only", "owned", "comps") if pick.get(k)},
         "deal": pick.get("deal"), "deal_pct": pick.get("deal_pct"),
         "edge": pick.get("edge"), "fast": bool(pick.get("fast")),
         "feedback": pick.get("feedback"),
@@ -460,6 +463,9 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
     picks = ranked(picks)
     # a card at a sliver of its value: the dashboard's loudest banner
     jackpots = jackpot.mark(picks, now)
+    pick_ids = {p["item_id"] for p in picks}   # and the ledger pass's own (jackpot.ledger_run)
+    jackpots = sorted(jackpots + [p for p in jackpot.stored(con, now) if p["item_id"] not in pick_ids],
+                      key=lambda p: jackpot.pay(p) / p["value"])
     spend = spending.summary(rows, now.date(), cfg["monthly_budget"])
     for p in picks:   # "you usually pay" next to each pick, once there is a history
         usual = spending.usual_for(spend, p.get("title") or p.get("card") or "")

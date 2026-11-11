@@ -7,6 +7,20 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Added
+- **Ledger jackpots, a mega tier, a critical alert and a Home Assistant event.**
+  `jackpot.scan` prices every live listing from the ledger alone (two or more
+  fresh sales of exactly the card, a sure match for the player or team, no
+  lots), `verify` reads each candidate on eBay before anything is sent (one
+  fresh item read each, eight a run), and `ledger_run` keeps the live ones in
+  kv `ledger_jackpots`. It runs after each hourly run's alerts and in the fast
+  lane, with no Claude call. A card already in the inventory
+  (`snipecheck.owned_copy`) is flagged `owned` ("grab it to flip or trade").
+  `jackpot.level` is "mega" for a $40+ card at 10% of its value or less:
+  title "🚨🚨 HOLY SH*T", sent with `notify.send(critical=True)` (an iOS
+  critical alert, Android's alarm channel; urgent on ntfy as before). Every
+  jackpot alert fires a Home Assistant event, `snipe_hunt_jackpot`
+  (`notify.fire_event`). The snapshot's `jackpots` include the ledger ones, and
+  picks carry `jackpot_level`, `ledger_only`, `owned` and `comps` when set.
 - **A warning before the Claude login lapses.** A Claude CLI signed in with
   `claude auth login` stops working after a few weeks, and every job fails
   until someone signs in again. `snipehunt/authcheck.py` reads `claude auth

@@ -158,6 +158,8 @@ def hourly(dry_run: bool = False) -> str:
     sent = notify.deliver(con, picks, dry_run=dry_run,
                           current={i.item_id: i for i in listings},
                           look=None if dry_run else notify.looker())
+    if not dry_run:   # and any live listing the ledger alone calls a jackpot, picked or not
+        _ledger_jackpots(con, ebay_search.EbayClient(con))
     if sheets.configured() and not dry_run:
         try:   # the Google Sheet copy of the hunt (optional)
             counts = sheets.push(con)
@@ -331,6 +333,22 @@ def lastcall(dry_run: bool = False) -> str:
             f"{len(hits)} lowball last call{'s' if len(hits) != 1 else ''}")
 
 
+def _ledger_jackpots(con, client) -> None:
+    """The ledger pass (jackpot.ledger_run): every live listing priced from its recorded
+    sales, no Claude, a few eBay reads to confirm; alerted like any jackpot. Runs in
+    the hourly job and in the fast lane, so a bot without the fast lane gets it too."""
+    from . import snapshot
+    try:
+        now = datetime.now(config.TZ)
+        picks = snapshot.live_picks(con, now)
+        found = jackpot.ledger_run(con, client, {p["item_id"] for p in picks}, now)
+        if found and settings.load(con)["alerts_enabled"]:
+            jackpot.alert(con, found, now)
+    except Exception as exc:   # bookkeeping on top of the hunt: never stops it
+        con.rollback()
+        print(f"jackpot: ledger pass: {exc}", file=sys.stderr)
+
+
 def steal_alerts(con, client) -> None:
     """Bid now, think later (bidnow.py) and Buy It Nows just cut into steal range
     (steals.drop_alert). Each is off unless its setting is on (steals mode turns
@@ -374,6 +392,8 @@ def fast(dry_run: bool = False) -> str:
         return "waiting for the first hourly run"
     client = ebay_search.EbayClient()
     client.lane = "fast"
+    if not dry_run:
+        _ledger_jackpots(con, client)   # any live listing the ledger alone calls a jackpot
     if not dry_run and settings.load(con)["alerts_enabled"]:
         steal_alerts(con, client)   # an auction's last hour can fall between hourly runs
     found = []

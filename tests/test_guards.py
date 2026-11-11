@@ -167,3 +167,10 @@ def test_scoring_lookups_never_get_more_than_web_reading(monkeypatch):
         settings.update(db.connect(), {"lookup_fetch": fetch})
         assert set(score.web_tools().split(",")) <= set(score.WEB_TOOLS.split(","))
     assert "web_tools() if" in source("score.py") and "web_tools() if" in source("snipecheck.py")
+
+
+def test_the_ledger_jackpot_pass_only_reads_single_listings():
+    text = source("jackpot.py")
+    calls = set(re.findall(r"client\.(\w+)\(", text))
+    assert calls == {"item"}, calls          # one read-only item call per candidate, nothing else
+    assert "ask_claude" not in text and "ask_json" not in text   # and no Claude at all
