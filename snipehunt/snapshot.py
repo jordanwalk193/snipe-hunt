@@ -12,7 +12,7 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
-from . import (authcheck, config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
+from . import (authcheck, card_art, config, db, gixen, inventory, jackpot, lowball, musthave, offers, profile,
                rainbow, priority, rarity, report, sales, scheduler, score, settings, shortlist,
                snipecheck, spending, tune, watch)
 from . import bidnow, brag, calibrate, closes, deep, ledger, steals, usage
@@ -220,17 +220,21 @@ def _price(row: dict) -> float:
 
 
 def _row(row: dict) -> dict:
-    return {"card": _short(report.card_name(row), 90), "status": row.get("status"),
+    return {"id": row.get("id"), "card": _short(report.card_name(row), 90), "status": row.get("status"),
             "paid": _price(row), "date": row.get("order_date"),
             "seller": row.get("seller"), "page": report.binder_page(row)}
 
 
-def cards(rows: list[dict], gs: list[dict] | None = None) -> list[dict]:
+HISTORY_PER_CARD = 12   # ledger sales per owned card, for the binder's card sheet
+
+
+def cards(rows: list[dict], gs: list[dict] | None = None, art: dict | None = None) -> list[dict]:
     """Every card, compact, for the searchable binder list: with "v", what the
     ledger's newest sale of the same card went for (ledger.match_row), when it has one."""
     out = []
     for r in rows:
         g = ledger.match_row(gs, r) if gs else None
+        img, img_from = card_art.picture(r, art or {}, gs)
         flags = "".join(letter for letter, on in (
             ("R", r.get("rc") == "Y"), ("A", r.get("auto") == "Y"),
             ("L", r.get("relic") == "Y"), ("N", bool(r.get("serial"))),
@@ -240,8 +244,13 @@ def cards(rows: list[dict], gs: list[dict] | None = None) -> list[dict]:
                     "s": r.get("status"), "p": _price(r), "d": r.get("order_date"),
                     "pg": report.binder_page(r), "f": flags,
                     "sl": _short(r.get("seller"), 20),
-                    "v": round(g["sales"][0]["total"], 2) if g else None,
-                    "vn": len(g["sales"]) if g else 0})
+                    "v": ledger.value(g),
+                    "vn": len(g["sales"]) if g else 0,
+                    "i": img, "if": img_from or None,
+                    "e": (r.get("ebay_item_id") or "").strip() or None,
+                    # the ledger's last sales of the same card, newest first: [date, total, item id]
+                    "h": [[datetime.fromtimestamp(x["sold_at"], config.TZ).date().isoformat(), round(x["total"], 2), x["item_id"]]
+                          for x in g["sales"][:HISTORY_PER_CARD]] if g else []})
     return out
 
 
@@ -274,7 +283,8 @@ def pipeline(rows: list[dict], picks: list[dict]) -> dict:
     """Cards on the way: unpaid wins by seller, packages in transit, to file."""
     unpaid = [{"seller": g["seller"], "advice": g["advice"],
                "total": round(sum(_price(c) for c in g["cards"]), 2),
-               "cards": [_short(report.card_name(c), 70) for c in g["cards"][:6]]}
+               "cards": [_short(report.card_name(c), 70) for c in g["cards"][:6]],
+               "ids": [c.get("id") for c in g["cards"][:6]]}
               for g in report.unpaid_by_seller(rows, picks)]
     return {
         "unpaid": unpaid[:6],
@@ -293,8 +303,18 @@ def record(con, now: datetime) -> dict:
     decided = len(wins) + len(losses)
 
     def brief(ev: dict) -> dict:
-        return {"title": _short(ev.get("title"), 80), "date": ev.get("date"),
-                "price": ev.get("price"), "seller": ev.get("seller")}
+        out = {"title": _short(ev.get("title"), 80), "date": ev.get("date"),
+               "price": ev.get("price"), "seller": ev.get("seller"), "item_id": ev.get("item_id")}
+        item = ev.get("item_id")
+        if item:   # what it went for and its picture (the ledger records the sale), and your snipe
+            sold = con.execute("SELECT price, shipping, image FROM sales WHERE item_id=?", (item,)).fetchone()
+            if sold:
+                out["sold"] = round((sold["price"] or 0) + (sold["shipping"] or 0), 2)
+                out["image"] = card_art.small(sold["image"], 300)
+            mine = con.execute("SELECT my_max FROM snipe_log WHERE item_id=? ORDER BY logged_at DESC LIMIT 1", (item,)).fetchone()
+            if mine and mine["my_max"] is not None:
+                out["my_max"] = mine["my_max"]
+        return out
     return {
         "rate": round(100 * len(wins) / decided) if decided else None,
         "days": RECORD_DAYS, "wins": len(wins), "losses": len(losses),
@@ -491,7 +511,7 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         # $20+ cards at a sliver of their value, the best first (also flagged in picks)
         "jackpots": [_slim(p) for p in jackpots],
         "fold_share": cfg["fold_share"],   # picks at this share of value or more fold into "close to market"
-        "cards": cards(rows, by_card),
+        "cards": cards(rows, by_card, card_art.known(con)),
         # the holes in the collection against every card that has sold, and where to buy them
         "gaps": gaps.view(con, rows, by_card, now),
         # what the big money goes for: the price ladder, the biggest sales, overpays, your money cards

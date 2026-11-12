@@ -59,7 +59,7 @@ def test_the_collection_is_worth_what_the_ledger_last_saw_with_weekly_movers():
     con.commit()
     w2 = ledger.worth(con, rows, ledger.groups(con), now + timedelta(days=7))
     mover = next(m for m in w2["movers"] if m["id"] == "99999")
-    assert mover["pct"] == 50 and w2["since"] == w["week"]
+    assert mover["pct"] == 25 and w2["since"] == w["week"]   # median of 12 and 18 = 15, up 25% on 12
 
 
 def test_endings_are_judged_per_card_type_and_slow_sellers_are_named():
@@ -162,3 +162,9 @@ def test_a_single_picks_alert_carries_phone_buttons(monkeypatch):
         {"action": "URI", "title": "Open ↗", "uri": "https://www.ebay.com/itm/123456789012"}]
     assert notify.pick_actions({"item_id": "x"}) is None
     assert [a["title"] for a in notify.pick_actions({"item_id": "123456789012", "is_auction": False})] == ["Skip"]
+
+
+def test_one_stray_sale_does_not_move_what_a_card_is_worth():
+    g = {"sales": [{"total": 25.65}, {"total": 0.75 + 1.36}, {"total": 1.75}, {"total": 1.83}]}
+    assert ledger.value(g) == 2.11            # median of the newest three, not the $25.65 stray
+    assert ledger.value({"sales": [{"total": 9.0}]}) == 9.0 and ledger.value(None) is None

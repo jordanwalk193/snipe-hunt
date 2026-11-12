@@ -197,8 +197,22 @@ def tag(picks: list[dict], gs: list[dict], now: float) -> None:
             p.pop("trend", None)
 
 
+VALUE_SALES = 3   # a card is worth the median of its newest few sales, so one mis-titled sale can't move it
+
+
+def value(g: dict | None) -> float | None:
+    """What a ledger card is worth: the median of its newest VALUE_SALES sales.
+    The newest sale alone let one stray (a slab or a parallel sold under a bare title)
+    make a $2 base card look like $25."""
+    if not g or not g.get("sales"):
+        return None
+    totals = sorted(float(s["total"]) for s in g["sales"][:VALUE_SALES])
+    mid = len(totals) // 2
+    return round(totals[mid] if len(totals) % 2 else (totals[mid - 1] + totals[mid]) / 2, 2)
+
+
 def worth(con, rows: list[dict], gs: list[dict], now: datetime) -> dict:
-    """The collection by the ledger: each card at the newest sale of the same card."""
+    """The collection by the ledger: each card at the median of its newest sales (value())."""
     from . import report   # report imports this module's neighbours; kept local
     week = now.strftime("%G-W%V")
     cards, paid_all, value_all, valued = [], 0.0, 0.0, 0
@@ -213,7 +227,7 @@ def worth(con, rows: list[dict], gs: list[dict], now: datetime) -> dict:
         name = report.card_name(r)
         g = match_row(gs, r)
         sale = g["sales"][0] if g else None
-        value = sale["total"] if sale else paid
+        value = globals()["value"](g) if sale else paid
         valued += sale is not None
         paid_all += paid
         value_all += value

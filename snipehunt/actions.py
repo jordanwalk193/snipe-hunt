@@ -118,6 +118,30 @@ def filed(con, data: dict) -> str:
     return f"Filed {len(done)} cards in the binder."
 
 
+def arrived(con, data: dict) -> str:
+    """Cards in the mail you have in hand. Cheap cards often ship untracked in an
+    envelope, so no delivery email ever moves them past "In transit"; this does.
+    They become Delivered (to file), or go straight to the binder with "binder": true."""
+    want = {str(i) for i in data.get("ids", [])}
+    if not want or len(want) > 200:
+        raise ValueError("no cards given")
+    to = "In binder" if data.get("binder") else "Delivered"
+    gitsync.pull()
+    fields, rows = inventory.read()
+    done = [r for r in rows if r.get("id") in want
+            and r.get("status") in ("In transit", "Won", "Awaiting payment") and inventory.advance(r, to)]
+    if not done:
+        return "Nothing to change: those cards aren't on the way."
+    inventory.write(fields, rows)
+    threading.Thread(target=_push_inventory, daemon=True,
+                     args=(f"inventory: {len(done)} arrived ({to})",)).start()
+    sheets.after_inventory_change("arrival", background=True)
+    where = "in the binder" if to == "In binder" else "to file"
+    if len(done) == 1:
+        return f"Arrived: {report.card_name(done[0])}, {where}."
+    return f"{len(done)} cards arrived, {where}."
+
+
 def refresh(con, data: dict) -> str:
     return "Refreshed."
 
@@ -146,7 +170,7 @@ def test_alert(con, data: dict) -> str:
     return "Test alert sent to your phone."
 
 
-ACTIONS = {"skip": skip, "feedback": feedback, "sniped": mark_sniped, "unskip_all": unskip_all, "filed": filed, "refresh": refresh,
+ACTIONS = {"skip": skip, "feedback": feedback, "sniped": mark_sniped, "unskip_all": unskip_all, "filed": filed, "arrived": arrived, "refresh": refresh,
            "search": search, "gixen_refresh": gixen_refresh, "test_alert": test_alert}
 
 

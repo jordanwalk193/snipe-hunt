@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from . import (aspects, authcheck, bidnow, bids, brag, config, db, deep, ebay_search, filters,
+from . import (aspects, authcheck, card_art, bidnow, bids, brag, config, db, deep, ebay_search, filters,
                gitsync, gixen, hidden, inventory, inventory_sync, jackpot,
                limited_drops, lowball, midtier, notify, offers, ops, priority, profile, rarity,
                reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
@@ -169,6 +169,14 @@ def hourly(dry_run: bool = False) -> str:
             print(f"sheets: {exc}", file=sys.stderr)
     if failed:
         raise failed
+    if not dry_run:
+        try:   # pictures of the owned cards, for the dashboard's binder (card_art.py)
+            n = card_art.fill(con, inventory.read()[1], ebay_search.EbayClient(con))
+            if n:
+                print(f"card_art: {n} pictures found", file=sys.stderr)
+        except Exception as exc:
+            con.rollback()
+            print(f"card_art: {exc}", file=sys.stderr)
     return (f"{len(listings)} listings, {len(fresh)} new, {len(scored)} scored, "
             f"{len(picks)} picks, {sent} alerted")
 

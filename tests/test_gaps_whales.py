@@ -107,7 +107,7 @@ def test_the_ladder_tiers_and_the_overpays():
     assert w["drivers"][0]["family"] == "Bowman Chrome" and w["drivers"][0]["n"] == 4
     assert w["trend"] is None                                 # too few sales to call a trend
     assert w["yours"]["n"] == 1 and w["yours"]["by_tier"] == {"Autograph": 1}
-    assert w["yours"]["top"][0]["value"] in (60.0, 70.0) and w["yours"]["paid"] == 50.0
+    assert w["yours"]["top"][0]["value"] == 65.0   # the median of its two sales and w["yours"]["paid"] == 50.0
 
 
 def test_tiers_from_a_title_and_from_an_inventory_row():

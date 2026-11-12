@@ -425,6 +425,14 @@ Install the [Snipe Hunt integration](https://github.com/jordanwalk193/ha-snipe-h
 
 You get a five-tab dashboard, about fifty entities, an auctions calendar, and every setting as a switch or number: which tiers alert, the minimum deal rating worth an alert, quiet hours, the bedtime bundle, the cheap-card limit, a monthly budget, watched sellers, sellers who combine shipping and extra searches.
 
+
+The bot fetches a picture of every card you own (the photo from the listing
+you bought it from, when the inventory has its eBay item number) for the
+dashboard's binder: a wall of your cards you can rank and filter, with a card
+sheet showing what you paid, what it's worth now and its recent sales. A card
+is worth the median of its newest three sales in the ledger, so one odd sale
+can't move it. Cards that came untracked can be marked arrived from the
+dashboard.
 ## Google Sheet
 
 Optional: every hourly run can also write your hunt to a Google Sheet you own, for sorting, filtering and sharing. Tabs: **Summary** (cards kept, what you paid, spending by month with a chart, live picks, offers, lowball targets, Gixen totals, the median sold price), **Collection**, **Picks**, **Sold**, **Offers**, **Lowball**, **Snipes** and **Data Sources** (what each tab came from and when). The Summary is written once as formulas over the other tabs, so you can change it; the data tabs are rewritten on every push. Titles go in as plain text, so a listing title can never turn into a formula. Setup takes about five minutes: [docs/SHEETS.md](docs/SHEETS.md). Push by hand with `python -m snipehunt sheets`.

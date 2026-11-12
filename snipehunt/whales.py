@@ -128,7 +128,7 @@ def yours(rows: list[dict], gs: list[dict]) -> dict:
             paid = float(r.get("price_paid") or 0)
         except ValueError:
             paid = 0.0
-        value = round(g["sales"][0]["total"], 2) if g else None
+        value = ledger.value(g)
         mine.append({"card": report.card_name(r)[:90], "tier": t, "paid": paid, "value": value,
                      "image": g["image"] if g else None})
         if str(r.get("dupe") or "").upper() == "Y" and value:

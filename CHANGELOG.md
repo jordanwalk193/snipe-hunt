@@ -7,6 +7,27 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Added
+- **Pictures of the cards you own.** `card_art.py` gives each inventory row with
+  an eBay item number the photo from the listing it was bought from: the ledger's
+  picture when it has one, otherwise an eBay item read (25 a run, in its own
+  `art` lane, the first cut when the day's cap runs low; misses are retried
+  weekly). A card with no listing falls back to a sale of the same card. The
+  snapshot's `cards` gain `i` (picture), `if` (`own` or `same`), `e` (item
+  number) and `h` (the ledger's last 12 sales of the card: date, total, item).
+  The dashboard uses them for its binder wall, card sheet and crown jewels.
+- **`arrived` action.** Cards in the mail you have in hand move to Delivered, or
+  straight to In binder with `"binder": true`: cheap cards often ship untracked,
+  so no delivery email ever moves them on.
+- **More detail for the dashboard.** `record.recent_losses` gain `item_id`,
+  `sold` (what it went for, from the ledger), `image` and `my_max`; Hall of Fame
+  rows, `collection.priciest` rows and `pipeline.unpaid` groups carry inventory
+  ids (`id` / `ids`) so the dashboard can show their pictures.
+
+### Changed
+- **A card is worth the median of its newest three sales** (`ledger.value`), in
+  the collection's worth, the binder, the Hall of Fame and Big money. The newest
+  sale alone let one mis-titled sale make a $2 card look like a $25 one.
+
 - **Ledger jackpots, a mega tier, a critical alert and a Home Assistant event.**
   `jackpot.scan` prices every live listing from the ledger alone (two or more
   fresh sales of exactly the card, a sure match for the player or team, no

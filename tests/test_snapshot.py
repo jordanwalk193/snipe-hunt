@@ -336,3 +336,21 @@ def test_a_long_shot_is_labelled_on_the_dashboard():
     con.commit()
     got = next(x for x in snapshot.snapshot(con, datetime.now(config.TZ))["picks"] if x["item_id"] == "78")
     assert got["long_shot"] is True and got["tier"] == "yellow"
+
+
+def test_arrived_moves_cards_in_the_mail_to_file_or_straight_to_the_binder(con, monkeypatch):
+    from snipehunt import actions
+    # Untracked envelopes never send a delivery email; "arrived" moves them on by hand.
+    config.INVENTORY.write_text("id,year,set,card,parallel,card_no,serial,status,price_paid\n"
+                                "1,2023,Topps,Base,Base,1,,In transit,2.00\n"
+                                "2,2023,Topps,Base,Base,2,,In transit,3.00\n"
+                                "3,2023,Topps,Base,Base,3,,In binder,3.00\n")
+    pushed = []
+    monkeypatch.setattr(actions.gitsync, "pull", lambda: None)
+    monkeypatch.setattr(actions, "_push_inventory", lambda msg: pushed.append(msg))
+    ok, message = actions.handle(con, {"action": "arrived", "ids": ["1", "3"]})
+    assert ok and "Arrived" in message
+    ok, message = actions.handle(con, {"action": "arrived", "ids": ["2"], "binder": True})
+    text = config.INVENTORY.read_text()
+    assert "1,2023,Topps,Base,Base,1,,Delivered,2.00" in text and "2,2023,Topps,Base,Base,2,,In binder,3.00" in text
+    assert "3,2023,Topps,Base,Base,3,,In binder,3.00" in text      # never moved backwards

@@ -146,7 +146,7 @@ def hall(con, rows: list[dict] | None = None, groups: list[dict] | None = None,
         g = ledger.match_row(groups, r)
         pick = picks.get((r.get("ebay_item_id") or "").strip())
         if g:
-            value, by, image = float(g["sales"][0]["total"]), "sales", g["image"]
+            value, by, image = ledger.value(g), "sales", g["image"]
         elif pick:
             value, by, image = float(pick["value"]), "bot", pick.get("image")
         else:
@@ -155,7 +155,7 @@ def hall(con, rows: list[dict] | None = None, groups: list[dict] | None = None,
         if value <= 0:
             unpriced += 1
             continue
-        priced.append({"card": name[:90], "paid": round(paid, 2), "value": round(value, 2),
+        priced.append({"id": r.get("id"), "card": name[:90], "paid": round(paid, 2), "value": round(value, 2),
                        "saved": round(value - paid, 2), "pct": round(100 * paid / value),
                        "image": image, "by": by, "bot": pick is not None,
                        "year": (r.get("year") or "").strip() or None})
