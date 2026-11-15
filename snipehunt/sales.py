@@ -22,6 +22,7 @@ import sys
 import time
 from collections.abc import Collection
 from datetime import datetime, timezone
+from functools import lru_cache
 
 from . import config, db, profile, settings, usage
 from .hidden import CODE, YEAR
@@ -70,8 +71,21 @@ def words(title: str) -> frozenset[str]:
     On a team bot only the team's words go: the player's name is what tells two
     cards from the same set apart."""
     who = profile.get()
-    name = set(re.findall(r"[a-z0-9]+", " ".join(
-        [who.player, who.search_name, *who.team_words]).lower()))
+    return _words(title, _name_words(who.player, who.search_name, tuple(who.team_words)))
+
+
+TITLE_CACHE = 16384   # titles whose words are kept: the ledger compares every sale with every other
+
+
+@lru_cache(maxsize=64)
+def _name_words(player: str, search_name: str, team_words: tuple) -> frozenset[str]:
+    return frozenset(re.findall(r"[a-z0-9]+", " ".join([player, search_name, *team_words]).lower()))
+
+
+@lru_cache(maxsize=TITLE_CACHE)
+def _words(title: str, name: frozenset[str]) -> frozenset[str]:
+    """words() for one profile's name words; kept, since the same titles are read
+    over and over (sales.history, ledger.groups and find_missed pair every sale)."""
     found = re.findall(r"[a-z0-9]+", title.lower().replace("'", ""))
     return frozenset(w for w in found if w not in name and w not in FILLER)
 
@@ -171,6 +185,7 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
     return added
 
 
+@lru_cache(maxsize=TITLE_CACHE)   # a pure function of the title, asked for per pair
 def card_number(title: str) -> str | None:
     """The card's number as printed, without "#" or dashes: BCP-236, #42, US123, TN-12."""
     for code in CODE.findall(title.upper()):   # the same pattern the no-name search uses
@@ -199,6 +214,7 @@ def _number_match(a: str, b: str) -> bool | None:
     return short.isdigit() and long.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ") == short
 
 
+@lru_cache(maxsize=TITLE_CACHE)
 def _year(title: str) -> str | None:
     found = YEAR.search(title)
     return found.group(1) if found else None
@@ -508,7 +524,12 @@ SAME_CARD = 0.75        # title overlap that makes two listings the same card
 
 def card_key(title: str) -> frozenset[str]:
     """The identifying words, with "07/50" read as "/50": which copy doesn't matter."""
-    return words(re.sub(r"\b\d{1,3}\s?/\s?(\d{1,3})\b", r" \1 ", title))
+    return words(_copyless(title))
+
+
+@lru_cache(maxsize=TITLE_CACHE)
+def _copyless(title: str) -> str:
+    return re.sub(r"\b\d{1,3}\s?/\s?(\d{1,3})\b", r" \1 ", title)
 
 
 GRADE = re.compile(r"\b(psa|bgs|sgc|cgc|beckett)\s*(\d{1,2}(?:\.5)?)?", re.I)
@@ -552,15 +573,26 @@ def _same(a: str, b: str) -> bool:
             and (profile.get().mode != "team" or same_player(a, b)))
 
 
+def _alike_keys(one: frozenset[str], two: frozenset[str]) -> bool:
+    """The word half of _same, on card keys already worked out."""
+    return bool(one and two) and len(one & two) / len(one | two) >= SAME_CARD
+
+
 def history(con, limit: int = 12) -> list[dict]:
     """Cards that have sold more than once, with every price: the start of a price trend."""
     groups: list[dict] = []
+    # _same wants the same traits and SAME_CARD of the words: only groups that pass
+    # both cheap checks are asked, so 2,000 sales take seconds, not half a minute
+    by_traits: dict[tuple, list[dict]] = {}
     for row in with_calls(con):   # newest first
-        group = next((g for g in groups if _same(row["title"], g["title"])), None)
+        key = card_key(row["title"])
+        group = next((g for g in by_traits.get(traits(row["title"]), ())
+                      if _alike_keys(key, g["key"]) and _same(row["title"], g["title"])), None)
         if group is None:
             group = {"title": row["title"], "image": row["image"],
-                     "item_id": row["item_id"], "sales": []}
+                     "item_id": row["item_id"], "sales": [], "key": key}
             groups.append(group)
+            by_traits.setdefault(traits(row["title"]), []).append(group)
         group["sales"].append(row)
     out = []
     for g in groups:
