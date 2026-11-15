@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from . import (aspects, authcheck, card_art, bidnow, bids, brag, config, db, deep, ebay_search, filters,
+from . import (aspects, authcheck, card_art, bidnow, bids, config, db, deep, ebay_search, filters,
                gitsync, gixen, hidden, inventory, inventory_sync, jackpot,
                limited_drops, lowball, midtier, notify, offers, ops, priority, profile, rarity,
                reflect, report, sales, score, settings, sheets, shortlist, snipecheck,

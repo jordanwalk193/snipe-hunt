@@ -8,7 +8,6 @@ import argparse
 import email
 import html
 import imaplib
-import json
 import re
 import sys
 from datetime import date, datetime, timedelta

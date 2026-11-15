@@ -53,15 +53,6 @@ def name_for(concept: str, con=None) -> str:
     return next((n for n in names if pattern.match(n)), FALLBACK[concept])
 
 
-def values_for(concept: str, con=None) -> list[str]:
-    """The values eBay has shown for that name, most common first (empty before a refresh)."""
-    try:
-        names = cached(con or db.connect()).get("names", {})
-    except Exception:
-        return []
-    return names.get(name_for(concept, con), [])
-
-
 def names(con=None) -> dict[str, str]:
     """Every concept's eBay name, for detectors that read several at once."""
     return {concept: name_for(concept, con) for concept in CONCEPTS}
