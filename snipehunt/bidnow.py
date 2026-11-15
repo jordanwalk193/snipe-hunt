@@ -43,7 +43,8 @@ def _trusted(p: dict) -> bool:
     return not (p.get("tier") == "drop" or p.get("unverified") or p.get("scam_risk")
                 or p.get("new_seller") or p.get("fake_auto")
                 or "fake_auto" in (p.get("flags") or [])
-                or (p.get("slab") or {}).get("problem") or filters.doubted(p))
+                or (p.get("slab") or {}).get("problem") or filters.doubted(p)
+                or (filters.says_auto(p) and not p.get("auto_proof")))   # an auto needs proof
 
 
 def unowned(picks: list[dict], rows: list[dict] | None = None) -> list[dict]:

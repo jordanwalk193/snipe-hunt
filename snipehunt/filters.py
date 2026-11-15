@@ -85,22 +85,28 @@ def fake_auto(title: str, description: str = "", specifics: dict | None = None,
 # Whole words only, and a hyphen counts as part of a word, so "IP-JW" (a card
 # code), "IPA", "SHIPPING" and "TTMs" don't match.
 _SEP = r"[\s\-]+"
+# Third-party authenticators: a pack-pulled auto is certified by its maker, so a
+# JSA, PSA/DNA or BAS signature was signed after the fact.
 STRONG = ("aftermarket", "unauthenticated", f"not{_SEP}certified", "ip", "ttm",
           f"through{_SEP}the{_SEP}mail", f"signed{_SEP}in{_SEP}person", f"in{_SEP}person",
-          f"no{_SEP}coa")
+          f"no{_SEP}coa", "jsa", r"psa\s?[/\-]?\s?dna", "bas")
 WEAK = (f"hand{_SEP}signed", "sharpie")   # real autos are hand signed too: only without proof
-# Words that still mean aftermarket next to a "certified" elsewhere in the listing.
-ALWAYS = frozenset({"aftermarket", "unauthenticated", "not certified"})
+# Words that still mean aftermarket next to proof elsewhere in the listing.
+ALWAYS = frozenset({"aftermarket", "unauthenticated"})
 _AFTER = re.compile(r"(?<![\w-])(" + "|".join(STRONG) + r")(?![\w-])", re.I)
 _WEAK = re.compile(r"(?<![\w-])(" + "|".join(WEAK) + r")(?![\w-])", re.I)
-# "We never sell aftermarket or IP autos": a store's boilerplate, not this card.
-_NEGATED = re.compile(r"\b(never|not|no|don'?t|do not|won'?t|doesn'?t)\b.{0,30}"
-                      r"\b(sell|sold|offer|carry|list)\w*\b", re.I | re.S)
-NEGATION_WINDOW = 40      # characters before a word that may hold the store's "we never sell"
-PROOF = re.compile(r"certified\s+autograph\s+issue|(?<!not\s)(?<!un)(?<!non-)(?<!non)\bcertified\b"
-                   r"|\bon[\s-]card\b|\bsticker\s+auto|\bpack[\s-]pulled\b", re.I)
-# An autograph card's own code: CPA-JW, BTPA-JW, RA-JW (capitals, as the card prints it)
-AUTO_CODE = re.compile(r"(?<![A-Za-z0-9])[A-Z]{0,4}A-[A-Z]{2,4}\b")
+# "No IP autos here", "We do not deal in aftermarket or IP autos", "NOT an aftermarket
+# auto": a negation earlier in the same clause, within NEGATION_WORDS words.
+_CLAUSE = re.compile(r"[.!?;:,]|\bbut\b|\bhowever\b", re.I)
+_NEGATION = re.compile(r"\b(no|not|never|isn'?t|aren'?t|don'?t|doesn'?t|won'?t|non)\b", re.I)
+NEGATION_WORDS = 6
+# "not certified by PSA": not graded, nothing to do with who signed it
+_UNGRADED = re.compile(r"\s+(by|through|with)\s+(psa|bgs|sgc|cgc|beckett)\b", re.I)
+PROOF = re.compile(r"certified\s+autograph\s+issue|\bon[\s-]card\b|\bsticker\s+auto|\bpack[\s-]pulled\b"
+                   r"|\b(topps|bowman|panini|leaf|upper\s+deck|donruss|fanatics)\s+certified\b", re.I)
+# An autograph card's own code, as the maker prints it: CPA-JW, BTPA-JW, CRA-JW.
+AUTO_CODE = re.compile(r"(?<![A-Za-z0-9])(CPA|BCPA|BTPA|BDPA|BSPA|BCMA|BPA|BMA|CDA|CRA|CRDA|RA|"
+                       r"FFA|TCA|PA|ROA|RAC|SSA|BA|TA|CA)-[A-Z]{2,4}\b")
 MAKERS = frozenset({"topps", "bowman", "panini", "upper deck", "leaf", "manufacturer",
                     "fanatics", "donruss"})
 AUTHENTICATION = "Autograph Authentication"   # eBay's item specific: who vouches for the signature
@@ -108,13 +114,14 @@ AFTERMARKET_WHY = "aftermarket signature (IP/TTM), not a certified auto"
 
 
 def _norm(word: str) -> str:
-    return re.sub(r"[\s\-]+", " ", word.lower())
+    return re.sub(r"[\s\-/]+", " ", word.lower())
 
 
 def auto_proof(title: str, description: str = "", specifics: dict | None = None) -> bool:
-    """Something in the listing says the autograph is the maker's own: certified,
-    on-card or sticker, pack pulled, an autograph card code, or the maker named
-    as the authenticator in item specifics."""
+    """Something in the listing says the autograph is the maker's own: its certified
+    autograph wording, on-card or sticker, pack pulled, an autograph card code, or the
+    maker named as authenticator in item specifics. A bare "certified" doesn't count:
+    "JSA certified" is how an in-person signature is sold."""
     if PROOF.search(title) or PROOF.search(description or ""):
         return True
     if AUTO_NUMBER.search(title) or AUTO_CODE.search(title):
@@ -123,23 +130,33 @@ def auto_proof(title: str, description: str = "", specifics: dict | None = None)
     return any(m in who for m in MAKERS)
 
 
+def _negated(text: str, start: int) -> bool:
+    """A no/not/never earlier in the same clause, a few words before this word."""
+    before = text[:start]
+    cut = list(_CLAUSE.finditer(before))
+    clause = before[cut[-1].end():] if cut else before
+    return bool(_NEGATION.search(" ".join(clause.split()[-NEGATION_WORDS:])))
+
+
 def aftermarket_auto(title: str, description: str = "", specifics: dict | None = None) -> str | None:
-    """The word that makes this an aftermarket autograph (signed in person or by
-    mail), or None. A seller's "we never sell IP autos" doesn't count."""
+    """The word that makes this an aftermarket autograph (signed in person, by mail
+    or authenticated by a third party), or None. "No IP autos here" doesn't count."""
     proof = auto_proof(title, description, specifics)
     texts = [title, description or ""] + [str(v) for v in (specifics or {}).values()]
     for text in texts:
         for m in _AFTER.finditer(text):
-            if _NEGATED.search(text[max(0, m.start() - NEGATION_WINDOW):m.start()]):
-                continue
             word = _norm(m.group(1))
+            if _negated(text, m.start()):
+                continue
+            if word == "not certified" and _UNGRADED.match(text, m.end()):
+                continue
             if word in ALWAYS or not proof:
                 return word
     if not proof:
         for text in texts:
-            m = _WEAK.search(text)
-            if m:
-                return _norm(m.group(1))
+            for m in _WEAK.finditer(text):
+                if not _negated(text, m.start()):
+                    return _norm(m.group(1))
     return None
 
 
@@ -149,18 +166,21 @@ def says_auto(pick: dict) -> bool:
     return bool(sales.AUTO.search(pick.get("title") or "") or sales.AUTO.search(pick.get("card") or ""))
 
 
-_RUN = re.compile(r"/\s?(\d{1,4})\b")
+_RUN = re.compile(r"(?<!\d{4})/\s?(\d{1,4})\b")   # "2023/24" is a season, not a print run
 
 
 def serial_unconfirmed(card: str, title: str, specifics: dict | None, text: str) -> str | None:
-    """The print run ("99") the scorer's card name claims that nothing the seller
-    wrote backs up (title, item specifics, description), or None."""
+    """The print run ("99") the scorer's card name claims for an autograph that
+    nothing the seller wrote backs up (title, item specifics, description), or None.
+    Only autographs: a Gold /50 is numbered by definition, a raw title often leaves it
+    out, and that hidden number is a real find."""
+    from . import sales   # sales imports ebay_search, which imports this; kept local
     claimed = _RUN.search(card or "")
-    if not claimed:
+    if not claimed or not (sales.AUTO.search(card or "") or sales.AUTO.search(title or "")):
         return None
     run = claimed.group(1)
     seller = f"{title} {text or ''}"
-    if re.search(rf"/\s?0*{run}\b|\b(of|to)\s+{run}\b|#\s?d\s+(to\s+)?{run}\b", seller, re.I):
+    if re.search(rf"/\s?0*{run}\b|\b(of|to|numbered|#'?d)\s+(to\s+)?{run}\b", seller, re.I):
         return None
     if any(re.search(rf"(?<!\d)0*{run}(?!\d)", str(v)) for v in (specifics or {}).values()):
         return None

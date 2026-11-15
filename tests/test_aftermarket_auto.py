@@ -319,3 +319,130 @@ def test_snapshot_carries_the_doubt_flags():
     add(con, "900000000083", auto_unverified=True)
     con.commit()
     assert snapshot.snapshot(con, SNAP_NOW)["picks"][0]["auto_unverified"] is True
+
+
+# ------------------------------------------------- final review fixes (2026-11-15)
+CERT = "2023 Bowman Chrome Jordan Walker Refractor Auto /99"
+
+
+@pytest.mark.parametrize("title,desc", [
+    ("Jordan Walker Signed Bowman Card", "Signed TTM. JSA certified with sticker."),
+    ("Jordan Walker Signed In Person Auto PSA-DNA Bowman", ""),
+    ("JORDAN WALKER SIGNED IP AUTO USA-ONLY", ""),
+    ("Jordan Walker Signed Bowman", "Signed IP at spring training. All our autographs are certified authentic!"),
+    ("Jordan Walker Signed Topps card JSA", ""),
+])
+def test_third_party_authentication_is_not_proof(title, desc):
+    assert not filters.auto_proof(title, desc)
+    assert filters.aftermarket_auto(title, desc)
+
+
+@pytest.mark.parametrize("desc", [
+    "Topps Certified Autograph Issue. We guarantee: no aftermarket autos in our store.",
+    "This is NOT an aftermarket auto. Topps Certified Autograph Issue.",
+    "We do not deal in aftermarket or IP autos. Pack pulled.",
+    "Card is raw, not certified by PSA. Topps Certified Autograph Issue on back.",
+    "Not IP, this is the real pack auto.",
+    "No IP autos here, this is a real Topps auto from a hobby box.",
+])
+def test_store_wording_does_not_flag_a_certified_auto(desc):
+    assert filters.aftermarket_auto(CERT, desc) is None
+
+
+@pytest.mark.parametrize("desc", [
+    "Price firm, no offers. Signed TTM in 2023.",
+    "No returns on items sold. Signed in person at spring training.",
+    "Not graded, signed in person at the ballpark.",
+])
+def test_a_negation_in_another_sentence_does_not_hide_ip(desc):
+    assert filters.aftermarket_auto("Jordan Walker Bowman signed", desc)
+
+
+def test_serial_check_only_for_autos_and_not_seasons():
+    gold = "2023 Bowman Chrome Jordan Walker Gold Refractor /50"
+    assert filters.serial_unconfirmed(gold, "2023 Bowman Chrome Jordan Walker Gold Refractor", {}, "") is None
+    assert filters.serial_unconfirmed("2023/24 Panini Prizm Auto", "2023-24 Panini Prizm Walker Auto", {}, "") is None
+    assert filters.serial_unconfirmed(REPORTED_TITLE, "Walker Auto numbered 99", {}, "") is None
+    assert filters.serial_unconfirmed(REPORTED_TITLE, SELLER_TITLE, {}, "") == "99"
+
+
+def test_unread_autos_wait_for_their_read():
+    con = db.connect()
+    autocheck.enrich(con, [listing(SELLER_TITLE, item_id="900000000101")], client=Client())
+    later = listing(SELLER_TITLE, item_id="900000000102")
+    plain = listing("2023 Bowman Scouts Top 100 Walker", item_id="900000000103")
+    assert autocheck.unread(con, [listing(SELLER_TITLE, item_id="900000000101"), later, plain]) \
+        == {"900000000102"}
+
+
+def test_a_stored_pick_takes_the_read_when_it_comes():
+    con = db.connect()
+    item = listing(SELLER_TITLE, item_id="900000000111")
+    item.end_time = SOON
+    stored = score._pick_dict(item, dict(CLAIM))       # scored before its description was read
+    assert stored["tier"] == "yellow" or "ip_auto" not in stored
+    stored.pop("auto_proof", None)                      # as a pick saved before this change
+    stored.update(tier="fire", edge="hidden", value=43.0, max=18.18)
+    stored.pop("auto_unverified", None)
+    db.save_pick(con, stored)
+    autocheck.enrich(con, [listing(SELLER_TITLE, item_id="900000000111")], client=Client())
+    assert autocheck.patch_picks(con) == 1
+    import json
+    kept = json.loads(con.execute("SELECT data FROM picks WHERE item_id='900000000111'").fetchone()[0])
+    assert kept["ip_auto"] and kept["tier"] == "yellow" and kept["value"] <= score.IP_VALUE_CAP
+    assert autocheck.patch_picks(con) == 0              # nothing left to change
+
+
+def test_bidnow_needs_proof_for_an_auto():
+    assert bidnow._trusted(cheap_auto())
+    p = cheap_auto()
+    del p["auto_proof"]
+    assert not bidnow._trusted(p)
+
+
+def test_a_full_read_keeps_the_description_and_flags():
+    item = listing(SELLER_TITLE)
+    ebay_search.enrich(item, {"description": f"<p>{REPORTED_DESC}</p>"})
+    assert "in-person" in item.description and "aftermarket_auto" in item.flags
+    assert item.auto_proof is False
+
+
+def test_midtier_never_alerts_a_doubted_auto():
+    from snipehunt import midtier
+    from tests.test_thin_comps import NOW as T, comp
+    item = Listing("900000000121", "2021 Bowman Jordon Walker Auto CPA-JW /99", 5.0, "USD", 0.0,
+                   ["AUCTION"], 0, None, "s", "u", None, auto_proof=True,
+                   signals=[{"name": "typo_name", "weight": 3, "positive": True, "why": "x"}])
+    base = {"item_id": "900000000121", "title": item.title, "card": item.title, "price": 5.0,
+            "shipping": 0.0, "is_auction": True, "max": 1.0, "tier": "fire", "value": 200.0,
+            "max_basis": "sales", "auto_proof": True, "why": ""}
+    comps = [comp(200, 1), comp(210, 2), comp(190, 3)]
+    cfg = midtier.config_now() or midtier.DEFAULTS
+    assert midtier.decide(dict(base), item, cfg, comps, T)["midtier"]["alert"]       # the control
+    out = midtier.decide(dict(base, serial_unconfirmed=True), item, cfg, comps, T)
+    assert not out["midtier"]["alert"] and "serial_unconfirmed" in out["midtier"]["reason"]
+
+
+def test_the_run_holds_back_autos_not_read_yet(monkeypatch):
+    from snipehunt import jobs
+    monkeypatch.setattr(autocheck, "enrich", lambda con, listings: 0)   # the cap was reached
+    held = jobs._autocheck(db.connect(), [listing(SELLER_TITLE, item_id="900000000131"),
+                                          listing("2023 Bowman Walker", item_id="900000000132")])
+    assert held == {"900000000131"}
+
+
+def test_a_failed_read_is_tried_again_but_does_not_hold_the_listing():
+    class Down:
+        calls = 0
+
+        def item(self, item_id, lane="item", fresh=False):
+            Down.calls += 1
+            raise RuntimeError("eBay is down")
+    con = db.connect()
+    item = listing(SELLER_TITLE, item_id="900000000141")
+    autocheck.enrich(con, [item], client=Down())
+    assert autocheck.unread(con, [item]) == set()        # scored now, with no proof
+    assert item.auto_proof is False
+    later = listing(SELLER_TITLE, item_id="900000000141")
+    autocheck.enrich(con, [later], client=Client())       # the next run reads it
+    assert later.aftermarket if hasattr(later, "aftermarket") else "aftermarket_auto" in later.flags

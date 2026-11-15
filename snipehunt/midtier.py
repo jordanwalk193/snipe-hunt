@@ -286,7 +286,11 @@ def decide(pick: dict, item: Listing, cfg: dict, comps: list[dict] | None = None
                     comps_cap=rated["cap"])
     if lane["alert"] and mislabel.qualifies(signals, forgive_facsimile=bool(rated)):
         pick["edge"] = "mislabeled"
-    return score.apply_caps(pick)
+    pick = score.apply_caps(pick)
+    doubt = filters.doubted(pick)   # an IP/TTM auto, an unproven auto, an unconfirmed print run
+    if doubt and lane["alert"]:
+        lane["alert"], lane["reason"] = False, f"autograph doubt: {doubt}"
+    return pick
 
 
 def score_lane(con, items: list[Listing], on_batch=None) -> list[dict]:

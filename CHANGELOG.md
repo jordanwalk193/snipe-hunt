@@ -17,6 +17,11 @@ appear in any release; renaming or removing one needs a new API version.
   or the maker as authenticator); an auto nothing proves, under a quarter of its
   value, is capped at yellow (`auto_unverified`). A print run only the scorer's
   card name claims is `serial_unconfirmed`: no jackpot and no "hidden" edge.
+  A JSA, PSA/DNA or BAS signature counts as aftermarket; "certified" alone is
+  not proof. A seller's "no IP autos here" doesn't flag a listing. A listing
+  that says auto waits one run for its description when the 25 reads are used
+  up, and stored picks take a read that came after them. The mid-tier lane
+  never alerts a doubted auto, and the print-run check applies to autographs only.
 
 ### Added
 - **Pictures of the cards you own.** `card_art.py` gives each inventory row with

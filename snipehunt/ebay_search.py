@@ -400,6 +400,12 @@ def enrich(item: Listing, raw: dict) -> Listing:
     item.category_id = str(raw.get("categoryId") or item.category_id or "") or None
     item.condition_id = str(raw.get("conditionId") or item.condition_id or "") or None
     item.short_description = item.short_description or str(raw.get("shortDescription") or "")[:600]
+    if raw.get("description"):   # the seller's words: is an autograph the maker's? (autocheck.py)
+        from . import filters   # filters imports aspects, which imports this module's neighbours
+        item.description = description_text(raw)
+        item.auto_proof = filters.auto_proof(item.title, f"{item.short_description} {item.description}",
+                                             item.aspects)
+        filters.flag(item)
     return item
 
 

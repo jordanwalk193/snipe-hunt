@@ -55,7 +55,7 @@ def hourly(dry_run: bool = False) -> str:
             print(f"specifics: {n} vague titles identified", file=sys.stderr)
     except Exception as exc:
         print(f"specifics: {exc}", file=sys.stderr)
-    _autocheck(con, listings)
+    held = _autocheck(con, listings)
     moves = _remember(con, listings)
     if not dry_run and not first_run:
         watch.save(con, moves)
@@ -143,6 +143,7 @@ def hourly(dry_run: bool = False) -> str:
             fresh = [i for i in fresh if i.item_id in keep or i not in swept]
             print(f"deep: {len(keep)} of {len(swept)} standing Buy It Nows worth a look",
                   file=sys.stderr)
+    fresh = [i for i in fresh if i.item_id not in held]   # autos wait for their description
 
     failed = None
     try:
@@ -342,14 +343,24 @@ def lastcall(dry_run: bool = False) -> str:
             f"{len(hits)} lowball last call{'s' if len(hits) != 1 else ''}")
 
 
-def _autocheck(con, listings: list) -> None:
-    """Listings that say auto: is it the maker's, or signed in person? (autocheck.py)"""
+def _autocheck(con, listings: list) -> set[str]:
+    """Listings that say auto: is it the maker's, or signed in person? (autocheck.py)
+    Stored picks take the reads that came after them. Returns the item ids still
+    unread, which wait for the next run instead of being scored blind."""
     try:
         n = autocheck.enrich(con, listings)
         if n:
             print(f"autocheck: {n} autograph listings checked", file=sys.stderr)
+        fixed = autocheck.patch_picks(con)
+        if fixed:
+            print(f"autocheck: {fixed} stored picks updated", file=sys.stderr)
+        held = autocheck.unread(con, listings)
+        if held:
+            print(f"autocheck: {len(held)} autograph listings wait for their read", file=sys.stderr)
+        return held
     except Exception as exc:   # a broken check costs the warning, not the run
         print(f"autocheck: {exc}", file=sys.stderr)
+        return set()
 
 
 def _ledger_jackpots(con, client) -> None:
@@ -430,7 +441,8 @@ def fast(dry_run: bool = False) -> str:
         if item.match != "no" and not item.is_auction:
             found.append(item)
     found, _ = filters.prefilter(found)
-    _autocheck(con, found)
+    held = _autocheck(con, found)
+    found = [i for i in found if i.item_id not in held]   # the hourly run scores them once read
     found, _ = steals.keep(found)   # steals mode's ceiling; a no-op otherwise
     new = [i for i in found if con.execute(
         "SELECT 1 FROM seen WHERE item_id=?", (i.item_id,)).fetchone() is None]
@@ -505,8 +517,9 @@ def backfill(dry_run: bool = False, pages: int = ebay_search.BACKFILL_PAGES,
     listings, junked = filters.prefilter(listings)
     if junked:
         print(f"filters: dropped {sum(junked.values())}", file=sys.stderr)
-    _autocheck(con, listings)
-    fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
+    held = _autocheck(con, listings)
+    fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)
+             and i.item_id not in held]
     print(f"backfill: {len(listings)} listings, {len(fresh)} not scored yet", file=sys.stderr)
     if dry_run:
         return f"{len(listings)} listings, {len(fresh)} would be scored (dry run)"
