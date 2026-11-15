@@ -1,7 +1,7 @@
 """The ledger's grouping is fast and finds exactly what pairing every sale did."""
 import itertools
 
-from snipehunt import config, db, profile, sales
+from snipehunt import config, db, ledger, profile, sales
 
 TEAM = (config.EXAMPLES / "profile.team.example.toml").read_text()
 
@@ -57,3 +57,39 @@ def test_title_words_follow_a_profile_change(monkeypatch):
     monkeypatch.setattr(profile, "_cache", profile.parse(TEAM))
     assert "cardinals" not in sales.words(title)   # a team bot drops its team's words
     assert sales.card_key("Gold 07/50 #3") == sales.card_key("Gold /50 #3")
+
+
+def naive_groups(con):
+    """ledger.groups as it was: every sale against every card, in order."""
+    out = []
+    for row in sales.with_calls(con):
+        if ledger.LOT.search(row["title"] or ""):
+            continue
+        key, kind = sales.card_key(row["title"]), sales.traits(row["title"])
+        g = next((g for g in out if g["traits"] == kind and ledger._alike(g, key, row["title"])), None)
+        if g is None:
+            g = {"title": row["title"], "key": key, "traits": kind, "sales": []}
+            out.append(g)
+        g["sales"].append(row["item_id"])
+    return out
+
+
+def test_ledger_groups_and_find_match_a_scan_of_every_card():
+    con = db.connect()
+    fill(con, 200)
+    # key sizes far apart: a short title and a long one of the same card number
+    con.execute("INSERT INTO sales (item_id, title, price, shipping, bids, sold_at) VALUES "
+                "('x1', 'Sam Example #3', 4, 1, 1, 1), "
+                "('x2', '2023 Topps Chrome Sam Example Refractor #3 RC Prospect Insert Shiny', 4, 1, 1, 2)")
+    con.commit()
+    got = ledger.groups(con)
+    want = naive_groups(con)
+    assert [(g["title"], [s["item_id"] for s in g["sales"]]) for g in got] == \
+        [(g["title"], g["sales"]) for g in want]
+    for title in [g["title"] for g in want] + ["2023 Topps Chrome Sam Example Refractor #3",
+                                               "Sam Example #7 PSA 10", "nothing like it"]:
+        key, kind = sales.card_key(title), sales.traits(title)
+        scan = next((g for g in got if g["traits"] == kind and ledger._alike(g, key, title)), None)
+        assert ledger.find(got, title) is scan
+    shorter = got[1:]   # another list is indexed afresh
+    assert ledger.find(shorter, got[0]["title"]) is not got[0]

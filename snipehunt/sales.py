@@ -731,7 +731,7 @@ def ledger_comps(con, item: Listing, now: float | None = None) -> list[dict]:
 def _parallel(ws) -> frozenset[str]:
     """The parallel words among a title's words ("refractors" counted as "refractor")."""
     from . import ledger   # ledger imports this module; kept local
-    return ledger._stems(ws) & ledger._stems(ledger.PARALLEL_WORDS)
+    return ledger._stems(ws) & ledger._PARALLEL_STEMS
 
 
 def same_parallel(title: str, comps: list[dict]) -> list[dict]:

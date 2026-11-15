@@ -13,6 +13,7 @@ Nothing here reaches eBay or Claude; it is arithmetic on sales already kept.
 from __future__ import annotations
 
 import json
+import math
 import re
 import statistics
 from datetime import datetime
@@ -34,14 +35,16 @@ def groups(con) -> list[dict]:
     """Every card in the ledger with its sales, newest first (sales.history, uncapped).
     Lots are left out: five cards for $9 says nothing about one."""
     out: list[dict] = []
+    idx = _Index()
     for row in sales.with_calls(con):
         if LOT.search(row["title"] or ""):
             continue
         key, kind = sales.card_key(row["title"]), sales.traits(row["title"])
-        g = next((g for g in out if g["traits"] == kind and _alike(g, key, row["title"])), None)
+        g = idx.first(key, kind, row["title"])
         if g is None:
             g = {"title": row["title"], "image": row["image"], "item_id": row["item_id"],
                  "key": key, "traits": kind, "sales": []}
+            idx.add(len(out), g)
             out.append(g)
         g["sales"].append(row)
     return out
@@ -53,15 +56,53 @@ def _alike(g: dict, key: frozenset, title: str) -> bool:
         return False
     if len(key & g["key"]) / len(key | g["key"]) < sales.SAME_CARD:
         return False
-    if _stems(key ^ g["key"]) & _stems(PARALLEL_WORDS):
+    if _stems(key ^ g["key"]) & _PARALLEL_STEMS:
         return False   # "Refractor" on one title only: a parallel, not the same card
     return sales._number_match(title, g["title"]) is not False and (
         getattr(sales, "same_player", None) is None or sales.same_player(title, g["title"]))
 
 
+class _Index:
+    """Ledger cards by traits and by the words of their keys, so a title is only
+    compared with cards it could be. Two keys with SAME_CARD of their words in
+    common share at least one of any (n - SAME_CARD * n + 1) of the title's n words,
+    so only cards holding one of its rarest few are asked. Gives the same card a
+    scan of the whole list in order would."""
+
+    def __init__(self, gs: list[dict] = ()) -> None:
+        # traits -> word -> positions, and position -> card
+        self.words: dict[tuple, dict[str, list[int]]] = {}
+        self.cards: dict[int, dict] = {}
+        for pos, g in enumerate(gs):
+            self.add(pos, g)
+
+    def add(self, pos: int, g: dict) -> None:
+        self.cards[pos] = g
+        posting = self.words.setdefault(g["traits"], {})
+        for w in g["key"]:
+            posting.setdefault(w, []).append(pos)
+
+    def first(self, key: frozenset, kind: tuple, title: str) -> dict | None:
+        posting = self.words.get(kind)
+        if not key or not posting:
+            return None
+        need = math.ceil(len(key) * sales.SAME_CARD - 1e-9)   # words a match must share
+        rare = sorted(key, key=lambda w: (len(posting.get(w, ())), w))[:len(key) - need + 1]
+        for pos in sorted({p for w in rare for p in posting.get(w, ())}):
+            if _alike(self.cards[pos], key, title):
+                return self.cards[pos]
+        return None
+
+
+_last_index: list = [None, -1, None]   # the list find() last indexed, its length, the index
+
+
 def find(gs: list[dict], title: str) -> dict | None:
-    key, kind = sales.card_key(title), sales.traits(title)
-    return next((g for g in gs if g["traits"] == kind and _alike(g, key, title)), None)
+    """The ledger card a title is. The index is kept for the list it was built on,
+    since callers look up a whole run's listings against one list."""
+    if _last_index[0] is not gs or _last_index[1] != len(gs):
+        _last_index[:] = [gs, len(gs), _Index(gs)]
+    return _last_index[2].first(sales.card_key(title), sales.traits(title), title)
 
 
 
@@ -94,6 +135,10 @@ GENERIC = frozenset("base insert prospect prospects rookie card design variation
 def _stems(ws) -> frozenset[str]:
     """"refractors" is "refractor": the plural a title uses must not hide a parallel."""
     return frozenset(w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w for w in ws)
+
+
+_PARALLEL_STEMS = _stems(PARALLEL_WORDS)
+_PARALLEL_SET_STEMS = _stems(PARALLEL_WORDS | SET_WORDS)
 
 
 def row_parts(row: dict) -> dict:
@@ -138,7 +183,7 @@ def _row_fit(parts: dict, g: dict) -> tuple | None:
         return None   # "2026 Topps Now" alone can't claim a numbered card
     number_words = _stems(sales.words(f"{parts['number']} {parts['run'] or ''}")) | {parts["year"]}
     extra = tw - parts["own"] - number_words
-    if extra & _stems(PARALLEL_WORDS | SET_WORDS):
+    if extra & _PARALLEL_SET_STEMS:
         return None
     return (numbered is True, len(parts["set"] & tw), len(g["sales"]))
 
