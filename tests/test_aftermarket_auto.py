@@ -63,3 +63,72 @@ def test_doubted_names_the_flag():
     assert filters.doubted({"auto_unverified": True}) == "auto_unverified"
     assert filters.doubted({"serial_unconfirmed": True}) == "serial_unconfirmed"
     assert filters.doubted({"tier": "fire"}) is None
+
+
+# ------------------------------------------------------------- reading descriptions
+from snipehunt import autocheck, db, ebay_search, item_cache  # noqa: E402
+from snipehunt.ebay_search import Listing  # noqa: E402
+
+
+def listing(title, item_id="900000000001", price=0.99, shipping=1.99, auction=True,
+            description="", aspects=None):
+    return Listing(item_id=item_id, title=title, price=price, currency="USD", shipping=shipping,
+                   buying_options=["AUCTION"] if auction else ["FIXED_PRICE"], bid_count=0,
+                   end_time="2026-11-20T21:00-05:00", seller="made_up_seller",
+                   url=f"https://ebay.com/itm/{item_id}", image=None,
+                   aspects=aspects or {}, short_description=description)
+
+
+class Client:
+    def __init__(self, description=REPORTED_DESC):
+        self.calls, self.description = [], description
+
+    def item(self, item_id, lane="item", fresh=False):
+        self.calls.append(item_id)
+        return {"description": f"<p>{self.description}</p>"}
+
+
+def test_enrich_reads_auto_listings_once():
+    con, client = db.connect(), Client()
+    first = listing(SELLER_TITLE)
+    assert autocheck.enrich(con, [first], client=client) == 1
+    again = listing(SELLER_TITLE)
+    assert autocheck.enrich(con, [again], client=client) == 1
+    assert client.calls == ["900000000001"]           # the second run read the table
+    for item in (first, again):
+        assert "aftermarket_auto" in item.flags and item.auto_proof is False
+        assert "in-person" in item.description
+
+
+def test_enrich_skips_non_auto_titles():
+    client = Client()
+    assert autocheck.enrich(db.connect(), [listing("2023 Bowman Scouts Top 100 Walker")],
+                            client=client) == 0
+    assert client.calls == []
+
+
+def test_enrich_reads_a_signed_listing_from_its_specifics():
+    client = Client("Topps Certified Autograph Issue")
+    item = listing("2023 Bowman Scouts Top 100 Walker", aspects={"Autographed": "Yes"})
+    assert autocheck.enrich(db.connect(), [item], client=client) == 1
+    assert item.auto_proof is True and "aftermarket_auto" not in item.flags
+
+
+def test_enrich_stops_at_limit():
+    client = Client()
+    items = [listing(SELLER_TITLE, item_id=f"90000000000{n}") for n in range(3)]
+    assert autocheck.enrich(db.connect(), items, client=client, limit=2) == 2
+    assert len(client.calls) == 2
+    assert "aftermarket_auto" not in items[2].flags and items[2].auto_proof is False
+
+
+def test_description_text_strips_html():
+    raw = {"description": "<b>Topps&nbsp;Certified</b>\n\n Autograph<script>x()</script>"}
+    assert ebay_search.description_text(raw) == "Topps Certified Autograph"
+    assert len(ebay_search.description_text({"description": "a " * 5000})) <= ebay_search.DESCRIPTION_CHARS
+
+
+def test_cache_keeps_description_text():
+    con = db.connect()
+    item_cache.put(con, "900000000009", {"description": "<p>signed in person</p>", "title": "t"})
+    assert item_cache.get(con, "900000000009")["description"] == "signed in person"

@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta
 
 from . import (aspects, authcheck, card_art, bidnow, bids, brag, config, db, deep, ebay_search, filters,
-               gitsync, gixen, hidden, inventory, inventory_sync, jackpot,
+               autocheck, gitsync, gixen, hidden, inventory, inventory_sync, jackpot,
                limited_drops, lowball, midtier, notify, offers, ops, priority, profile, rarity,
                reflect, report, sales, score, settings, sheets, shortlist, snipecheck,
                specifics, steals, usage, watch, wins)
@@ -55,6 +55,7 @@ def hourly(dry_run: bool = False) -> str:
             print(f"specifics: {n} vague titles identified", file=sys.stderr)
     except Exception as exc:
         print(f"specifics: {exc}", file=sys.stderr)
+    _autocheck(con, listings)
     moves = _remember(con, listings)
     if not dry_run and not first_run:
         watch.save(con, moves)
@@ -341,6 +342,16 @@ def lastcall(dry_run: bool = False) -> str:
             f"{len(hits)} lowball last call{'s' if len(hits) != 1 else ''}")
 
 
+def _autocheck(con, listings: list) -> None:
+    """Listings that say auto: is it the maker's, or signed in person? (autocheck.py)"""
+    try:
+        n = autocheck.enrich(con, listings)
+        if n:
+            print(f"autocheck: {n} autograph listings checked", file=sys.stderr)
+    except Exception as exc:   # a broken check costs the warning, not the run
+        print(f"autocheck: {exc}", file=sys.stderr)
+
+
 def _ledger_jackpots(con, client) -> None:
     """The ledger pass (jackpot.ledger_run): every live listing priced from its recorded
     sales, no Claude, a few eBay reads to confirm; alerted like any jackpot. Runs in
@@ -419,6 +430,7 @@ def fast(dry_run: bool = False) -> str:
         if item.match != "no" and not item.is_auction:
             found.append(item)
     found, _ = filters.prefilter(found)
+    _autocheck(con, found)
     found, _ = steals.keep(found)   # steals mode's ceiling; a no-op otherwise
     new = [i for i in found if con.execute(
         "SELECT 1 FROM seen WHERE item_id=?", (i.item_id,)).fetchone() is None]
@@ -493,6 +505,7 @@ def backfill(dry_run: bool = False, pages: int = ebay_search.BACKFILL_PAGES,
     listings, junked = filters.prefilter(listings)
     if junked:
         print(f"filters: dropped {sum(junked.values())}", file=sys.stderr)
+    _autocheck(con, listings)
     fresh = [i for i in listings if db.needs_scoring(con, i.item_id, i.total)]
     print(f"backfill: {len(listings)} listings, {len(fresh)} not scored yet", file=sys.stderr)
     if dry_run:

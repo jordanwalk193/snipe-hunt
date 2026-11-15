@@ -174,3 +174,10 @@ def test_the_ledger_jackpot_pass_only_reads_single_listings():
     calls = set(re.findall(r"client\.(\w+)\(", text))
     assert calls == {"item"}, calls          # one read-only item call per candidate, nothing else
     assert "ask_claude" not in text and "ask_json" not in text   # and no Claude at all
+
+
+def test_the_autograph_check_only_reads_single_listings():
+    text = source("autocheck.py")
+    calls = set(re.findall(r"client\.(\w+)\(", text))
+    assert calls == {"item"}, calls          # one read-only item call per listing, nothing else
+    assert "ask_claude" not in text and "ask_json" not in text

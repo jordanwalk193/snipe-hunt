@@ -16,7 +16,6 @@ from datetime import datetime
 from . import config, db
 
 KEEP_AFTER_END = 3600
-DROP = ("description",)   # the seller's HTML: large, and nothing reads it
 SCHEMA = ("CREATE TABLE IF NOT EXISTS item_cache (item_id TEXT PRIMARY KEY, data TEXT NOT NULL,"
           " end_ts INTEGER, day TEXT NOT NULL, fetched_at INTEGER NOT NULL)")
 
@@ -59,7 +58,10 @@ def put(con, item_id: str, raw: dict, now: float | None = None) -> None:
     now = now or time.time()
     try:
         con = _con(con)
-        body = {k: v for k, v in raw.items() if k not in DROP}
+        from .ebay_search import description_text   # ebay_search imports this; kept local
+        body = dict(raw)
+        if "description" in body:   # the seller's HTML is large: keep its words (autocheck.py)
+            body["description"] = description_text(raw)
         con.execute("INSERT OR REPLACE INTO item_cache VALUES (?,?,?,?,?)",
                     (str(item_id), json.dumps(body), _end_ts(raw), _today(now), int(now)))
         con.execute("DELETE FROM item_cache WHERE (end_ts IS NOT NULL AND end_ts<?)"

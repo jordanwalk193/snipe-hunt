@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import html
 import json
 import re
 import sys
@@ -141,6 +142,8 @@ class Listing:
     listed_at: str | None = None     # when the listing first went up (eBay itemOriginDate), ISO UTC
     country: str | None = None       # where it ships from, e.g. "US", "CA"
     bin_price: float | None = None  # an auction's Buy It Now price, until the first bid
+    description: str = ""            # the seller's description as plain text (autocheck.py)
+    auto_proof: bool = False         # the listing says the autograph is the maker's (filters.auto_proof)
 
     @property
     def graded(self) -> bool | None:
@@ -363,6 +366,18 @@ def parse_item(raw: dict) -> Listing | None:
         country=(raw.get("itemLocation") or {}).get("country"),
         bin_price=bin_price if bin_price and bin_price > price else None,
     )
+
+
+DESCRIPTION_CHARS = 3000   # enough for the seller's paragraph; boilerplate after it says little
+_SCRIPT = re.compile(r"<(script|style)\b.*?</\1>", re.I | re.S)
+_TAG = re.compile(r"<[^>]+>")
+
+
+def description_text(raw: dict | None) -> str:
+    """The seller's description (HTML) as plain text, cut to DESCRIPTION_CHARS."""
+    text = str((raw or {}).get("description") or "")
+    text = html.unescape(_TAG.sub(" ", _SCRIPT.sub(" ", text)))
+    return " ".join(text.split())[:DESCRIPTION_CHARS]
 
 
 def image_count(raw: dict) -> int | None:

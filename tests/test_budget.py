@@ -137,7 +137,7 @@ def test_the_item_cache_reads_a_live_listing_once_a_day(monkeypatch):
     first = client.item("900000000001")
     second = client.item("900000000001")
     assert len(sent) == 1 and first["localizedAspects"] == second["localizedAspects"]
-    assert "description" not in second        # the seller's HTML isn't kept
+    assert "<" not in second.get("description", "")   # the seller's HTML isn't kept, only its words
     assert ebay_search.LANE_CALLS["item"] == 1
 
 
