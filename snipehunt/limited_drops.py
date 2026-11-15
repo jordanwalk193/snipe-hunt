@@ -125,12 +125,6 @@ def as_pick(drop: dict) -> dict:
             "end_time": None, "why": why, "url": drop.get("url"), "image": None}
 
 
-def format_drop(drop: dict) -> str:
-    p = as_pick(drop)
-    price = f"${p['price']:.2f}" if p["price"] else "price ?"
-    return f"⏰ {p['card']}\n{price} at original price\n{p['why']}\n{drop.get('url', '')}"
-
-
 def new_drops(con, drops: list[dict]) -> list[dict]:
     fresh = []
     for d in drops:

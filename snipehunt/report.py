@@ -1,7 +1,6 @@
 """Weekly report: wins and losses, unpaid wins, deliveries, snipes, totals."""
 from __future__ import annotations
 
-import json
 from collections import Counter
 from datetime import datetime, timedelta
 

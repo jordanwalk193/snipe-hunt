@@ -41,6 +41,12 @@ appear in any release; renaming or removing one needs a new API version.
   ids (`id` / `ids`) so the dashboard can show their pictures.
 
 ### Changed
+- **The ledger is much faster, with the same answers.** Title words, card keys
+  and numbers are kept per title, and the price history, ledger cards, `last_sold`
+  and `ledger_comps` compare a title only with the sales that could be the same
+  card. On a 2,000-sale ledger a dashboard snapshot went from 26 s to about 1 s
+  (price history alone 19 s to 0.3 s), and the jackpot ledger pass, the snipe
+  checker, lowball and offers spend a fraction of the time they did.
 - **A card is worth the median of its newest three sales** (`ledger.value`), in
   the collection's worth, the binder, the Hall of Fame and Big money. The newest
   sale alone let one mis-titled sale make a $2 card look like a $25 one.

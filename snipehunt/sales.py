@@ -16,12 +16,14 @@ Read-only, like the rest of the eBay code: this only ever reads one listing.
 from __future__ import annotations
 
 import json
+import math
 import re
 import statistics
 import sys
 import time
 from collections.abc import Collection
 from datetime import datetime, timezone
+from functools import lru_cache
 
 from . import config, db, profile, settings, usage
 from .hidden import CODE, YEAR
@@ -70,8 +72,21 @@ def words(title: str) -> frozenset[str]:
     On a team bot only the team's words go: the player's name is what tells two
     cards from the same set apart."""
     who = profile.get()
-    name = set(re.findall(r"[a-z0-9]+", " ".join(
-        [who.player, who.search_name, *who.team_words]).lower()))
+    return _words(title, _name_words(who.player, who.search_name, tuple(who.team_words)))
+
+
+TITLE_CACHE = 16384   # titles whose words are kept: the ledger compares every sale with every other
+
+
+@lru_cache(maxsize=64)
+def _name_words(player: str, search_name: str, team_words: tuple) -> frozenset[str]:
+    return frozenset(re.findall(r"[a-z0-9]+", " ".join([player, search_name, *team_words]).lower()))
+
+
+@lru_cache(maxsize=TITLE_CACHE)
+def _words(title: str, name: frozenset[str]) -> frozenset[str]:
+    """words() for one profile's name words; kept, since the same titles are read
+    over and over (sales.history, ledger.groups and find_missed pair every sale)."""
     found = re.findall(r"[a-z0-9]+", title.lower().replace("'", ""))
     return frozenset(w for w in found if w not in name and w not in FILLER)
 
@@ -171,6 +186,7 @@ def collect(con, client: EbayClient | None = None, now: float | None = None) -> 
     return added
 
 
+@lru_cache(maxsize=TITLE_CACHE)   # a pure function of the title, asked for per pair
 def card_number(title: str) -> str | None:
     """The card's number as printed, without "#" or dashes: BCP-236, #42, US123, TN-12."""
     for code in CODE.findall(title.upper()):   # the same pattern the no-name search uses
@@ -199,6 +215,7 @@ def _number_match(a: str, b: str) -> bool | None:
     return short.isdigit() and long.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ") == short
 
 
+@lru_cache(maxsize=TITLE_CACHE)
 def _year(title: str) -> str | None:
     found = YEAR.search(title)
     return found.group(1) if found else None
@@ -508,7 +525,12 @@ SAME_CARD = 0.75        # title overlap that makes two listings the same card
 
 def card_key(title: str) -> frozenset[str]:
     """The identifying words, with "07/50" read as "/50": which copy doesn't matter."""
-    return words(re.sub(r"\b\d{1,3}\s?/\s?(\d{1,3})\b", r" \1 ", title))
+    return words(_copyless(title))
+
+
+@lru_cache(maxsize=TITLE_CACHE)
+def _copyless(title: str) -> str:
+    return re.sub(r"\b\d{1,3}\s?/\s?(\d{1,3})\b", r" \1 ", title)
 
 
 GRADE = re.compile(r"\b(psa|bgs|sgc|cgc|beckett)\s*(\d{1,2}(?:\.5)?)?", re.I)
@@ -553,6 +575,12 @@ def traits(title: str) -> tuple:
             if grade else None, auto, run.group(1) if run else None)
 
 
+@lru_cache(maxsize=TITLE_CACHE)
+def _title_traits(title: str) -> tuple:
+    """traits(), kept per title: ledger_comps asks it of every sale for every listing."""
+    return traits(title)
+
+
 def _same(a: str, b: str) -> bool:
     """Two titles for the same card: like words, the same grade, autograph and print run,
     and no card numbers that disagree."""
@@ -562,15 +590,26 @@ def _same(a: str, b: str) -> bool:
             and (profile.get().mode != "team" or same_player(a, b)))
 
 
+def _alike_keys(one: frozenset[str], two: frozenset[str]) -> bool:
+    """The word half of _same, on card keys already worked out."""
+    return bool(one and two) and len(one & two) / len(one | two) >= SAME_CARD
+
+
 def history(con, limit: int = 12) -> list[dict]:
     """Cards that have sold more than once, with every price: the start of a price trend."""
     groups: list[dict] = []
+    # _same wants the same traits and SAME_CARD of the words: only groups that pass
+    # both cheap checks are asked, so 2,000 sales take seconds, not half a minute
+    by_traits: dict[tuple, list[dict]] = {}
     for row in with_calls(con):   # newest first
-        group = next((g for g in groups if _same(row["title"], g["title"])), None)
+        key = card_key(row["title"])
+        group = next((g for g in by_traits.get(traits(row["title"]), ())
+                      if _alike_keys(key, g["key"]) and _same(row["title"], g["title"])), None)
         if group is None:
             group = {"title": row["title"], "image": row["image"],
-                     "item_id": row["item_id"], "sales": []}
+                     "item_id": row["item_id"], "sales": [], "key": key}
             groups.append(group)
+            by_traits.setdefault(traits(row["title"]), []).append(group)
         group["sales"].append(row)
     out = []
     for g in groups:
@@ -662,12 +701,38 @@ def missed_lines(rows: list[dict]) -> str:
 
 def last_sold(rows: list[dict], title: str, item_id: str = "") -> dict | None:
     """The latest recorded sale of the same card as this title, and how many there are."""
-    same = [r for r in rows if r["item_id"] != item_id and _same(title, r["title"])]
+    same = [r for r in _candidates(rows, title)
+            if r["item_id"] != item_id and _same(title, r["title"])]
     if not same:
         return None
     return {"total": same[0]["total"], "price": same[0]["price"], "n": len(same),
             "estimated": same[0]["estimated"],
             "at": datetime.fromtimestamp(same[0]["sold_at"], config.TZ).date().isoformat()}
+
+
+_rows_index: list = [None, -1, None, None]   # the rows last indexed, their length, the profile, the index
+
+
+def _candidates(rows: list[dict], title: str) -> list[dict]:
+    """The rows _same could call the same card as this title, in order: two card keys
+    with SAME_CARD of their words in common share one of any (n - SAME_CARD * n + 1)
+    of the title's n words, so only rows holding one of its rarest few can match.
+    The word index is kept for the rows it was built on: callers ask about a whole
+    run's listings against one list (snipecheck, lowball, offers, the snapshot)."""
+    who = profile.get()
+    if _rows_index[0] is not rows or _rows_index[1] != len(rows) or _rows_index[2] is not who:
+        posting: dict[str, list[int]] = {}
+        for pos, r in enumerate(rows):
+            for w in card_key(r["title"]):
+                posting.setdefault(w, []).append(pos)
+        _rows_index[:] = [rows, len(rows), who, posting]
+    posting = _rows_index[3]
+    key = card_key(title)
+    if not key:
+        return []
+    need = math.ceil(len(key) * SAME_CARD - 1e-9)   # words a match must share
+    rare = sorted(key, key=lambda w: (len(posting.get(w, ())), w))[:len(key) - need + 1]
+    return [rows[i] for i in sorted({i for w in rare for i in posting.get(w, ())})]
 
 
 FRESH_DAYS = 180   # comps older than this count for less (score.thin_comps)
@@ -690,15 +755,14 @@ def ledger_comps(con, item: Listing, now: float | None = None) -> list[dict]:
     out = []
     for r in con.execute("SELECT item_id, title, price, shipping, sold_at, kind, source "
                          "FROM sales ORDER BY sold_at DESC"):
+        if r["item_id"] == item.item_id or _title_traits(r["title"]) != want:
+            continue
         sale = dict(r)
-        if sale["item_id"] == item.item_id:
-            continue
         sale["words"] = words(sale["title"])
-        if not sale["words"] or traits(sale["title"]) != want:
+        if not sale["words"]:
             continue
-        sale_graded = traits(sale["title"])[0] is not None
-        if graded is not None and want[0] is None and sale_graded != graded:
-            continue   # the title names no grade, but eBay says graded (or raw)
+        if graded is not None and want[0] is None and graded:
+            continue   # the title names no grade, but eBay says graded
         if _closeness(item.title, mine, sale, min_overlap) is None:
             continue
         sale["total"] = delivered(sale["price"], sale["shipping"])
@@ -709,7 +773,7 @@ def ledger_comps(con, item: Listing, now: float | None = None) -> list[dict]:
 def _parallel(ws) -> frozenset[str]:
     """The parallel words among a title's words ("refractors" counted as "refractor")."""
     from . import ledger   # ledger imports this module; kept local
-    return ledger._stems(ws) & ledger._stems(ledger.PARALLEL_WORDS)
+    return ledger._stems(ws) & ledger._PARALLEL_STEMS
 
 
 def same_parallel(title: str, comps: list[dict]) -> list[dict]:
