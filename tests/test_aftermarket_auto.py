@@ -132,3 +132,73 @@ def test_cache_keeps_description_text():
     con = db.connect()
     item_cache.put(con, "900000000009", {"description": "<p>signed in person</p>", "title": "t"})
     assert item_cache.get(con, "900000000009")["description"] == "signed in person"
+
+
+# ------------------------------------------------------------- the pick and its caps
+from datetime import datetime, timedelta  # noqa: E402
+
+from snipehunt import config, jackpot, score  # noqa: E402
+
+SOON = (datetime.now(config.TZ) + timedelta(minutes=45)).isoformat(timespec="minutes")
+# What the scorer said about the reported listing
+CLAIM = {"card": REPORTED_TITLE, "tier": "fire", "edge": "hidden", "value": 43, "max": 18.18,
+         "max_basis": "sales", "why": "Chrome auto at $0.99 with no bids."}
+
+
+def scored(description="", aspects=None, claim=None):
+    item = listing(SELLER_TITLE, aspects=aspects)
+    item.end_time = SOON
+    item.description = description
+    item.auto_proof = filters.auto_proof(item.title, description, item.aspects)
+    filters.flag(item)
+    return score._pick_dict(item, dict(claim or CLAIM))
+
+
+def test_reported_listing_is_an_ip_auto_not_a_jackpot():
+    pick = scored(REPORTED_DESC)
+    assert pick["ip_auto"] and pick["aftermarket"] == "aftermarket"
+    assert pick["tier"] == "yellow" and pick["edge"] is None
+    assert pick["value"] <= score.IP_VALUE_CAP and pick["max"] <= pick["value"]
+    assert pick["deal"] <= score.IP_STARS
+    assert pick["why"].startswith(filters.AFTERMARKET_WHY)
+    assert jackpot.check(pick) is None
+    again = score.apply_caps(dict(pick))
+    assert again == pick                                  # the caps hold on every re-rate
+
+
+def test_auto_without_proof_far_under_value_is_unverified():
+    pick = scored("Great card, ships fast.")
+    assert "ip_auto" not in pick and pick["auto_proof"] is False
+    assert pick["auto_unverified"] and pick["tier"] == "yellow" and pick["edge"] is None
+
+
+def test_auto_with_proof_keeps_its_tier():
+    pick = scored("Topps Certified Autograph Issue", aspects={"Print Run": "99"})
+    assert pick["auto_proof"] is True and pick["tier"] == "fire" and pick["edge"] == "hidden"
+    assert "auto_unverified" not in pick and "serial_unconfirmed" not in pick
+
+
+def test_serial_only_in_card_name_is_unconfirmed():
+    pick = scored("Topps Certified Autograph Issue")
+    assert pick["serial_unconfirmed"] and pick["tier"] == "green" and pick["edge"] is None
+
+
+def test_serial_in_specifics_is_confirmed():
+    assert filters.serial_unconfirmed(REPORTED_TITLE, SELLER_TITLE, {"Print Run": "99"}, "") is None
+    assert filters.serial_unconfirmed(REPORTED_TITLE, SELLER_TITLE, {}, "numbered 12/99") is None
+    assert filters.serial_unconfirmed(REPORTED_TITLE, SELLER_TITLE, {}, "") == "99"
+    assert filters.serial_unconfirmed("Scouts Top 100 refractor", SELLER_TITLE, {}, "") is None
+
+
+def test_ip_pool_comps_are_kept():
+    pick = score.apply_caps({"ip_auto": True, "comps_n": 3, "value": 14.0, "max": 6.06,
+                             "price": 1.0, "shipping": 1.0, "is_auction": True, "tier": "green",
+                             "why": "", "max_basis": "sales"})
+    assert pick["value"] == 14.0 and pick["tier"] == "yellow"
+
+
+def test_prompt_warns_on_aftermarket():
+    item = listing(SELLER_TITLE, description=REPORTED_DESC)
+    filters.flag(item)
+    assert filters.AFTERMARKET_WHY in score._compact(item)
+    assert score.AFTERMARKET_RULE in score.build_prompt([item])

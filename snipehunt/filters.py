@@ -149,6 +149,24 @@ def says_auto(pick: dict) -> bool:
     return bool(sales.AUTO.search(pick.get("title") or "") or sales.AUTO.search(pick.get("card") or ""))
 
 
+_RUN = re.compile(r"/\s?(\d{1,4})\b")
+
+
+def serial_unconfirmed(card: str, title: str, specifics: dict | None, text: str) -> str | None:
+    """The print run ("99") the scorer's card name claims that nothing the seller
+    wrote backs up (title, item specifics, description), or None."""
+    claimed = _RUN.search(card or "")
+    if not claimed:
+        return None
+    run = claimed.group(1)
+    seller = f"{title} {text or ''}"
+    if re.search(rf"/\s?0*{run}\b|\b(of|to)\s+{run}\b|#\s?d\s+(to\s+)?{run}\b", seller, re.I):
+        return None
+    if any(re.search(rf"(?<!\d)0*{run}(?!\d)", str(v)) for v in (specifics or {}).values()):
+        return None
+    return run
+
+
 DOUBTS = ("ip_auto", "auto_unverified", "serial_unconfirmed")
 
 

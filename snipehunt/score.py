@@ -47,6 +47,9 @@ SYSTEM = ("You are a careful sports card collecting assistant. You read and "
 # A deal's stars: how far under its going rate you would pay, shipping included.
 STARS = ((50, 5), (35, 4), (20, 3), (10, 2))
 GUESS_STARS = 3          # the most stars a pick priced from a guess may have
+IP_VALUE_CAP = 10.00     # an aftermarket (IP/TTM) auto with no IP sales recorded is worth this at most
+IP_STARS = 2             # the most stars an aftermarket auto may have
+UNVERIFIED_SHARE = 0.25  # an auto with no proof, at under this share of its value: too good to trust
 SELLER_TRUST_OVER = 30.0  # over this total, a seller with little feedback caps the tier
 FULL_COMPS = 3           # recorded sales of the exact card needed for five stars
 LEDGER_MAX_PCT = 25      # an auction's max from the ledger: this percentile of fresh closes
@@ -182,6 +185,7 @@ def apply_caps(pick: dict, cfg: dict | None = None) -> dict:
         pick["capped_from"], pick["tier"] = pick["tier"], "yellow"
     elif not pick["new_seller"] and pick.get("capped_from"):
         pick["tier"] = pick.pop("capped_from")   # the price fell back under $30
+    _autograph_caps(pick, ship)
     # On the bot this came from, 1 snipe in 32 over $50 won at the bot's max in five weeks.
     long_at = cfg.get("long_shot_value") or 0
     if (long_at and pick.get("is_auction") and not pick.get("want")
@@ -192,6 +196,46 @@ def apply_caps(pick: dict, cfg: dict | None = None) -> dict:
     else:
         pick.pop("long_shot", None)   # only there when it applies, like scam_risk
     return pick
+
+
+def _autograph_caps(pick: dict, ship: float) -> None:
+    """An aftermarket signature is the base card plus a little; an auto nothing proves
+    is not trusted at a giveaway price; a print run only the scorer claims is not
+    trusted at all. None of them may be a jackpot, steal or alert (filters.doubted)."""
+    value = pick.get("value")
+    if pick.get("ip_auto"):
+        if not pick.get("comps_n") and value is not None and value > IP_VALUE_CAP:
+            pick.setdefault("value_claimed", value)
+            pick["value"] = value = IP_VALUE_CAP
+        if pick.get("is_auction") and pick.get("max") is not None and value is not None:
+            cap = pricing.odd_cents(value - ship) if value - ship > 0 else 0.0
+            pick["max"] = min(pick["max"], cap)
+        if pick.get("tier") in ("fire", "green"):
+            pick["tier"] = "yellow"
+        pick["edge"] = None
+        paid = 0.0 if pick.get("combined_ship") else ship
+        pick["deal"], pick["deal_pct"] = rate(
+            (pick["max"] if pick.get("is_auction") and pick.get("max") is not None
+             else pick["price"]) + paid, value)
+        if pick["deal"]:
+            pick["deal"] = min(pick["deal"], IP_STARS)
+        why = str(pick.get("why") or "")
+        if not why.startswith(filters.AFTERMARKET_WHY):
+            pick["why"] = f"{filters.AFTERMARKET_WHY}; {why}"[:140]
+        pick.pop("auto_unverified", None)
+    elif (filters.says_auto(pick) and not pick.get("auto_proof") and value
+          and pick["price"] + ship < UNVERIFIED_SHARE * value):
+        pick["auto_unverified"] = True
+        if pick.get("tier") in ("fire", "green"):
+            pick["tier"] = "yellow"
+        pick["edge"] = None
+    else:
+        pick.pop("auto_unverified", None)
+    if pick.get("serial_unconfirmed"):
+        if pick.get("tier") == "fire":
+            pick["tier"] = "green"
+        if pick.get("edge") == "hidden":
+            pick["edge"] = None
 
 
 def rerate(pick: dict) -> dict:
@@ -552,6 +596,8 @@ def _compact(item: Listing, marked: list[dict] = ()) -> str:
         **({"condition": "graded" if item.graded else "raw"} if item.graded is not None else {}),
         **({"warning": filters.FAKE_AUTO_WHY + ": price it as the unsigned card"}
            if "fake_auto" in item.flags else {}),
+        **({"warning": filters.AFTERMARKET_WHY + ": price it as the base card plus a few dollars"}
+           if "aftermarket_auto" in item.flags else {}),
         **({"specifics": {k: v for k, v in list(item.aspects.items())[:12]}}
            if item.lane == "midtier" and item.aspects else {}),
         **({"signals": [f"{s['name']}: {s['why']}" for s in item.signals]}
@@ -582,6 +628,11 @@ the card really is and the price is still well under its going rate.
 FAKE_AUTO_RULE = """- A listing with a "warning" that it has a printed signature is not an \
 autograph. Price it as the unsigned card, never from autograph sales, and start its \
 "why" with "printed signature, not an auto".
+"""
+
+AFTERMARKET_RULE = """- A listing with a "warning" of an aftermarket signature was signed in person \
+or through the mail, not pulled from a pack. Price it as the base card plus a few dollars, \
+never from certified autograph sales, and start its "why" with "aftermarket signature".
 """
 
 
@@ -645,6 +696,7 @@ def _filled(items: list[Listing], lookups: int = 8,
     from . import priority, steals   # steals imports jackpot and pricing; kept local
     lane_rules = (MIDTIER_RULE if any(i.lane == "midtier" for i in items) else "") + (
         FAKE_AUTO_RULE if any("fake_auto" in i.flags for i in items) else "") + (
+        AFTERMARKET_RULE if any("aftermarket_auto" in i.flags for i in items) else "") + (
         steals.prompt_rule()) + (   # nothing unless steals mode is on
         priority.prompt_rule())     # nothing without casehits.md
     return template, dict(
@@ -1011,6 +1063,14 @@ def _pick_dict(item: Listing, raw: dict, combined: frozenset[str] = frozenset(),
         pick["fake_auto"] = True
         if not pick["why"].lower().startswith(filters.FAKE_AUTO_WHY):
             pick["why"] = f"{filters.FAKE_AUTO_WHY}; {pick['why']}"[:140]
+    said = f"{item.short_description} {item.description}"
+    if "aftermarket_auto" in item.flags:
+        pick["ip_auto"] = True
+        pick["aftermarket"] = filters.aftermarket_auto(item.title, said, item.aspects) or "aftermarket"
+    if filters.says_auto(pick) or pick.get("ip_auto"):
+        pick["auto_proof"] = bool(item.auto_proof)
+    if filters.serial_unconfirmed(pick["card"], item.title, item.aspects, said):
+        pick["serial_unconfirmed"] = True
     if item.lane:
         pick["lane"] = item.lane
         pick["identity"] = "unsure" if str(raw.get("identity")).lower() == "unsure" else "sure"

@@ -7,7 +7,8 @@ def listing(price=55.0, shipping=5.0, auction=False, item_id="296000000001"):
     return Listing(item_id, "2023 Topps Jordon Walker Auto Beckett 10", price, "USD", shipping,
                    ["AUCTION"] if auction else ["FIXED_PRICE", "BEST_OFFER"],
                    0 if auction else None, "2026-10-20T00:00:00-04:00" if auction else None,
-                   "newseller", "u", None)
+                   "newseller", "u", None,
+                   auto_proof=True)   # these tests are about guesses and sellers, not autographs
 
 
 def judged(item=None, **raw):

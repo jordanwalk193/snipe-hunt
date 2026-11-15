@@ -65,7 +65,7 @@ def test_an_edge_is_kept_only_when_the_numbers_back_it():
                        currency="USD", shipping=1.0,
                        buying_options=["AUCTION"] if auction else ["FIXED_PRICE"], bid_count=0,
                        end_time="2026-10-20T00:00:00Z" if auction else None, seller="s",
-                       url="u", image=None)
+                       url="u", image=None, auto_proof=True)
         return score._pick_dict(item, {"item_id": "1", "tier": "fire", "max": 12.12,
                                        "value": value, "edge": edge})["edge"]
 
