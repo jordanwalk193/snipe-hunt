@@ -20,7 +20,7 @@ import time
 
 from . import aspects, filters, usage
 
-PER_RUN = 25            # item calls per run; the rest wait for the next run
+PER_RUN = 60            # item calls per run (eBay allows 5,000 a day); the rest wait for the next run
 KEEP_DAYS = 120         # a verdict is kept this long (listings rarely run longer)
 LANE = "item"           # the eBay lane these calls count in (usage.py)
 SCHEMA = ("CREATE TABLE IF NOT EXISTS autocheck (item_id TEXT PRIMARY KEY, aftermarket TEXT,"
@@ -52,6 +52,9 @@ def enrich(con, listings: list, client=None, now: float | None = None,
     con.execute("DELETE FROM autocheck WHERE checked_at < ?", (now - KEEP_DAYS * 86400,))
     names = aspects.names() if any(i.aspects for i in listings) else aspects.FALLBACK
     done, calls = 0, 0
+    from . import db
+    # Listings still to be scored first: those are the ones held back until read.
+    listings = sorted(listings, key=lambda i: not db.needs_scoring(con, i.item_id, i.total))
     for item in listings:
         if getattr(item, "match", "yes") == "no" or not claims_auto(item, names):
             continue

@@ -446,3 +446,15 @@ def test_a_failed_read_is_tried_again_but_does_not_hold_the_listing():
     later = listing(SELLER_TITLE, item_id="900000000141")
     autocheck.enrich(con, [later], client=Client())       # the next run reads it
     assert later.aftermarket if hasattr(later, "aftermarket") else "aftermarket_auto" in later.flags
+
+
+def test_listings_that_still_need_scoring_are_read_first():
+    con = db.connect()
+    old = listing(SELLER_TITLE, item_id="900000000201")
+    db.touch(con, old.item_id, old.title)
+    db.mark_scored(con, old.item_id, old.total, None)          # scored before this check existed
+    new = listing(SELLER_TITLE, item_id="900000000202")
+    con.commit()
+    client = Client()
+    autocheck.enrich(con, [old, new], client=client, limit=1)
+    assert client.calls == ["900000000202"]
