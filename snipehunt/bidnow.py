@@ -18,7 +18,7 @@ import json
 import sys
 from datetime import datetime, timedelta
 
-from . import config, db, jackpot, lowball, settings
+from . import config, db, filters, jackpot, lowball, settings
 from .ebay_search import _money
 
 WINDOW_MINUTES = 60
@@ -43,7 +43,7 @@ def _trusted(p: dict) -> bool:
     return not (p.get("tier") == "drop" or p.get("unverified") or p.get("scam_risk")
                 or p.get("new_seller") or p.get("fake_auto")
                 or "fake_auto" in (p.get("flags") or [])
-                or (p.get("slab") or {}).get("problem"))
+                or (p.get("slab") or {}).get("problem") or filters.doubted(p))
 
 
 def unowned(picks: list[dict], rows: list[dict] | None = None) -> list[dict]:

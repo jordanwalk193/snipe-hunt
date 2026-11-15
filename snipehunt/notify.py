@@ -203,6 +203,8 @@ def worth_alerting(pick: dict) -> bool:
         tier = pick["capped_from"]   # shown as yellow, alerted with a new-seller warning
     if tier == "drop":
         return True
+    if filters.doubted(pick):
+        return False   # an IP/TTM auto, an unproven auto or an unconfirmed print run: shown only
     if pick.get("unverified"):
         return False   # a dear Buy It Now priced from a guess: the dashboard shows it
     if pick.get("scam_risk") and not (pick.get("comps_n") and not pick.get("new_seller")):

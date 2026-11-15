@@ -202,3 +202,57 @@ def test_prompt_warns_on_aftermarket():
     filters.flag(item)
     assert filters.AFTERMARKET_WHY in score._compact(item)
     assert score.AFTERMARKET_RULE in score.build_prompt([item])
+
+
+# ------------------------------------------------- jackpots, bid-now, steals, alerts
+from snipehunt import bidnow, notify  # noqa: E402
+
+
+def cheap_auto(**kw):
+    return {"item_id": "900000000050", "card": "2023 Chrome Rookie Auto /99", "tier": "green",
+            "price": 0.99, "shipping": 1.00, "total": 1.99, "value": 30.0, "max_basis": "sales",
+            "is_auction": True, "end_time": SOON, "max": 15.15, "auto_proof": True,
+            "url": "https://www.ebay.com/itm/900000000050", **kw}
+
+
+@pytest.mark.parametrize("flag", filters.DOUBTS)
+def test_doubted_picks_never_jackpot_bidnow_or_alert(flag, monkeypatch):
+    monkeypatch.setattr(notify, "is_quiet", lambda now=None: False)
+    p = cheap_auto(**{flag: True})
+    assert jackpot.check(p) is None
+    assert not bidnow._trusted(p)
+    assert not notify.worth_alerting(p)
+
+
+def test_unread_auto_cannot_be_jackpot():
+    p = cheap_auto()
+    del p["auto_proof"]
+    assert jackpot.check(p) is None
+
+
+def test_certified_auto_still_jackpots():
+    assert jackpot.check(cheap_auto()) == "sales"
+
+
+def test_ledger_verify_drops_aftermarket():
+    class Ebay:
+        def item(self, item_id, **kw):
+            return {"itemId": f"v1|{item_id}|0", "legacyItemId": item_id, "title": SELLER_TITLE,
+                    "buyingOptions": ["FIXED_PRICE"], "price": {"value": "3.50", "currency": "USD"},
+                    "shippingOptions": [{"shippingCost": {"value": "1.00", "currency": "USD"}}],
+                    "seller": {"username": "made_up_seller", "feedbackScore": 250},
+                    "description": f"<div>{REPORTED_DESC}</div>"}
+    found = [{"item_id": "900000000060", "title": SELLER_TITLE, "card": SELLER_TITLE,
+              "is_auction": False, "url": "u", "value": 40.0, "max_basis": "sales"}]
+    assert jackpot.verify(found, Ebay()) == []
+    proven = dict(found[0], item_id="900000000061")
+
+    class Proven(Ebay):
+        def item(self, item_id, **kw):
+            return dict(super().item(item_id), description="Topps Certified Autograph Issue")
+    kept = jackpot.verify([proven], Proven())
+    assert kept and kept[0]["auto_proof"] is True
+
+
+def test_ledger_scan_skips_aftermarket_titles():
+    assert filters.aftermarket_auto("2023 Bowman Jordan Walker TTM Auto")   # what scan() checks

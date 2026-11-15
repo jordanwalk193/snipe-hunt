@@ -31,7 +31,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from . import config, db, sales, settings
+from . import config, db, filters, sales, settings
 
 MIN_VALUE = 20.00
 SHARE_SALES = 0.20      # 80% or more off a value backed by sales
@@ -83,6 +83,8 @@ def check(pick: dict, now: datetime | None = None) -> str | None:
             or pick.get("fake_auto") or "fake_auto" in (pick.get("flags") or [])
             or (pick.get("slab") or {}).get("problem")):
         return None
+    if filters.doubted(pick) or (filters.says_auto(pick) and not pick.get("auto_proof")):
+        return None   # an IP/TTM signature, an auto nothing proves, or a print run only claimed
     basis = "sales" if pick.get("max_basis") == "sales" else "guess"
     share = SHARE_SALES if basis == "sales" else SHARE_GUESS
     if pick.get("is_auction"):
@@ -219,7 +221,8 @@ def scan(con, skip: set[str], now: datetime | None = None, gs: list[dict] | None
             "WHERE closed_at IS NULL AND price IS NOT NULL AND last_seen >= ? "
             "AND (end_ts IS NULL OR end_ts > ?)", (ts - LEDGER_SEEN_DAYS * 86400, ts)):
         title = r["title"] or ""
-        if r["item_id"] in skip or ledger.LOT.search(title) or not _ours(title):
+        if (r["item_id"] in skip or ledger.LOT.search(title) or not _ours(title)
+                or filters.aftermarket_auto(title)):
             continue
         if r["is_auction"] and not (r["end_ts"] and r["end_ts"] <= ts + AUCTION_HOURS * 3600):
             continue
@@ -270,6 +273,10 @@ def verify(found: list[dict], client, limit: int = LEDGER_VERIFY) -> list[dict]:
         item = ebay_search.parse_item(raw)
         if not item:
             continue
+        said = f"{item.short_description} {ebay_search.description_text(raw)}"
+        if filters.aftermarket_auto(item.title, said, item.aspects):
+            continue   # signed in person or by mail: not the card the ledger priced
+        p["auto_proof"] = filters.auto_proof(item.title, said, item.aspects)
         p.update(price=item.price, shipping=item.shipping, total=item.total, seller=item.seller,
                  image=item.image or p.get("image"), url=item.url or p["url"],
                  bin_price=item.bin_price, bids=item.bid_count,

@@ -27,7 +27,7 @@ import re
 import sys
 from datetime import datetime, timedelta
 
-from . import bidnow, config, db, jackpot, pricing, priority, profile, sales, settings
+from . import bidnow, config, db, filters, jackpot, pricing, priority, profile, sales, settings
 
 # [steals] in the profile, with these where it says nothing
 DEFAULTS = {
@@ -171,7 +171,7 @@ def radar(con, now: datetime | None = None, picks: list[dict] | None = None) -> 
                                     or datetime.fromisoformat(p["end_time"]) <= now):
             continue
         line, kind = _line(p)
-        if line is None:
+        if line is None or filters.doubted(p):
             continue
         pay, value = jackpot.pay(p), float(p["value"])
         hot = ("jackpot" if jackpot.check(p, now) else

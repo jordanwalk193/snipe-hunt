@@ -6,6 +6,18 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Changed
+- **Aftermarket autographs are never jackpots.** A listing that says auto now gets
+  one eBay item read (`autocheck.py`, 25 a run, once per listing) so its
+  description can say whether the signature is the maker's. Signed in person or
+  by mail ("aftermarket", "IP", "TTM", "no COA", ...) means it is priced as the
+  base card plus a little (at most $10 without IP sales), capped at yellow, and
+  never a jackpot, bid-now, steal or alert. **Jackpots and bid-nows on an
+  autograph now need proof it is certified** (the description, an auto card code,
+  or the maker as authenticator); an auto nothing proves, under a quarter of its
+  value, is capped at yellow (`auto_unverified`). A print run only the scorer's
+  card name claims is `serial_unconfirmed`: no jackpot and no "hidden" edge.
+
 ### Added
 - **Pictures of the cards you own.** `card_art.py` gives each inventory row with
   an eBay item number the photo from the listing it was bought from: the ledger's

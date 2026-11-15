@@ -10,7 +10,9 @@ def pick(item_id="1", **kw):
     return {"item_id": item_id, "card": "2023 Chrome Rookie Auto /99", "tier": "green",
             "price": 0.99, "shipping": 1.00, "total": 1.99, "value": 30.0, "max_basis": "sales",
             "is_auction": False, "best_offer": False, "end_time": None,
-            "url": f"https://www.ebay.com/itm/{item_id}", **kw}
+            "url": f"https://www.ebay.com/itm/{item_id}",
+            "auto_proof": True,   # a certified auto: autocheck.py read its description
+            **kw}
 
 
 def test_what_counts_as_a_jackpot():

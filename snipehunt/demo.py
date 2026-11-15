@@ -514,8 +514,11 @@ def build(now: datetime | None = None) -> dict:
                          tier="fire", price=1.25, shipping=1.00, total=2.25, value=34.0,
                          max_basis="sales", deal=5, deal_pct=93, edge="mispriced",
                          url="https://www.ebay.com/itm/410000900001",
-                         why="Priced at $1.25 with free returns: the seller almost certainly meant $125."))
+                         why="Priced at $1.25 with free returns: the seller almost certainly meant $125.",
+                         auto_proof=True))   # a jackpot auto needs proof it is certified
     jackpots = jackpot.mark(picks, now)
+    for p in picks:
+        p.pop("auto_proof", None)   # the scorer's business: the snapshot doesn't carry it
     for p in picks:   # what paying now costs as a share of value (snapshot._slim)
         p["share_now"] = round(jackpot.pay(p) / float(p["value"]), 2) if p.get("value") else None
     return {
