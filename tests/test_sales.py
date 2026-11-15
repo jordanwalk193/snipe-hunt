@@ -501,3 +501,18 @@ def test_ledger_comps_keep_to_the_listings_parallel():
     comps = sales.ledger_comps(con, gold)                    # no Gold sold: all, marked
     assert len(comps) == 4 and all(c["mixed"] for c in comps)
     assert score.thin_comps(comps)["cap"] <= score.GUESS_STARS
+
+
+def test_ledger_comps_hold_raw_against_raw_when_ebay_says_graded():
+    con = db.connect()
+    sale(con, "1", "2021 Bowman Draft Chrome Jordan Walker #BDC-187", 2.0)
+    sale(con, "2", "2021 Bowman Draft Chrome Jordan Walker #BDC-187 PSA 10", 40.0)
+    item = listing("9", "2021 Bowman Draft Chrome Jordan Walker #BDC-187")
+    assert [c["item_id"] for c in sales.ledger_comps(con, item)] == ["1"]   # eBay didn't say
+    item.condition_id = "4000"                                             # raw
+    assert [c["item_id"] for c in sales.ledger_comps(con, item)] == ["1"]
+    item.condition_id = "2750"                       # graded, but the title names no grade
+    assert sales.ledger_comps(con, item) == []
+    slab = listing("9", "2021 Bowman Draft Chrome Jordan Walker #BDC-187 PSA 10")
+    slab.condition_id = "2750"
+    assert [c["item_id"] for c in sales.ledger_comps(con, slab)] == ["2"]

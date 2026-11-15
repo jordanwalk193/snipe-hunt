@@ -565,6 +565,12 @@ def traits(title: str) -> tuple:
             if grade else None, bool(AUTO.search(title)), run.group(1) if run else None)
 
 
+@lru_cache(maxsize=TITLE_CACHE)
+def _title_traits(title: str) -> tuple:
+    """traits(), kept per title: ledger_comps asks it of every sale for every listing."""
+    return traits(title)
+
+
 def _same(a: str, b: str) -> bool:
     """Two titles for the same card: like words, the same grade, autograph and print run,
     and no card numbers that disagree."""
@@ -739,15 +745,14 @@ def ledger_comps(con, item: Listing, now: float | None = None) -> list[dict]:
     out = []
     for r in con.execute("SELECT item_id, title, price, shipping, sold_at, kind, source "
                          "FROM sales ORDER BY sold_at DESC"):
+        if r["item_id"] == item.item_id or _title_traits(r["title"]) != want:
+            continue
         sale = dict(r)
-        if sale["item_id"] == item.item_id:
-            continue
         sale["words"] = words(sale["title"])
-        if not sale["words"] or traits(sale["title"]) != want:
+        if not sale["words"]:
             continue
-        sale_graded = traits(sale["title"])[0] is not None
-        if graded is not None and want[0] is None and sale_graded != graded:
-            continue   # the title names no grade, but eBay says graded (or raw)
+        if graded is not None and want[0] is None and graded:
+            continue   # the title names no grade, but eBay says graded
         if _closeness(item.title, mine, sale, min_overlap) is None:
             continue
         sale["total"] = delivered(sale["price"], sale["shipping"])
