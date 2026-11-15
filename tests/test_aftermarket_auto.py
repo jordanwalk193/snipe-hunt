@@ -256,3 +256,40 @@ def test_ledger_verify_drops_aftermarket():
 
 def test_ledger_scan_skips_aftermarket_titles():
     assert filters.aftermarket_auto("2023 Bowman Jordan Walker TTM Auto")   # what scan() checks
+
+
+# ------------------------------------------------------------- IP sales: their own pool
+from snipehunt import ledger, sales  # noqa: E402
+from tests.test_ledger import sale  # noqa: E402
+
+IP_TITLE = "2023 Bowman Scouts Top 100 Jordan Walker Auto TTM"
+CERT_TITLE = "2023 Bowman Scouts Top 100 Jordan Walker Auto"
+
+
+def test_ip_sale_is_not_same_card_as_certified():
+    assert sales.traits(IP_TITLE)[1] == "ip" and sales.traits(CERT_TITLE)[1] is True
+    assert not sales._same(IP_TITLE, CERT_TITLE)
+
+
+def test_item_traits_reads_the_flag():
+    item = listing(SELLER_TITLE)
+    item.flags.append("aftermarket_auto")
+    assert sales.item_traits(item)[1] == "ip"
+
+
+def test_ip_sales_group_together():
+    con = db.connect()
+    sale(con, "900000000071", IP_TITLE, 6.0, 3)
+    sale(con, "900000000072", "2023 Bowman Scouts Top 100 Jordan Walker Auto IP", 7.0, 5)
+    sale(con, "900000000073", CERT_TITLE, 45.0, 4)
+    con.commit()
+    gs = ledger.groups(con)
+    ip = [g for g in gs if g["traits"][1] == "ip"]
+    assert len(ip) == 1 and len(ip[0]["sales"]) == 2
+    assert any(g["traits"][1] is True and len(g["sales"]) == 1 for g in gs)
+
+
+def test_ip_sale_never_values_an_inventory_row():
+    row = {"year": "2023", "set": "Bowman", "card": "Scouts Top 100", "auto": "Y"}
+    g = {"title": IP_TITLE, "traits": sales.traits(IP_TITLE), "sales": [{}]}
+    assert ledger._row_fit(ledger.row_parts(row), g) is None

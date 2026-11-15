@@ -121,7 +121,7 @@ def _row_fit(parts: dict, g: dict) -> tuple | None:
     if not parts["year"] or sales._year(title) != parts["year"]:
         return None
     grade, auto, run = g["traits"]
-    if bool(auto) != parts["auto"] or (grade is not None) != parts["graded"] or run != parts["run"]:
+    if auto == "ip" or bool(auto) != parts["auto"] or (grade is not None) != parts["graded"] or run != parts["run"]:
         return None
     numbered = None
     if parts["number"]:

@@ -532,15 +532,25 @@ def item_traits(item: Listing) -> tuple:
             run = found.group(1) if found and found.group(1) != "0" else None
         if not auto and specifics.get(names["autographed"], "").strip().lower() == "yes":
             auto = True
-    return grade, auto and "fake_auto" not in getattr(item, "flags", ()), run
+    if "fake_auto" in getattr(item, "flags", ()):
+        auto = False
+    elif "aftermarket_auto" in getattr(item, "flags", ()):
+        auto = "ip"   # its own price pool: an IP/TTM signature is not a certified auto
+    return grade, auto, run
 
 
 def traits(title: str) -> tuple:
-    """What changes a card's price without changing many words: grade, autograph, print run."""
+    """What changes a card's price without changing many words: grade, autograph, print run.
+    The autograph is True, False, or "ip" for one signed in person or by mail
+    (filters.aftermarket_auto), so those sales never price a certified auto."""
+    from . import filters   # filters reads the profile; kept local
     grade = GRADE.search(title)
     run = RUN.search(title)
+    auto: bool | str = bool(AUTO.search(title))
+    if auto and filters.aftermarket_auto(title):
+        auto = "ip"
     return (grade.group(1).lower().replace("beckett", "bgs") + (grade.group(2) or "")
-            if grade else None, bool(AUTO.search(title)), run.group(1) if run else None)
+            if grade else None, auto, run.group(1) if run else None)
 
 
 def _same(a: str, b: str) -> bool:
