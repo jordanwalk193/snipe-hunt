@@ -49,7 +49,11 @@ def _slim(pick: dict) -> dict:
         "image": pick.get("image"), "snipe": pick.get("snipe"),
         # only when there is something to say, so most picks stay as they were
         **{k: pick[k] for k in ("marked", "bin_price", "closes", "jackpot_bin", "trend", "win_odds",
-                                "max_ledger", "labels") if pick.get(k)},
+                                "max_ledger", "labels",
+                                # autograph doubts (score._autograph_caps): an IP/TTM signature,
+                                # an auto nothing proves, a print run only the scorer claims
+                                "ip_auto", "aftermarket", "auto_unverified", "serial_unconfirmed")
+           if pick.get(k)},
         "bid_now": pick.get("bid_now"), "value": pick.get("value"),
         # when eBay last gave this price (a search, or bids.py near the end), and
         # an auction's bid count then
@@ -446,6 +450,10 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
     cfg = settings.load(con)
     _, rows = inventory.read()
     picks = live_picks(con, now)
+    # aftermarket (IP/TTM) autos: listed on their own, off the picks unless asked for
+    ip_autos = [p for p in picks if p.get("ip_auto")]
+    if not cfg["show_ip_autos"]:
+        picks = [p for p in picks if not p.get("ip_auto")]
     gix = None
     if cfg["gixen_enabled"] and config.get("GIXEN_USER"):
         sniped, problem, read_at = gixen.snipes(con)
@@ -510,6 +518,7 @@ def snapshot(con=None, now: datetime | None = None) -> dict:
         "gixen_account": bool(config.get("GIXEN_USER")),
         # $20+ cards at a sliver of their value, the best first (also flagged in picks)
         "jackpots": [_slim(p) for p in jackpots],
+        "ip_autos": [_slim(p) for p in ip_autos[:MAX_PICKS]],   # signed in person or by mail
         "fold_share": cfg["fold_share"],   # picks at this share of value or more fold into "close to market"
         "cards": cards(rows, by_card, card_art.known(con)),
         # the holes in the collection against every card that has sold, and where to buy them

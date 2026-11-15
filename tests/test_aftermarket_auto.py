@@ -293,3 +293,29 @@ def test_ip_sale_never_values_an_inventory_row():
     row = {"year": "2023", "set": "Bowman", "card": "Scouts Top 100", "auto": "Y"}
     g = {"title": IP_TITLE, "traits": sales.traits(IP_TITLE), "sales": [{}]}
     assert ledger._row_fit(ledger.row_parts(row), g) is None
+
+
+# ------------------------------------------------------------- the dashboard's list
+from snipehunt import settings, snapshot  # noqa: E402
+from tests.test_snapshot import NOW as SNAP_NOW, add  # noqa: E402
+
+
+def test_ip_autos_hidden_by_default():
+    con = db.connect()
+    add(con, "900000000081", ip_auto=True, tier="yellow", aftermarket="ttm")
+    add(con, "900000000082")
+    con.commit()
+    snap = snapshot.snapshot(con, SNAP_NOW)
+    assert [p["item_id"] for p in snap["picks"]] == ["900000000082"]
+    assert [p["item_id"] for p in snap["ip_autos"]] == ["900000000081"]
+    assert snap["ip_autos"][0]["ip_auto"] and snap["ip_autos"][0]["aftermarket"] == "ttm"
+    settings.update(con, {"show_ip_autos": True})
+    shown = snapshot.snapshot(con, SNAP_NOW)
+    assert {p["item_id"] for p in shown["picks"]} == {"900000000081", "900000000082"}
+
+
+def test_snapshot_carries_the_doubt_flags():
+    con = db.connect()
+    add(con, "900000000083", auto_unverified=True)
+    con.commit()
+    assert snapshot.snapshot(con, SNAP_NOW)["picks"][0]["auto_unverified"] is True

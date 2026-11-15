@@ -37,6 +37,8 @@ DEFAULTS: dict = {
     # the dashboard folds a pick away once paying for it costs this share of its value or more:
     # close to market, no longer a steal worth the top of the page (display only)
     "fold_share": 0.40,
+    # aftermarket (IP/TTM) autos stay off the picks list; they are listed under ip_autos
+    "show_ip_autos": False,
     # a seller under this many feedback can't make a pick over SELLER_TRUST_OVER better than yellow
     "min_seller_feedback": 100,
     "quiet_hours": True,

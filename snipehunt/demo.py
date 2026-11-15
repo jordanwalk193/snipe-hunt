@@ -549,6 +549,7 @@ def build(now: datetime | None = None) -> dict:
         },
         "picks": picks,
         "jackpots": jackpots,
+        "ip_autos": [],
         "fold_share": settings.DEFAULTS["fold_share"],
         "gixen": _checked({"available": True, "problem": None,
                   "read_at": (now - timedelta(minutes=6)).isoformat(timespec="seconds"),
