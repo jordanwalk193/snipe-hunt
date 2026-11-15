@@ -16,6 +16,7 @@ Read-only, like the rest of the eBay code: this only ever reads one listing.
 from __future__ import annotations
 
 import json
+import math
 import re
 import statistics
 import sys
@@ -684,12 +685,38 @@ def missed_lines(rows: list[dict]) -> str:
 
 def last_sold(rows: list[dict], title: str, item_id: str = "") -> dict | None:
     """The latest recorded sale of the same card as this title, and how many there are."""
-    same = [r for r in rows if r["item_id"] != item_id and _same(title, r["title"])]
+    same = [r for r in _candidates(rows, title)
+            if r["item_id"] != item_id and _same(title, r["title"])]
     if not same:
         return None
     return {"total": same[0]["total"], "price": same[0]["price"], "n": len(same),
             "estimated": same[0]["estimated"],
             "at": datetime.fromtimestamp(same[0]["sold_at"], config.TZ).date().isoformat()}
+
+
+_rows_index: list = [None, -1, None, None]   # the rows last indexed, their length, the profile, the index
+
+
+def _candidates(rows: list[dict], title: str) -> list[dict]:
+    """The rows _same could call the same card as this title, in order: two card keys
+    with SAME_CARD of their words in common share one of any (n - SAME_CARD * n + 1)
+    of the title's n words, so only rows holding one of its rarest few can match.
+    The word index is kept for the rows it was built on: callers ask about a whole
+    run's listings against one list (snipecheck, lowball, offers, the snapshot)."""
+    who = profile.get()
+    if _rows_index[0] is not rows or _rows_index[1] != len(rows) or _rows_index[2] is not who:
+        posting: dict[str, list[int]] = {}
+        for pos, r in enumerate(rows):
+            for w in card_key(r["title"]):
+                posting.setdefault(w, []).append(pos)
+        _rows_index[:] = [rows, len(rows), who, posting]
+    posting = _rows_index[3]
+    key = card_key(title)
+    if not key:
+        return []
+    need = math.ceil(len(key) * SAME_CARD - 1e-9)   # words a match must share
+    rare = sorted(key, key=lambda w: (len(posting.get(w, ())), w))[:len(key) - need + 1]
+    return [rows[i] for i in sorted({i for w in rare for i in posting.get(w, ())})]
 
 
 FRESH_DAYS = 180   # comps older than this count for less (score.thin_comps)

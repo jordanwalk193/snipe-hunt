@@ -93,3 +93,19 @@ def test_ledger_groups_and_find_match_a_scan_of_every_card():
         assert ledger.find(got, title) is scan
     shorter = got[1:]   # another list is indexed afresh
     assert ledger.find(shorter, got[0]["title"]) is not got[0]
+
+
+def test_last_sold_finds_what_a_scan_of_every_sale_finds(monkeypatch):
+    con = db.connect()
+    fill(con, 200)
+    rows = sales.with_calls(con)
+    titles = [r["title"] for r in rows[:60]] + ["2023 Topps Chrome Sam Example #3", "unrelated"]
+    for title in titles:
+        scan = [r for r in rows if r["item_id"] != "t0" and sales._same(title, r["title"])]
+        got = sales.last_sold(rows, title, "t0")
+        assert (got["n"], got["total"]) == (len(scan), scan[0]["total"]) if scan else got is None
+    # a team profile reads the words differently: the index is built again
+    monkeypatch.setattr(profile, "_cache", profile.parse(TEAM))
+    title = rows[5]["title"]
+    scan = [r for r in rows if sales._same(title, r["title"])]
+    assert sales.last_sold(rows, title)["n"] == len(scan)
