@@ -7,6 +7,15 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Fixed
+- **Chrome-only inserts are one card again, whether the title says Chrome or not.**
+  The paper-vs-Chrome fix below counted every title without "chrome" as paper, so
+  "2022 Bowman #HIFI-15 Hi-Fi Futures" and "... Hi-Fi Futures Chrome #HIFI-15"
+  became two cards. Now a bare title counts as paper only when its card number is
+  one paper and Chrome both print (plain numbers, BD-, PD-:
+  `sales.SHARED_PREFIXES`); a prefix only one print uses (HIFI, BTP, BCP, US...)
+  already says which card it is. Sapphire, Optic and 1st Edition must still agree,
+  and a title saying "paper" never matches one saying "Chrome". `history` buckets
+  by the other print marks and checks Chrome against paper per group.
 - **Paper cards no longer price from Chrome sales.** A PSA 10 paper Bowman Draft
   slab could be valued at a PSA 10 Chrome sale of the same card: the titles
   shared enough words, and the same-number-and-year shortcut never looked at

@@ -185,14 +185,7 @@ def _row_fit(parts: dict, g: dict) -> tuple | None:
         return None   # an insert's title may drop "Chrome" when its number says which card
     if not parts["number"] and not parts["card"] and sales.card_number(title):
         return None   # "2026 Topps Now" alone can't claim a numbered card
-    if sales.different_product(parts["print"], title) and not (
-            # A named insert (Hi-Fi Futures, Virtuosic Vibrations) comes in one print, and
-            # its titles often drop "Chrome": with the number matched above, a title that
-            # names no print at all is that insert. A base row (card BD-57, say) has a paper
-            # and a Chrome print with one number, so it stays strict.
-            parts["card"] and numbered is True
-            and sales.product(title) == {"paper"} and not re.search(r"\bpaper\b", title, re.I)
-            and sales.product(parts["print"]) - {"chrome"} == frozenset()):
+    if sales.different_product(parts["print"], title):
         return None   # a Chrome row never prices from a paper sale whose number matches
     number_words = _stems(sales.words(f"{parts['number']} {parts['run'] or ''}")) | {parts["year"]}
     extra = tw - parts["own"] - number_words

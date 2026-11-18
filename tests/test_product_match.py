@@ -137,3 +137,44 @@ def test_a_named_chrome_insert_still_prices_from_titles_that_drop_chrome():
     row = {"year": "2022", "set": "Bowman Chrome", "card": "Virtuosic Vibrations insert",
            "parallel": "Base", "card_no": "VV-13", "graded": "", "auto": "N"}
     assert ledger.match_row(gs, row) is not None
+
+
+HIFI_BARE = "2022 Bowman #HIFI-15 Jordan Walker Hi-Fi Futures"
+HIFI_CHROME = "2022 Bowman Jordan Walker Hi-Fi Futures Chrome #HIFI-15 Cardinals"
+
+
+def test_a_chrome_only_insert_is_one_card_with_or_without_the_word_chrome():
+    # HIFI- is printed on Chrome stock only: its number says which print it is
+    assert _close(HIFI_BARE, HIFI_CHROME) is not None and _close(HIFI_CHROME, HIFI_BARE) is not None
+    assert sales._same(HIFI_BARE, HIFI_CHROME) and _alike(HIFI_BARE, HIFI_CHROME)
+    assert _comps(HIFI_BARE, HIFI_CHROME) and _comps(HIFI_CHROME, HIFI_BARE)
+
+
+def test_the_ledger_keeps_a_chrome_only_insert_in_one_card():
+    con = db.connect()
+    now = time.time()
+    sales.add_manual(con, "1", 2.0, 1.0, HIFI_CHROME, now=now - 86400)
+    sales.add_manual(con, "2", 2.5, 0.0, "Jordan Walker 2022 Bowman Hi-Fi Futures HIFI-15 St. Louis Cardinals",
+                     now=now - 2 * 86400)
+    sales.add_manual(con, "3", 4.0, 0.0, HIFI_BARE, now=now - 3 * 86400)
+    gs = ledger.groups(con)
+    assert len(gs) == 1 and len(gs[0]["sales"]) == 3
+    row = {"year": "2022", "set": "Bowman Chrome", "card": "Hi-Fi Futures insert", "parallel": "Base",
+           "card_no": "HIFI-15", "graded": "", "auto": "N"}
+    assert ledger.value(ledger.match_row(gs, row)) == 3.0
+
+
+def test_a_number_both_prints_share_still_splits_paper_and_chrome():
+    # plain numbers, BD- and PD- are printed on paper and on Chrome
+    for number in ("#57", "#BD-57", "#PD-57"):
+        bare, chrome = f"2020 Bowman Draft {number} PSA 10", f"2020 Bowman Draft Chrome {number} PSA 10"
+        assert _close(bare, chrome) is None and not sales._same(bare, chrome), number
+
+
+def test_an_explicit_paper_title_still_never_matches_chrome_whatever_the_number():
+    assert _close("2022 Bowman Paper #HIFI-15 Hi-Fi Futures", HIFI_CHROME) is None
+
+
+def test_a_sapphire_still_needs_the_word_on_both_titles_with_a_one_print_number():
+    assert _close("2022 Bowman Chrome Sapphire #BCP-50 Prospect", "2022 Bowman #BCP-50 Prospect") is None
+

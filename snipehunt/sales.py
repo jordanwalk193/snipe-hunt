@@ -233,31 +233,56 @@ FIRST_EDITION = re.compile(r"\b1st\s+ed(ition|\.)?\b", re.I)
 CHROME_ONLY = re.compile(r"fractors?\b|\b(mojo|atomic|lava|raywave|sapphire)\b", re.I)
 
 
+# Card-number prefixes that paper and Chrome both print (plus plain numbers): Bowman
+# Draft's BD-57 and Pro Debut's PD-12 are each on paper and on Chrome. Every other
+# prefix belongs to one print (BP/BCP, US/USC, HIFI, VV...), so the number alone
+# says which card it is.
+SHARED_PREFIXES = frozenset({"", "BD", "PD"})
+AXIS = frozenset({"chrome", "paper"})
+
+
 def product(title: str) -> frozenset[str]:
-    """Which print a title is: its PRODUCT_WORDS, "1st edition", and always one of
+    """Which print a title is: its PRODUCT_WORDS, "1st edition", and usually one of
     "chrome" or "paper".
 
     A title that says neither "chrome" nor "paper" counts as paper, because that is
     how sellers title the paper card ("2020 Bowman Draft #BD-57"): the Chrome card
     almost always says Chrome, as it sells for more. So a bare title never matches a
     Chrome one, even with the same number and year (the BD-57 case that let a
-    Chrome sale price a paper slab). The one exception is a bare title with a
-    Chrome-only finish (CHROME_ONLY: "Bowman Draft BD-57 Refractor"): that card can
-    only be Chrome, so it counts as Chrome and keeps matching Chrome titles, never
-    paper ones. (The fix request asked for bare-vs-Chrome to stay as it was; its own
+    Chrome sale price a paper slab). Two exceptions:
+    - a Chrome-only finish (CHROME_ONLY: "Bowman Draft BD-57 Refractor"): that card
+      can only be Chrome, so it counts as Chrome;
+    - a card number with a prefix only one print uses (not SHARED_PREFIXES:
+      "2022 Bowman #HIFI-15 Hi-Fi Futures"): the number says which card it is, so
+      the title is neither paper nor Chrome and matches both (sellers drop "Chrome"
+      from Chrome-only inserts all the time).
+    (The original fix request asked for bare-vs-Chrome to stay as it was; its own
     test, bare BD-57 vs Chrome BD-57 must not match, needs this stricter rule.)"""
-    found = set(re.findall(r"[a-z0-9]+", (title or "").lower())) & PRODUCT_WORDS
-    if FIRST_EDITION.search(title or ""):
+    title = title or ""
+    found = set(re.findall(r"[a-z0-9]+", title.lower())) & PRODUCT_WORDS
+    if FIRST_EDITION.search(title):
         found.add("1st edition")
-    if not found & {"chrome", "paper"}:
-        found.add("chrome" if CHROME_ONLY.search(title or "") else "paper")
+    if not found & AXIS:
+        number = card_number(title)
+        if CHROME_ONLY.search(title):
+            found.add("chrome")
+        elif not number or re.match(r"[A-Z]*", number.upper()).group() in SHARED_PREFIXES:
+            found.add("paper")
     return frozenset(found)
+
+
+def products_differ(one: frozenset[str], two: frozenset[str]) -> bool:
+    """product() of two titles, compared: Sapphire, Optic and 1st Edition must agree,
+    and Chrome and paper clash only when both titles have one."""
+    if (one - AXIS) != (two - AXIS):
+        return True
+    return bool(one & AXIS and two & AXIS and one & AXIS != two & AXIS)
 
 
 def different_product(a: str, b: str) -> bool:
     """True when two titles are different prints of a card (product()), however
     alike their words and numbers are."""
-    return product(a) != product(b)
+    return products_differ(product(a), product(b))
 
 
 def _closeness(title: str, mine: frozenset[str], sale: dict, min_overlap: float
@@ -646,12 +671,14 @@ def history(con, limit: int = 12) -> list[dict]:
     by_traits: dict[tuple, list[dict]] = {}
     for row in with_calls(con):   # newest first
         key = card_key(row["title"])
-        bucket = (traits(row["title"]), product(row["title"]))
+        made = product(row["title"])
+        bucket = (traits(row["title"]), made - AXIS)   # Chrome and paper: checked per group
         group = next((g for g in by_traits.get(bucket, ())
-                      if _alike_keys(key, g["key"]) and _same(row["title"], g["title"])), None)
+                      if not products_differ(made, g["product"]) and _alike_keys(key, g["key"])
+                      and _same(row["title"], g["title"])), None)
         if group is None:
             group = {"title": row["title"], "image": row["image"],
-                     "item_id": row["item_id"], "sales": [], "key": key}
+                     "item_id": row["item_id"], "sales": [], "key": key, "product": made}
             groups.append(group)
             by_traits.setdefault(bucket, []).append(group)
         group["sales"].append(row)
@@ -707,7 +734,7 @@ def find_missed(con, now: float | None = None, days: int = MISSED_DAYS,
                    if r["sold_at"] < row["sold_at"] and r["key"]
                    and len(row["key"] & r["key"]) / len(row["key"] | r["key"]) >= SAME_CARD
                    and r["parallel"] == row["parallel"]   # base isn't cheap next to Refractors
-                   and r["product"] == row["product"]     # nor paper next to Chrome
+                   and not products_differ(r["product"], row["product"])   # nor paper next to Chrome
                    and not (row["number"] and r["number"]
                             and _number_match(row["title"], r["title"]) is False)]
         if len(earlier) < MISSED_PRIOR:
