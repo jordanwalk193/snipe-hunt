@@ -6,6 +6,21 @@ appear in any release; renaming or removing one needs a new API version.
 
 ## Unreleased
 
+### Fixed
+- **Paper cards no longer price from Chrome sales.** A PSA 10 paper Bowman Draft
+  slab could be valued at a PSA 10 Chrome sale of the same card: the titles
+  shared enough words, and the same-number-and-year shortcut never looked at
+  them. Chrome, paper, Sapphire, Optic and 1st Edition are now separate prints
+  (`sales.product`, `sales.different_product`, one list in
+  `sales.PRODUCT_WORDS`), checked by every matcher: `ledger._alike` (ledger
+  cards and `ledger.find`), `sales._same` (history, last sold, alert grouping,
+  overvalued marks), `sales._closeness` before its shortcut (comps and
+  `ledger_comps`), `find_missed` and `ledger.match_row`. A title that says
+  neither "chrome" nor "paper" counts as paper, unless it has a Chrome-only
+  finish (Refractor, X-fractor, Mojo, Atomic, Lava, RayWave, Sapphire): then it
+  counts as Chrome. A named Chrome insert in the inventory still matches sale
+  titles that drop "Chrome" when its card number matches.
+
 ### Changed
 - **Aftermarket autographs are never jackpots.** A listing that says auto now gets
   one eBay item read (`autocheck.py`, 25 a run, once per listing) so its

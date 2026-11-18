@@ -58,6 +58,8 @@ def _alike(g: dict, key: frozenset, title: str) -> bool:
         return False
     if _stems(key ^ g["key"]) & _PARALLEL_STEMS:
         return False   # "Refractor" on one title only: a parallel, not the same card
+    if sales.different_product(title, g["title"]):
+        return False   # paper against Chrome, Chrome against Sapphire: another print
     return sales._number_match(title, g["title"]) is not False and (
         getattr(sales, "same_player", None) is None or sales.same_player(title, g["title"]))
 
@@ -156,6 +158,8 @@ def row_parts(row: dict) -> dict:
         "run": serial.group(1) if serial else None,
         "auto": str(row.get("auto") or "").strip().upper() == "Y",
         "graded": bool(str(row.get("graded") or "").strip()),
+        # the row as a title, for sales.different_product
+        "print": f"{row.get('set') or ''} {row.get('card') or ''} {row.get('parallel') or ''}",
     }
 
 
@@ -181,6 +185,15 @@ def _row_fit(parts: dict, g: dict) -> tuple | None:
         return None   # an insert's title may drop "Chrome" when its number says which card
     if not parts["number"] and not parts["card"] and sales.card_number(title):
         return None   # "2026 Topps Now" alone can't claim a numbered card
+    if sales.different_product(parts["print"], title) and not (
+            # A named insert (Hi-Fi Futures, Virtuosic Vibrations) comes in one print, and
+            # its titles often drop "Chrome": with the number matched above, a title that
+            # names no print at all is that insert. A base row (card BD-57, say) has a paper
+            # and a Chrome print with one number, so it stays strict.
+            parts["card"] and numbered is True
+            and sales.product(title) == {"paper"} and not re.search(r"\bpaper\b", title, re.I)
+            and sales.product(parts["print"]) - {"chrome"} == frozenset()):
+        return None   # a Chrome row never prices from a paper sale whose number matches
     number_words = _stems(sales.words(f"{parts['number']} {parts['run'] or ''}")) | {parts["year"]}
     extra = tw - parts["own"] - number_words
     if extra & _PARALLEL_SET_STEMS:

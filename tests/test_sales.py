@@ -302,10 +302,12 @@ def test_a_different_print_run_is_a_hint_and_a_different_card_number_is_no_match
 
 def test_the_same_card_number_and_year_match_even_when_the_titles_share_few_words():
     con = db.connect()
-    sale(con, "1", "Jordan Walker 2020 Bowman Draft Chrome 1st Bowman Prospect Rookie St Louis "
+    sale(con, "1", "Jordan Walker 2020 Bowman Draft Paper 1st Bowman Prospect Rookie St Louis "
                    "Top Outfield BD-57", 9.0, ago=10)
-    sale(con, "2", "Jordan Walker 2021 Bowman Chrome Prospects Rookie St Louis Top Outfield "
+    sale(con, "2", "Jordan Walker 2021 Bowman Prospects Rookie St Louis Top Outfield "
                    "BD-57", 3.0, ago=20)     # the same number in another year's set
+    sale(con, "3", "Jordan Walker 2020 Bowman Draft Chrome 1st Bowman Prospect Rookie St Louis "
+                   "Top Outfield BD-57", 30.0, ago=5)   # the same number on Chrome: another print
     thin = listing("9", "2020 Bowman Draft #BD-57")
     assert [s["item_id"] for s in sales.relevant(con, [thin])] == ["1"]
     assert sales.relevant(con, [listing("9", "2020 Bowman Draft BD-58")]) == []
@@ -498,8 +500,9 @@ def test_ledger_comps_keep_to_the_listings_parallel():
     refractor = listing("9", "Jordan Walker 2021 Bowman Draft Chrome Refractor #BDC-187")
     assert sorted(c["item_id"] for c in sales.ledger_comps(con, refractor)) == ["1", "4"]
     gold = listing("9", "2021 Bowman Draft Chrome Jordan Walker #BDC-187 Gold")
-    comps = sales.ledger_comps(con, gold)                    # no Gold sold: all, marked
-    assert len(comps) == 4 and all(c["mixed"] for c in comps)
+    comps = sales.ledger_comps(con, gold)    # no Gold sold: all the Chrome ones, marked
+    assert sorted(c["item_id"] for c in comps) == ["1", "3", "4"] and all(c["mixed"] for c in comps)
+    # (never the Sapphire: another print, not another parallel)
     assert score.thin_comps(comps)["cap"] <= score.GUESS_STARS
 
 

@@ -221,14 +221,56 @@ def _year(title: str) -> str | None:
     return found.group(1) if found else None
 
 
+# Separate prints of the same card number. A PSA 10 paper 2020 Bowman Draft sells for
+# a third of the Chrome one with the same number, so no title with one of these may
+# price a title without it. This is the one list: every matcher goes through
+# different_product(). (ledger.SET_WORDS names whole products; these are only the
+# ones that reprint another product's numbers: paper/Chrome, Chrome/Sapphire,
+# Donruss/Optic, and Bowman's 1st Edition, a paper print of its own.)
+PRODUCT_WORDS = frozenset({"chrome", "paper", "sapphire", "optic"})
+FIRST_EDITION = re.compile(r"\b1st\s+ed(ition|\.)?\b", re.I)
+# Finishes only Chrome stock has: paper Bowman and Topps have no Refractors.
+CHROME_ONLY = re.compile(r"fractors?\b|\b(mojo|atomic|lava|raywave|sapphire)\b", re.I)
+
+
+def product(title: str) -> frozenset[str]:
+    """Which print a title is: its PRODUCT_WORDS, "1st edition", and always one of
+    "chrome" or "paper".
+
+    A title that says neither "chrome" nor "paper" counts as paper, because that is
+    how sellers title the paper card ("2020 Bowman Draft #BD-57"): the Chrome card
+    almost always says Chrome, as it sells for more. So a bare title never matches a
+    Chrome one, even with the same number and year (the BD-57 case that let a
+    Chrome sale price a paper slab). The one exception is a bare title with a
+    Chrome-only finish (CHROME_ONLY: "Bowman Draft BD-57 Refractor"): that card can
+    only be Chrome, so it counts as Chrome and keeps matching Chrome titles, never
+    paper ones. (The fix request asked for bare-vs-Chrome to stay as it was; its own
+    test, bare BD-57 vs Chrome BD-57 must not match, needs this stricter rule.)"""
+    found = set(re.findall(r"[a-z0-9]+", (title or "").lower())) & PRODUCT_WORDS
+    if FIRST_EDITION.search(title or ""):
+        found.add("1st edition")
+    if not found & {"chrome", "paper"}:
+        found.add("chrome" if CHROME_ONLY.search(title or "") else "paper")
+    return frozenset(found)
+
+
+def different_product(a: str, b: str) -> bool:
+    """True when two titles are different prints of a card (product()), however
+    alike their words and numbers are."""
+    return product(a) != product(b)
+
+
 def _closeness(title: str, mine: frozenset[str], sale: dict, min_overlap: float
                ) -> float | None:
     """How well a sale's title fits a listing's, or None when it isn't the same card.
 
-    A different card number rules a sale out however alike the words are. The
-    same card number and year is a strong match even when the titles share
-    few words, which is how a listing with a thin title gets its comps.
+    Another print (different_product: paper against Chrome, Chrome against
+    Sapphire) or a different card number rules a sale out however alike the words
+    are. Otherwise the same card number and year is a strong match even when the
+    titles share few words, which is how a listing with a thin title gets its comps.
     """
+    if different_product(title, sale["title"]):
+        return None
     numbers = _number_match(title, sale["title"])
     if numbers is False:
         return None
@@ -582,10 +624,11 @@ def _title_traits(title: str) -> tuple:
 
 
 def _same(a: str, b: str) -> bool:
-    """Two titles for the same card: like words, the same grade, autograph and print run,
-    and no card numbers that disagree."""
+    """Two titles for the same card: like words, the same print (different_product),
+    the same grade, autograph and print run, and no card numbers that disagree."""
     one, two = card_key(a), card_key(b)
     return (bool(one and two) and len(one & two) / len(one | two) >= SAME_CARD
+            and not different_product(a, b)
             and traits(a) == traits(b) and _number_match(a, b) is not False
             and (profile.get().mode != "team" or same_player(a, b)))
 
@@ -598,18 +641,19 @@ def _alike_keys(one: frozenset[str], two: frozenset[str]) -> bool:
 def history(con, limit: int = 12) -> list[dict]:
     """Cards that have sold more than once, with every price: the start of a price trend."""
     groups: list[dict] = []
-    # _same wants the same traits and SAME_CARD of the words: only groups that pass
-    # both cheap checks are asked, so 2,000 sales take seconds, not half a minute
+    # _same wants the same traits, the same print and SAME_CARD of the words: only
+    # groups that pass those cheap checks are asked, so 2,000 sales take seconds
     by_traits: dict[tuple, list[dict]] = {}
     for row in with_calls(con):   # newest first
         key = card_key(row["title"])
-        group = next((g for g in by_traits.get(traits(row["title"]), ())
+        bucket = (traits(row["title"]), product(row["title"]))
+        group = next((g for g in by_traits.get(bucket, ())
                       if _alike_keys(key, g["key"]) and _same(row["title"], g["title"])), None)
         if group is None:
             group = {"title": row["title"], "image": row["image"],
                      "item_id": row["item_id"], "sales": [], "key": key}
             groups.append(group)
-            by_traits.setdefault(traits(row["title"]), []).append(group)
+            by_traits.setdefault(bucket, []).append(group)
         group["sales"].append(row)
     out = []
     for g in groups:
@@ -653,6 +697,7 @@ def find_missed(con, now: float | None = None, days: int = MISSED_DAYS,
     for row in rows:
         row["key"], row["number"] = card_key(row["title"]), card_number(row["title"])
         row["parallel"] = _parallel(row["key"])
+        row["product"] = product(row["title"])
         by_traits.setdefault(traits(row["title"]), []).append(row)
     out = []
     for row in rows:
@@ -662,6 +707,7 @@ def find_missed(con, now: float | None = None, days: int = MISSED_DAYS,
                    if r["sold_at"] < row["sold_at"] and r["key"]
                    and len(row["key"] & r["key"]) / len(row["key"] | r["key"]) >= SAME_CARD
                    and r["parallel"] == row["parallel"]   # base isn't cheap next to Refractors
+                   and r["product"] == row["product"]     # nor paper next to Chrome
                    and not (row["number"] and r["number"]
                             and _number_match(row["title"], r["title"]) is False)]
         if len(earlier) < MISSED_PRIOR:
