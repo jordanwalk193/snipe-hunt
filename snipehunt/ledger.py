@@ -37,8 +37,8 @@ def groups(con) -> list[dict]:
     out: list[dict] = []
     idx = _Index()
     for row in sales.with_calls(con):
-        if LOT.search(row["title"] or ""):
-            continue
+        if LOT.search(row["title"] or "") or not sales.identifiable(row["title"] or ""):
+            continue   # a lot, or a title that names no card (sales.identifiable)
         key, kind = sales.card_key(row["title"]), sales.traits(row["title"])
         g = idx.first(key, kind, row["title"])
         if g is None:

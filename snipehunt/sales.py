@@ -15,6 +15,7 @@ Read-only, like the rest of the eBay code: this only ever reads one listing.
 """
 from __future__ import annotations
 
+import functools
 import json
 import math
 import re
@@ -59,7 +60,7 @@ HASH_NUMBER = re.compile(r"#\s?([A-Z]{0,4}-?\d{1,4}[A-Z]?)\b(?!\s?/\s?\d)", re.I
 BARE_NUMBER = re.compile(r"(?<![A-Za-z0-9/#-])([A-Z]{1,4}\d{2,4})(?![A-Za-z0-9])")
 # Letters in front of a number that make it a grade or a count, not a card number.
 NOT_NUMBER = {"PSA", "BGS", "SGC", "CGC", "CSG", "HGA", "TAG", "GEM", "MT", "MINT", "NM",
-              "LOT", "AUTO", "QTY"}
+              "LOT", "AUTO", "QTY", "GMA", "PGI", "TAG", "HGA", "AGS", "ISA", "KSA"}
 # Words that say nothing about which card it is.
 FILLER = {"the", "and", "card", "cards", "baseball", "football", "basketball", "hockey",
           "mlb", "nfl", "nba", "nhl", "rookie", "rc", "sp", "free", "shipping", "ship",
@@ -285,6 +286,22 @@ def different_product(a: str, b: str) -> bool:
     return products_differ(product(a), product(b))
 
 
+def identifiable(title: str) -> bool:
+    """Whether a title says which card it is: a year, a card number or a set name
+    (ledger.SET_WORDS). "PLAYER NAME RC ROOKIE REFRACTOR" says none of them and fits
+    any Refractor, so a sale under such a title prices nothing: it is kept and
+    listed, but never a ledger card, a comp or a "last sold"."""
+    return _identifiable(title, id(profile.get()))   # words() follow the profile
+
+
+@functools.lru_cache(maxsize=20000)
+def _identifiable(title: str, _profile: int) -> bool:
+    from . import ledger   # ledger imports this module; kept local
+    if _year(title) or card_number(title):
+        return True
+    return bool(ledger._stems(words(title)) & ledger._stems(ledger.SET_WORDS))
+
+
 def _closeness(title: str, mine: frozenset[str], sale: dict, min_overlap: float
                ) -> float | None:
     """How well a sale's title fits a listing's, or None when it isn't the same card.
@@ -294,7 +311,7 @@ def _closeness(title: str, mine: frozenset[str], sale: dict, min_overlap: float
     are. Otherwise the same card number and year is a strong match even when the
     titles share few words, which is how a listing with a thin title gets its comps.
     """
-    if different_product(title, sale["title"]):
+    if different_product(title, sale["title"]) or not identifiable(sale["title"]):
         return None
     numbers = _number_match(title, sale["title"])
     if numbers is False:
@@ -601,6 +618,10 @@ def _copyless(title: str) -> str:
 
 
 GRADE = re.compile(r"\b(psa|bgs|sgc|cgc|beckett)\s*(\d{1,2}(?:\.5)?)?", re.I)
+# Smaller graders (GMA, PGI, TAG...): a slab of theirs sells for a fraction of a PSA one
+# and well over the raw card, so it is its own grade. Their names are common words
+# ("price tag"), so only with a grade after them.
+OTHER_GRADE = re.compile(r"\b(gma|pgi|tag|hga|csg|ags|isa|ksa)\s*(\d{1,2}(?:\.5)?)\b", re.I)
 AUTO = re.compile(r"\b(auto|autos|autograph|autographed|signed|rpa)\b", re.I)
 RUN = re.compile(r"/\s?(\d{1,4})\b")
 
@@ -633,7 +654,7 @@ def traits(title: str) -> tuple:
     The autograph is True, False, or "ip" for one signed in person or by mail
     (filters.aftermarket_auto), so those sales never price a certified auto."""
     from . import filters   # filters reads the profile; kept local
-    grade = GRADE.search(title)
+    grade = GRADE.search(title) or OTHER_GRADE.search(title)
     run = RUN.search(title)
     auto: bool | str = bool(AUTO.search(title))
     if auto and filters.aftermarket_auto(title):
@@ -670,6 +691,8 @@ def history(con, limit: int = 12) -> list[dict]:
     # groups that pass those cheap checks are asked, so 2,000 sales take seconds
     by_traits: dict[tuple, list[dict]] = {}
     for row in with_calls(con):   # newest first
+        if not identifiable(row["title"]):
+            continue
         key = card_key(row["title"])
         made = product(row["title"])
         bucket = (traits(row["title"]), made - AXIS)   # Chrome and paper: checked per group
@@ -723,6 +746,8 @@ def find_missed(con, now: float | None = None, days: int = MISSED_DAYS,
     by_traits: dict[tuple, list] = {}            # only the same grade and print run can match
     for row in rows:
         row["key"], row["number"] = card_key(row["title"]), card_number(row["title"])
+        if not identifiable(row["title"]):
+            row["key"] = frozenset()   # says no card: neither a miss nor a typical price
         row["parallel"] = _parallel(row["key"])
         row["product"] = product(row["title"])
         by_traits.setdefault(traits(row["title"]), []).append(row)
@@ -775,7 +800,7 @@ def missed_lines(rows: list[dict]) -> str:
 def last_sold(rows: list[dict], title: str, item_id: str = "") -> dict | None:
     """The latest recorded sale of the same card as this title, and how many there are."""
     same = [r for r in _candidates(rows, title)
-            if r["item_id"] != item_id and _same(title, r["title"])]
+            if r["item_id"] != item_id and identifiable(r["title"]) and _same(title, r["title"])]
     if not same:
         return None
     return {"total": same[0]["total"], "price": same[0]["price"], "n": len(same),

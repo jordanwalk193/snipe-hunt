@@ -7,6 +7,16 @@ appear in any release; renaming or removing one needs a new API version.
 ## Unreleased
 
 ### Fixed
+- **Slabs from smaller graders are slabs.** GMA, PGI, TAG, HGA, CSG, AGS, ISA and
+  KSA grades were missed, so those slabs counted as raw cards and priced the raw
+  card at several times its going rate. Each is now its own grade
+  (`sales.OTHER_GRADE`), only with a grade number after the name, so "price tag"
+  is not a slab.
+- **A title that names no card prices nothing.** A sale titled only with the
+  player, team and "RC Rookie Refractor" (no year, card number or set) was a
+  ledger card any other vague Refractor could price from. Such sales
+  (`sales.identifiable`) are still kept and listed, but are never a ledger card,
+  a comp, a "last sold", a price history or a missed steal.
 - **Chrome-only inserts are one card again, whether the title says Chrome or not.**
   The paper-vs-Chrome fix below counted every title without "chrome" as paper, so
   "2022 Bowman #HIFI-15 Hi-Fi Futures" and "... Hi-Fi Futures Chrome #HIFI-15"
